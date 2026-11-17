@@ -73,8 +73,15 @@ final class Control {
                     Validate::number($p['image'],1,PHP_INT_MAX);
                     if (empty($p['ssh_keys'])) { throw new RuntimeException('Select at least one SSH public key'); }
                 } else { Validate::number($p['provider_id'],1,PHP_INT_MAX); }
+                if ($command==='snapshot-create') {
+                    $eligible=false;
+                    foreach ($s->all('server') as $server) {
+                        if (($server['provider'] ?? null)===$p['provider'] && ($server['provider_id'] ?? null)===(int)$p['provider_id'] && $server['managed_eligible'] && $server['application_ready']) { $eligible=true; }
+                    }
+                    if (!$eligible) { throw new RuntimeException('Snapshot source must be linked to an inspected, ready NixOS server'); }
+                }
                 $resource='provider:'.$p['provider'];
-                if (isset($p['provider_id']) && !str_starts_with($command,'snapshot-')) {
+                if (isset($p['provider_id']) && $command!=='snapshot-delete') {
                     foreach ($s->all('server') as $server) {
                         if (($server['provider'] ?? null)===$p['provider'] && ($server['provider_id'] ?? null)===(int)$p['provider_id']) { $resource='server:'.$server['id']; break; }
                     }

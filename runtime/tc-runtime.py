@@ -32,6 +32,11 @@ class Runtime:
             raise RuntimeError('controlled command failed: ' + args[0] + ' exit=' + str(p.returncode))
         return p.stdout.decode(errors='replace').strip()
 
+    def checkpoint(self, phase):
+        callback = getattr(self, 'progress', None)
+        if callback:
+            callback(phase)
+
     def write(self, path, value):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -116,6 +121,7 @@ class Runtime:
             self.write(auth_file, registry_auth)
             auth_args = ['--authfile', str(auth_file)]
         try:
+            self.checkpoint('pulling-image')
             self.run(['podman', 'pull']+auth_args+[image], 600)
         finally:
             auth_file.unlink(missing_ok=True)
@@ -137,18 +143,29 @@ class Runtime:
             self.write(source, content)
             args.extend(['--volume', str(source)+':'+target+':ro'])
         args.append(image)
+        self.checkpoint('creating-container')
         self.run(args)
         unit = name+'.service'
         unit_path = self.root/'units'/unit
         podman = self.run(['which', 'podman'])
+        self.checkpoint('writing-unit')
         self.write(unit_path, '[Unit]\nAfter=network-online.target\nWants=network-online.target\n'
                    '[Service]\nRestart=always\nRestartSec=3\nTimeoutStopSec=45\n'
                    f'ExecStart={podman} start --attach {name}\nExecStop={podman} stop --time 30 {name}\n'
                    '[Install]\nWantedBy=multi-user.target\n')
         self.run(['systemctl', 'daemon-reload'])
+        self.checkpoint('starting-candidate')
         self.start({'unit': unit})
-        inspection = json.loads(self.run(['podman', 'inspect', name]))[0]
-        port = int(inspection['NetworkSettings']['Ports'][str(spec['container_port'])+'/tcp'][0]['HostPort'])
+        port = None
+        for _ in range(25):
+            inspection = json.loads(self.run(['podman', 'inspect', name]))[0]
+            mapping = inspection.get('NetworkSettings', {}).get('Ports', {}).get(str(spec['container_port'])+'/tcp')
+            if mapping:
+                port = int(mapping[0]['HostPort'])
+                break
+            time.sleep(0.2)
+        if port is None:
+            raise RuntimeError('candidate port did not become available')
         release = {k: v for k, v in spec.items() if k != 'secrets'}
         release.update({'operation': operation, 'unit': unit, 'container': name, 'port': port})
         self.write(directory/'release.json', release)
@@ -169,8 +186,13 @@ class Runtime:
             return self.recover(app, journal_path, state_path, journal)
         previous = state['active']
         journal = {'operation': operation, 'status': 'running', 'phase': 'intent', 'before': state,
-                   'public_check': request.get('public_check', True)}
+                   'public_check': request.get('public_check', True), 'events': []}
         self.write(journal_path, journal)
+        def progress(phase):
+            journal['phase'] = phase
+            journal['events'].append({'step': phase, 'at': int(time.time())})
+            self.write(journal_path, journal)
+        self.progress = progress
         try:
             if request['action'] == 'rollback':
                 candidate = state['previous']
@@ -219,6 +241,8 @@ class Runtime:
             return journal
         except Exception as e:
             journal['error'] = str(e) if isinstance(e, (RuntimeError, ValueError)) else type(e).__name__
+            if isinstance(e, OSError):
+                journal['errno'] = e.errno
             self.write(journal_path, journal)
             return self.recover(app, journal_path, state_path, journal)
 
@@ -237,6 +261,12 @@ class Runtime:
             candidate = journal.get('candidate')
             if candidate and (not previous or candidate['operation'] != previous['operation']):
                 self.stop(candidate)
+            elif not candidate and journal.get('operation'):
+                name = 'tc-'+app+'-'+journal['operation']
+                marker = self.root/'enabled'/(name+'.service')
+                marker.unlink(missing_ok=True)
+                self.run(['systemctl', 'daemon-reload'])
+                self.run(['podman', 'rm', '--force', '--ignore', name])
             journal['status'] = 'uncertain' if journal['phase'] == 'migration-started' else 'failed'
             journal['restored'] = previous['operation'] if previous else None
         except Exception:

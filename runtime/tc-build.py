@@ -32,7 +32,13 @@ def build(p):
     with open(root/'lock', 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if result.exists():
-            return json.loads(result.read_text())
+            recorded = json.loads(result.read_text())
+            if recorded.get('status') != 'succeeded':
+                return {'status': 'uncertain', 'reason': 'interrupted build; inspect builder before issuing a new operation'}
+            return recorded
+        # A lost SSH client can leave build containers running. Persist intent so
+        # retrying the same operation cannot start a second unobserved build.
+        result.write_text(json.dumps({'status': 'running', 'operation': p['operation']}))
         with tempfile.TemporaryDirectory(prefix='tc-build-') as directory:
             work = Path(directory)
             source = work/'src'
@@ -63,7 +69,12 @@ def build(p):
             if not re.fullmatch(r'sha256:[a-f0-9]{64}', digest):
                 raise RuntimeError('registry did not return a digest')
             output = {'status': 'succeeded', 'image': p['tag'].rsplit(':', 1)[0]+'@'+digest, 'commit': p['commit']}
-            result.write_text(json.dumps(output))
+            temporary = result.with_suffix('.tmp')
+            with open(temporary, 'w') as handle:
+                json.dump(output, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, result)
             return output
 
 

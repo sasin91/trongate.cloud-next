@@ -6,7 +6,7 @@ The workstation has no WSL installation, Nix, Podman or local Linux/KVM runtime.
 Executed successfully during implementation:
 
 - PHP syntax checks for application/worker/UI code.
-- Eleven PHP operational behavior tests: queue claiming/fencing/recovery, input
+- Thirteen PHP operational behavior tests: queue claiming/fencing/recovery, input
   validation, deterministic configuration data, authenticated encryption, Hetzner
   status mapping/label reconciliation, SSH prerequisite reporting and build planning.
 - Ten inherited Build_commands tests.

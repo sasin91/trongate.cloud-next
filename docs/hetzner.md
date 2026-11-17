@@ -67,9 +67,12 @@ bash bin/install-rescue-image.sh VM_ADDRESS PRIVATE_KEY VERIFIED_KNOWN_HOSTS \
 ```
 
    The script requires the explicit destructive flag, checks the block device and
-   refuses a mounted first partition. Never select an existing application host.
+   refuses mounted partitions. Never select an existing application host.
 5. Reboot the selected VM using the provider command. Independently verify the
    new NixOS SSH identity, then use normal server-scan/server-confirm/inspection.
+   Include `"provider":"hetzner","provider_id":ID` in server-confirm to link
+   enrollment to the selected provider's primary IPv4. Snapshot capture requires
+   that linked ready NixOS record; reboot/deletion then share the host-operation lock.
    Confirm cloud-init imported the selected project SSH key and runtime readiness.
 6. Before snapshot capture, clear instance-specific cloud-init/host identity state
    from the bootstrap machine using its console or verified SSH connection:

@@ -79,6 +79,9 @@ final class Worker {
             return ['status'=>'pending','provider_id'=>$response['server']['id']];
         }
         if ($intent) { return ['status'=>'uncertain','reason'=>'Mutation already submitted; inspect provider action history before resolving']; }
+        if ($kind==='snapshot-create' && $provider->call('GET','/servers/'.(int)$p['provider_id'])['server']['status']!=='off') {
+            return ['status'=>'failed','reason'=>'Power off the selected snapshot source before capture'];
+        }
         $s->put('external',$id,['submitted'=>time(),'kind'=>$kind,'provider_id'=>$p['provider_id']]);
         $resource=(int)$p['provider_id'];
         $response=match($kind) {
