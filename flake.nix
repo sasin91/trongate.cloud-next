@@ -13,6 +13,11 @@
         runtimeInputs = with pkgs; [ python3 podman systemd curl caddy nix util-linux which ];
         text = ''exec python3 ${./runtime/tc-runtime.py} "$@"'';
       };
+      builder = pkgs.writeShellApplication {
+        name = "tc-build";
+        runtimeInputs = with pkgs; [ python3 podman git ];
+        text = ''exec python3 ${./runtime/tc-build.py} "$@"'';
+      };
       default = pkgs.stdenvNoCC.mkDerivation {
         pname = "trongate-cloud-next"; version = "0.1.0"; src = self;
         nativeBuildInputs = [ pkgs.makeWrapper ];
@@ -35,8 +40,7 @@
     };
     nixosConfigurations.check = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
-      modules = [ self.nixosModules.runtime self.nixosModules.control-plane ({...}: {
-        services.trongate-runtime.enable = true;
+      modules = [ self.nixosModules.control-plane ({...}: {
         services.trongate-cloud = { enable = true; domain = "control.example.com"; };
         boot.loader.grub.enable = false;
         fileSystems."/" = { device = "/dev/vda1"; fsType = "ext4"; };
@@ -44,5 +48,9 @@
       }) ];
     };
     checks.x86_64-linux.installation = self.nixosConfigurations.check.config.system.build.toplevel;
+    checks.x86_64-linux.runtime-vm = import ./tests/runtime-vm.nix {
+      pkgs = import nixpkgs { system = "x86_64-linux"; };
+      inherit self;
+    };
   };
 }

@@ -21,7 +21,7 @@ class Simulated(module.Runtime):
     def run(self, args, timeout=120):
         return ''
 
-    def stage(self, app, operation, spec, secrets):
+    def stage(self, app, operation, spec, secrets, files=None, registry_auth=None):
         self.starts += 1
         return dict(spec, operation=operation, port=1234, unit=operation+'.service', container=operation)
 

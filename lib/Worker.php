@@ -43,6 +43,9 @@ final class Worker {
                 $release=$s->get('release',$p['release'])['spec']; $secrets=[];
                 foreach ($release['secrets'] as $name=>$ref) { $secrets[$name]=$s->secret($ref); }
                 $request+=['release'=>$release,'secret_values'=>$secrets];
+                $request['file_values']=[];
+                foreach ($release['file_secrets'] ?? [] as $target=>$ref) { $request['file_values'][$target]=$s->secret($ref); }
+                if (isset($release['registry_secret'])) { $request['registry_auth']=$s->secret($release['registry_secret']); }
             }
             return $ssh->runtime($server,$request,$heartbeat);
         }

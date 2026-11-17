@@ -26,6 +26,9 @@ final class Validate {
         $p['container_port'] = self::number($p['container_port'] ?? 8080,1,65535);
         $p['secrets'] = $p['secrets'] ?? [];
         foreach ($p['secrets'] as $name=>$ref) { self::match($name,'/^[A-Z_][A-Z0-9_]*$/D','environment name'); self::id($ref); }
+        $p['file_secrets'] = $p['file_secrets'] ?? [];
+        foreach ($p['file_secrets'] as $target=>$ref) { self::match($target,'~^/app/config/[a-zA-Z0-9_-]+\.php$~D','configuration file'); self::id($ref); }
+        if (isset($p['registry_secret'])) { self::id($p['registry_secret']); }
         $p['mounts'] = $p['mounts'] ?? [];
         foreach ($p['mounts'] as $name=>$dest) { self::id($name); self::match($dest,'~^/app/(?:[a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+$~D','persistent mount'); }
         if (isset($p['commit'])) { self::match($p['commit'],'/^[a-f0-9]{40}$/D','commit'); }

@@ -21,6 +21,7 @@ jobs:
           extensions: pdo_mysql, pdo_sqlite, sodium, curl
       - run: find lib modules public bin tests -type f \( -name '*.php' -o -name tc \) -print0 | xargs -0 -n1 php -l
       - run: composer test
+      - run: php tests/web.php
       - run: python3 -m unittest discover -s tests -p '*_test.py' -v
       - run: php tests/mariadb.php
         env:
@@ -41,3 +42,4 @@ jobs:
           path: flake.lock
       - run: nix flake check --no-build
       - run: nix build .#default .#runtime
+      - run: nix build .#checks.x86_64-linux.runtime-vm -L

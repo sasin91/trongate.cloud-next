@@ -92,7 +92,7 @@ class Runtime:
     def healthy(self, release):
         return release is not None and self.health(f'http://127.0.0.1:{release["port"]}{release["health"]}')
 
-    def stage(self, app, operation, spec, secrets):
+    def stage(self, app, operation, spec, secrets, files=None, registry_auth=None):
         image = self.match(spec['image'], r'[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}')
         self.match(spec['health'], r'/[a-zA-Z0-9/_.-]*')
         name = 'tc-' + app + '-' + operation
@@ -105,7 +105,16 @@ class Runtime:
                 raise ValueError('environment secrets must be single-line strings')
             env += key + '=' + value + '\n'
         self.write(directory/'environment', env)
-        self.run(['podman', 'pull', image], 600)
+        auth_args = []
+        auth_file = directory/'registry-auth'
+        if registry_auth is not None:
+            json.loads(registry_auth)
+            self.write(auth_file, registry_auth)
+            auth_args = ['--authfile', str(auth_file)]
+        try:
+            self.run(['podman', 'pull']+auth_args+[image], 600)
+        finally:
+            auth_file.unlink(missing_ok=True)
         # Allocate a free port through Podman, never a racy application-side scan.
         args = ['podman', 'create', '--name', name, '--label', 'tc.operation='+operation,
                 '--publish', '127.0.0.1::'+str(int(spec['container_port'])),
@@ -118,6 +127,11 @@ class Runtime:
             data = self.root/'apps'/app/'data'/volume
             data.mkdir(parents=True, exist_ok=True, mode=0o750)
             args.extend(['--volume', str(data)+':'+target])
+        for index, (target, content) in enumerate((files or {}).items()):
+            self.match(target, r'/app/config/[A-Za-z0-9_-]+\.php')
+            source = directory/('config-'+str(index))
+            self.write(source, content)
+            args.extend(['--volume', str(source)+':'+target+':ro'])
         args.append(image)
         self.run(args)
         unit = name+'.service'
@@ -150,7 +164,8 @@ class Runtime:
             # or report uncertainty if a migration/host event needs operator review.
             return self.recover(app, journal_path, state_path, journal)
         previous = state['active']
-        journal = {'operation': operation, 'status': 'running', 'phase': 'intent', 'before': state}
+        journal = {'operation': operation, 'status': 'running', 'phase': 'intent', 'before': state,
+                   'public_check': request.get('public_check', True)}
         self.write(journal_path, journal)
         try:
             if request['action'] == 'rollback':
@@ -165,7 +180,7 @@ class Runtime:
                     active = self.read(other, {}).get('active')
                     if other.parent.name != app and active and active['domain'] == spec['domain']:
                         raise RuntimeError('domain is already assigned')
-                candidate = self.stage(app, operation, spec, request.get('secret_values', {}))
+                candidate = self.stage(app, operation, spec, request.get('secret_values', {}), request.get('file_values', {}), request.get('registry_auth'))
             journal.update({'candidate': candidate, 'phase': 'candidate'})
             self.write(journal_path, journal)
             if request['action'] != 'rollback' and request['release'].get('migration'):
@@ -212,7 +227,7 @@ class Runtime:
                     raise RuntimeError('previous release unhealthy')
             self.route(app, previous)
             # Check the restored public route when one previously existed.
-            if previous and not self.health('https://'+previous['domain']+previous['health'], 3):
+            if previous and journal.get('public_check', True) and not self.health('https://'+previous['domain']+previous['health'], 3):
                 raise RuntimeError('restored route not verified publicly')
             self.write(state_path, journal['before'])
             candidate = journal.get('candidate')
@@ -241,6 +256,13 @@ class Runtime:
         if action == 'host-inspect':
             return self.host_inspect()
         operation = self.match(req['operation'], r'[a-f0-9]{32}')
+        journal_path = self.root/'operations'/('host-'+operation+'.json')
+        terminal = self.read(journal_path)
+        if terminal and terminal.get('status') == 'succeeded':
+            observed = self.host_inspect()
+            if observed['generation'] == terminal['generation'] and observed['services_healthy']:
+                return terminal
+            return {'status': 'uncertain', 'reason': 'host changed after recorded completion', **observed}
         reservation_path = self.root/'host-reservation.json'
         reservation = self.read(reservation_path)
         if reservation and reservation['operation'] != operation:
@@ -265,8 +287,10 @@ class Runtime:
         observed = self.host_inspect()
         expected = req.get('expected')
         if observed['generation'] == expected and observed['services_healthy']:
+            result = {'status': 'succeeded', **observed}
+            self.write(journal_path, result)
             reservation_path.unlink(missing_ok=True)
-            return {'status': 'succeeded', **observed}
+            return result
         return {'status': 'uncertain', **observed}
 
     def dispatch(self, request):
