@@ -26,6 +26,12 @@ in pkgs.testers.runNixOSTest {
     virtualisation.diskSize = 8192;
     services.openssh.settings.PermitRootLogin = "prohibit-password";
   };
+  nodes.control = { pkgs, ... }: {
+    imports = [ self.nixosModules.control-plane ];
+    services.trongate-cloud = { enable = true; domain = "control.localhost"; };
+    environment.systemPackages = [ pkgs.curl ];
+    virtualisation.memorySize = 1024;
+  };
   testScript = ''
     import json
     machine.start()
@@ -71,5 +77,15 @@ in pkgs.testers.runNixOSTest {
     # Real host-key rotation must fail closed on the next normal CLI inspection.
     machine.succeed("rm /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub; ssh-keygen -t ed25519 -N \"\" -f /etc/ssh/ssh_host_ed25519_key; systemctl restart sshd")
     machine.fail("echo '{\"server\":\"web\"}' | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc server-inspect")
+    # Boot the supported installation module with its real MariaDB/socket auth,
+    # PHP-FPM, Caddy and worker rather than only evaluating its options.
+    control.start()
+    control.wait_for_unit("mysql.service")
+    control.succeed("printf '%s' '{\"name\":\"admin\",\"password\":\"disposable-test-password\"}' | sudo -u tc env TC_STATE=/var/lib/tc-control tc init")
+    control.wait_for_unit("phpfpm-tc.service")
+    control.wait_for_unit("caddy.service")
+    control.wait_until_succeeds("curl -ksf --resolve control.localhost:443:127.0.0.1 https://control.localhost/ | grep 'Sign in'")
+    control.succeed("sudo -u tc env TC_STATE=/var/lib/tc-control tc inventory </dev/null")
+    control.wait_for_unit("tc-worker.service")
   '';
 }
