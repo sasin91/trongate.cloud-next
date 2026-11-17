@@ -4,12 +4,12 @@ A self-hostable PHP/Trongate administrator panel and durable SQL worker. Managed
 NixOS hosts and OCI application deployment are independent operations. Hetzner is
 a provider; SSH is the transport, including for manually enrolled Linux hosts.
 
-This repository is private. Application licensing follows the original proprietary
+Application licensing follows the original proprietary
 application; upstream Trongate MIT notices are preserved in `engine/LICENSE.txt`.
 
 ## Install on an existing NixOS control-plane VM
 
-Clone this repository using your own Git credentials. No request to a hosted
+Clone this repository. No request to a hosted
 Trongate control plane is required. A single control-plane VM runs MariaDB,
 PHP-FPM, Caddy and the worker. Application targets and untrusted builders are
 separate machines in this PoC.

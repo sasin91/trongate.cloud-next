@@ -50,7 +50,8 @@ in pkgs.testers.runNixOSTest {
         import shlex
         result = machine.succeed("printf %s " + shlex.quote(json.dumps(payload)) + " | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc " + command)
         return json.loads(result)
-    cli("credential", {"id": "test-key", "value": machine.succeed("cat /root/.ssh/id_ed25519")})
+    # Keep the private key inside the VM: the test driver logs command arguments.
+    machine.succeed("php -r 'echo json_encode([\"id\"=>\"test-key\",\"value\"=>file_get_contents(\"/root/.ssh/id_ed25519\")]);' | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc credential")
     scanned = cli("server-scan", {"host": "127.0.0.1", "port": 22, "user": "root", "credential": "test-key"})
     fingerprint = machine.succeed("ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | cut -d' ' -f2").strip()
     assert scanned["fingerprint"] == fingerprint
