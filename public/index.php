@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+if (PHP_SAPI==='cli-server' && preg_match('~^/assets/[a-z-]+\.(?:css|js)$~D',parse_url($_SERVER['REQUEST_URI'],PHP_URL_PATH)) && is_file(__DIR__.parse_url($_SERVER['REQUEST_URI'],PHP_URL_PATH))) { return false; }
 require dirname(__DIR__).'/lib/bootstrap.php';
 require dirname(__DIR__).'/engine/Trongate.php';
 require dirname(__DIR__).'/engine/Core.php';

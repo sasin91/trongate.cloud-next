@@ -27,6 +27,7 @@ jobs:
       - run: find lib modules public bin tests -type f \( -name '*.php' -o -name tc \) -print0 | xargs -0 -n1 php -l
       - run: composer test
       - run: php tests/web.php
+      - run: php tests/flows.php
       - run: python3 -m unittest discover -s tests -p '*_test.py' -v
       - run: php tests/mariadb.php
         env:

@@ -121,10 +121,17 @@ The result records whether that check was requested.
 - **Recovery:** `tc reconcile operation.json` resumes observation of an uncertain
   operation. It does not release its resource lock or blindly repeat a mutation.
 
-The panel exposes essential operations through a minimal action form with JSON
-fields, server readiness, inventory and operation results. Local administrators
-have installation-wide authority. Multi-tenant roles, GitHub login, private Git
+The panel includes guided server onboarding, the app launch wizard adapted from
+the original Trongate Cloud, app release/rollback controls and live operation
+progress. Git launches resolve a public branch to an immutable commit, build on
+a separate builder, then queue deployment of the returned image digest. Image
+launches skip the build. Environment values are encrypted before jobs are queued.
+The Advanced page retains the JSON action console for provider and host operations.
+Local administrators have installation-wide authority. Multi-tenant roles, GitHub login, private Git
 repositories, billing and Kubernetes migration are outside this PoC.
+Application database provisioning/imports, repository configuration suggestions,
+mail capture and background-process configuration from the original platform are
+not yet available; the wizard describes the supported database connection path.
 
 ## Verification
 

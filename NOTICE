@@ -4,3 +4,6 @@ Trongate engine/Core.php and engine/Trongate.php: MIT, Copyright (c) 2019 Dave C
 See engine/LICENSE.txt. lib/Encryptor.php, lib/Build_commands.php and the build
 command tests originate from sasin91/trongate.cloud at
 715699cf6c314cdf26e994413316992e381eae7f. No relicensing of those components is implied.
+The onboarding wizard CSS, brand mark, deployment CSS and adapted question/progress
+flows also originate from the owner's local trongate.cloud project, reused at
+their explicit request. These remain subject to the same application license.

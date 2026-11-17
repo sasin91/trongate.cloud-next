@@ -27,6 +27,9 @@ final class Worker {
             $r=(new Ssh($s))->command($s->get('server',$p['builder']),'tc-build',json($p['plan']+['operation'=>$id]),3600,$heartbeat);
             $result=json_decode($r['out'],true);
             if ($r['exit']!==0 || !is_array($result)) { throw new RuntimeException('Builder interrupted'); }
+            if (($result['status'] ?? '')==='succeeded' && isset($p['launch'])) {
+                $result['deployment']=(new AppFlow($s))->deploy_built($id,$p['launch'],$result);
+            }
             return $result;
         }
         if (in_array($kind,['deploy','rollback','host-update','host-rollback'])) {
