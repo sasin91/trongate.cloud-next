@@ -1,0 +1,16 @@
+{
+  "app":"demo",
+  "release":{
+    "image":"registry.example.com/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "domain":"demo.example.com",
+    "health":"/",
+    "config_version":"v1",
+    "container_port":8080,
+    "memory_mb":256,
+    "cpus":1,
+    "secrets":{},
+    "file_secrets":{},
+    "mounts":{"uploads":"/app/public/uploads"},
+    "migration":[]
+  }
+}

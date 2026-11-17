@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 final class Worker {
-    function __construct(private Store $store) {}
+    function __construct(private Store $store, private Http $http=new Http) {}
     function once(): bool {
         $owner=bin2hex(random_bytes(16)); $job=$this->store->claim($owner);
         if (!$job) { return false; }
@@ -49,7 +49,7 @@ final class Worker {
             }
             return $ssh->runtime($server,$request,$heartbeat);
         }
-        $provider=(new Control($s))->provider($p['provider']);
+        $provider=new Hetzner($s->secret($s->get('provider',$p['provider'])['credential']),$this->http);
         try { $intent=$s->get('external',$id); } catch (RuntimeException) { $intent=[]; }
         if (isset($intent['action'])) {
             $observed=$provider->action($intent['action']);

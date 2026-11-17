@@ -99,7 +99,7 @@ class Runtime:
         directory = self.root/'apps'/app/'releases'/operation
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         env = ''
-        for key, value in secrets.items():
+        for key, value in (secrets or {}).items():
             self.match(key, r'[A-Z_][A-Z0-9_]*')
             if not isinstance(value, str) or any(c in value for c in '\r\n\0'):
                 raise ValueError('environment secrets must be single-line strings')
@@ -121,7 +121,7 @@ class Runtime:
                 '--memory', str(int(spec['memory_mb']))+'m', '--cpus', str(int(spec['cpus'])),
                 '--pids-limit', '256', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
                 '--env', 'PORT='+str(int(spec['container_port'])), '--env-file', str(directory/'environment')]
-        for volume, target in spec.get('mounts', {}).items():
+        for volume, target in (spec.get('mounts') or {}).items():
             self.match(volume, r'[a-z][a-z0-9-]{0,39}')
             self.match(target, r'/app/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+')
             data = self.root/'apps'/app/'data'/volume

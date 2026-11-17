@@ -28,6 +28,11 @@ final class Control {
                 $id=Validate::id($p['id']);
                 foreach ($s->all('server') as $existing) { if ($existing['id']===$id) { throw new RuntimeException('Server already enrolled; identity rotation requires a new inventory record'); } }
                 $server=$pending['server']+['host_key'=>$pending['identity']['key']];
+                if (isset($p['provider_id'],$p['provider'])) {
+                    $observed=$this->provider($p['provider'])->call('GET','/servers/'.Validate::number($p['provider_id'],1,PHP_INT_MAX))['server'];
+                    if (($observed['public_net']['ipv4']['ip'] ?? '')!==$server['host']) { throw new RuntimeException('Provider address does not match enrollment; use its primary IPv4 for linking'); }
+                    $server+=['provider'=>$p['provider'],'provider_id'=>(int)$p['provider_id']];
+                }
                 $inspection=(new Ssh($s))->inspect($server);
                 $s->put('server',$id,$server+$inspection); return ['id'=>$id]+$inspection;
             case 'server-inspect':
@@ -68,7 +73,13 @@ final class Control {
                     Validate::number($p['image'],1,PHP_INT_MAX);
                     if (empty($p['ssh_keys'])) { throw new RuntimeException('Select at least one SSH public key'); }
                 } else { Validate::number($p['provider_id'],1,PHP_INT_MAX); }
-                return $s->enqueue($command,'provider:'.$p['provider'],$p);
+                $resource='provider:'.$p['provider'];
+                if (isset($p['provider_id']) && !str_starts_with($command,'snapshot-')) {
+                    foreach ($s->all('server') as $server) {
+                        if (($server['provider'] ?? null)===$p['provider'] && ($server['provider_id'] ?? null)===(int)$p['provider_id']) { $resource='server:'.$server['id']; break; }
+                    }
+                }
+                return $s->enqueue($command,$resource,$p);
             case 'provider-inspect':
                 return $this->provider($p['provider'])->call('GET','/servers/'.Validate::number($p['provider_id'],1,PHP_INT_MAX));
             case 'reconcile':

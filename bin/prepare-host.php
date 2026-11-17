@@ -11,7 +11,7 @@ try {
     $hardware=file_get_contents($p['hardware_file']);
     $source=dirname(__DIR__);
     if (!is_file($source.'/flake.lock')) { throw new RuntimeException('Run nix flake lock before freezing a revision'); }
-    $revision=hash('sha256',$data.$hardware.file_get_contents($source.'/flake.lock').file_get_contents($source.'/runtime/tc-runtime.py').file_get_contents($source.'/nix/runtime.nix'));
+    $revision=hash('sha256',$data.$hardware.file_get_contents(__FILE__).file_get_contents($source.'/flake.nix').file_get_contents($source.'/flake.lock').file_get_contents($source.'/runtime/tc-runtime.py').file_get_contents($source.'/nix/runtime.nix'));
     $dir=state_dir().'/revisions/'.$revision;
     if (is_file($dir.'/expected-system')) { echo $revision."\n"; exit; }
     if (!is_dir($dir.'/source/runtime')) { mkdir($dir.'/source/runtime',0700,true); }

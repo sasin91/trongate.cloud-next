@@ -55,6 +55,26 @@ test('duplicate matching provider resources fail closed',function() {
     $p=new Hetzner('secret',new FixtureHttp([['servers'=>[['id'=>1],['id'=>2]]]]));
     assert_throws(fn()=>$p->reconcile_create(str_repeat('a',32)),'Multiple provider');
 });
+test('worker persists ambiguous create intent and never reissues POST after recovery',function() {
+    $dir=sys_get_temp_dir().'/tc-provider-'.bin2hex(random_bytes(5)); mkdir($dir); putenv('TC_STATE='.$dir); file_put_contents($dir.'/key',Encryptor::generate_key());
+    $s=database(); $s->secret('token','provider-secret'); $s->put('provider','hetzner',['credential'=>'token']);
+    $payload=['provider'=>'hetzner','name'=>'web','image'=>12,'server_type'=>'cx23','location'=>'fsn1','ssh_keys'=>[1]];
+    $id=$s->enqueue('provision','provider:hetzner',$payload);
+    $http=new FixtureHttp([
+        ['servers'=>[]],
+        ['image'=>['type'=>'snapshot','status'=>'available','labels'=>['tc-nixos'=>'true'],'architecture'=>'x86']],
+        ['server_type'=>['architecture'=>'x86']],
+        new RuntimeException('transport timeout provider-secret'),
+        ['servers'=>[]],
+    ]);
+    $worker=new Worker($s,$http); $worker->once();
+    assert_same('uncertain',$s->job($id)['status']); assert_same(false,str_contains($s->job($id)['result'],'provider-secret'));
+    (new Control($s))->execute('reconcile',['operation'=>$id]); $worker->once();
+    assert_same('uncertain',$s->job($id)['status']);
+    assert_same(1,count(array_filter($http->calls,fn($c)=>$c[0]==='POST')));
+    assert_same($id,$http->calls[3][2]['labels']['tc-operation']);
+    unlink($dir.'/key'); rmdir($dir); putenv('TC_STATE');
+});
 class FixtureProcess extends Process {
     public array $args=[];
     function run(array $argv,string $input='',int $timeout=60,?callable $heartbeat=null,array $extra_env=[]): array {

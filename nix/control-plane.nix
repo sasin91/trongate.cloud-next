@@ -45,6 +45,7 @@ in {
     systemd.services.tc-worker = lib.mkIf cfg.worker {
       description = "Trongate durable operation worker";
       wantedBy = [ "multi-user.target" ]; after = [ "network-online.target" "mysql.service" ];
+      wants = [ "network-online.target" ];
       inherit environment;
       path = [ pkgs.openssh pkgs.nix pkgs.git cfg.deployPackage ];
       serviceConfig = {

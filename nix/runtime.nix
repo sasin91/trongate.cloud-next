@@ -16,6 +16,7 @@ let cfg = config.services.trongate-runtime; in {
     systemd.services.tc-proxy = {
       description = "Trongate application routing";
       wantedBy = [ "multi-user.target" ]; after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
       preStart = ''
         if ! test -f /var/lib/tc/runtime/Caddyfile; then
           printf '{\n admin 127.0.0.1:2019\n}\n' > /var/lib/tc/runtime/Caddyfile

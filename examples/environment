@@ -1,0 +1,7 @@
+TC_STATE=/var/lib/tc-control
+TC_KEY_FILE=/var/lib/tc-control/key
+TC_BASE_URL=https://control.example.com
+TC_DSN=mysql:unix_socket=/run/mysqld/mysqld.sock;dbname=tc
+TC_DB_USER=tc
+# TC_DB_PASSWORD is needed only for password-authenticated remote databases.
+# Provide it in a protected runtime environment file, never a Nix expression.
