@@ -6,6 +6,7 @@ class Console extends Trongate {
         $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
         $_SESSION['launch_request'] ??= bin2hex(random_bytes(16));
         $page=(string)($_GET['page'] ?? 'dashboard');
+        $inline=($_POST['inline'] ?? '')==='server';
         if ($_SERVER['REQUEST_METHOD']==='POST') {
             if (!hash_equals($_SESSION['csrf'],(string)($_POST['csrf'] ?? ''))) { http_response_code(403); exit('Invalid request token'); }
             if (($_POST['command'] ?? '')==='login') {
@@ -32,10 +33,13 @@ class Console extends Trongate {
                         if (trim($_POST['private_key'] ?? '')==='') { throw new RuntimeException('Provide the SSH private key for this server.'); }
                         $store->secret($server['credential'],$_POST['private_key']);
                         $_SESSION['enrollment']=$control->execute('server-scan',$server)+['id'=>$id,'host'=>$server['host']];
+                        if ($inline) { $this->_server_response($_SESSION['enrollment']); return; }
                         header('Location: /?page=confirm-server',true,303); exit;
                     } elseif ($command==='confirm-server') {
                         $pending=$_SESSION['enrollment'] ?? [];
-                        $control->execute('server-confirm',['id'=>$pending['id'] ?? '', 'enrollment'=>$pending['enrollment'] ?? '', 'fingerprint'=>trim($_POST['fingerprint'] ?? '')]);
+                        if ($inline && !hash_equals($pending['enrollment'] ?? '',(string)($_POST['enrollment'] ?? ''))) { throw new RuntimeException('This server confirmation expired. Connect again.'); }
+                        $result=$control->execute('server-confirm',['id'=>$pending['id'] ?? '', 'enrollment'=>$pending['enrollment'] ?? '', 'fingerprint'=>trim($_POST['fingerprint'] ?? '')]);
+                        if ($inline) { unset($_SESSION['enrollment']); $this->_server_response($result+['host'=>$pending['host']]); return; }
                         unset($_SESSION['enrollment']); header('Location: /',true,303); exit;
                     } elseif ($command==='redeploy-app' || $command==='rollback-app') {
                         $app=Validate::id($_POST['app'] ?? '');
@@ -46,8 +50,8 @@ class Console extends Trongate {
                         $message=json_encode($control->execute($command,$payload),JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);
                     }
                 }
-                catch (Throwable $e) { $message='Action could not be completed: '.($e instanceof RuntimeException ? $e->getMessage() : 'Invalid input'); }
-            } else { http_response_code(403); $message='Sign in to perform this action.'; }
+                catch (Throwable $e) { $message='Action could not be completed: '.($e instanceof RuntimeException ? $e->getMessage() : 'Invalid input'); if ($inline) { $this->_server_response(['error'=>$message],422); return; } }
+            } else { if ($inline) { $this->_server_response(['error'=>'Your session expired. Sign in again in another tab, then retry.'],401); return; } http_response_code(403); $message='Sign in to perform this action.'; }
         }
         $signedIn=!empty($_SESSION['admin']) && ($_SESSION['expires'] ?? 0)>time();
         $operation=null;
@@ -64,5 +68,9 @@ class Console extends Trongate {
         if ($signedIn && $page==='new-app' && $_SERVER['REQUEST_METHOD']==='GET') { $_SESSION['launch_request']=bin2hex(random_bytes(16)); }
         if (!in_array($page,['dashboard','new-app','connect-server','confirm-server','deployment','advanced'])) { $page='dashboard'; }
         $this->view($page==='advanced'?'advanced':'index',['page'=>$page,'operation'=>$operation,'signedIn'=>$signedIn,'message'=>$message,'inventory'=>$signedIn?$control->execute('inventory',[]):[],'operations'=>$signedIn?$control->execute('operations',[]):[]]);
+    }
+    function _server_response(array $data,int $status=200): void {
+        http_response_code($status); header('Content-Type: application/json');
+        echo json_encode($data,JSON_THROW_ON_ERROR);
     }
 }

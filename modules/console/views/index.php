@@ -7,7 +7,7 @@ $field=function($name,$label,$default='',$type='text',$required=true) use($value
 <?php };
 $ready=array_filter($inventory['servers'] ?? [],fn($s)=>$s['application_ready']);
 ?>
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trongate Cloud · <?= $e(ucwords(str_replace('-',' ',$page))) ?></title><link rel="stylesheet" href="/assets/wizard.css"><link rel="stylesheet" href="/assets/deployments.css"><link rel="stylesheet" href="/assets/panel.css"><script src="/assets/flows.js" defer></script></head>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trongate Cloud · <?= $e(ucwords(str_replace('-',' ',$page))) ?></title><link rel="stylesheet" href="/assets/wizard.css"><link rel="stylesheet" href="/assets/deployments.css"><link rel="stylesheet" href="/assets/panel.css"><script src="/assets/flows.js" defer></script><script src="/assets/server-dialog.js" defer></script></head>
 <body class="wz-body"><header class="wz-top"><div class="wz-top-row"><a class="wz-brand" href="/"><?php require __DIR__.'/_mark.php'; ?><span>trongate<b>.cloud</b></span></a>
 <?php if ($signedIn): ?><nav><a href="/">Apps</a><a href="/?page=connect-server">Servers</a><a href="/?page=advanced">Advanced</a><form method="post"><?= $csrf() ?><button class="link-button" name="command" value="logout">Sign out</button></form></nav><?php endif ?><span id="wz-counter" class="wz-counter"></span></div><div id="wz-progress" class="wz-progress" aria-hidden="true"></div></header>
 <?php if ($message!==null): ?><div class="notice wz-errors" role="alert"><?= $e($message) ?></div><?php endif ?>

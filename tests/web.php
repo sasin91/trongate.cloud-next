@@ -24,7 +24,12 @@ try {
     $store->put('server','web',['application_ready'=>true,'host'=>'192.0.2.10','managed_eligible'=>false,'missing'=>[]]);
     [$code,$page]=request(null,'/?page=new-app');
     if ($code!==200 || !str_contains($page,'Which app are we putting online?')) { throw new RuntimeException('Wizard missing'); }
+    if (!str_contains($page,'id="server-dialog"') || str_contains($page,'href="/?page=connect-server">Connect a server</a>')) { throw new RuntimeException('Wizard must enroll servers inline'); }
     preg_match('/name="request" value="([a-f0-9]+)"/',$page,$launch);
+    [$code,$error]=request(['command'=>'connect-server','inline'=>'server','csrf'=>$csrf,'id'=>'new-server','host'=>'192.0.2.11','user'=>'root','port'=>22,'private_key'=>''],'/?page=connect-server');
+    if ($code!==422 || !isset(json_decode($error,true)['error'])) { throw new RuntimeException('Inline errors must return JSON without navigating away'); }
+    [$code,$error]=request(['command'=>'confirm-server','inline'=>'server','csrf'=>$csrf,'enrollment'=>'expired','fingerprint'=>'SHA256:fixture'],'/?page=connect-server');
+    if ($code!==422 || !str_contains(json_decode($error,true)['error'],'expired')) { throw new RuntimeException('Inline confirmation must reject stale enrollment'); }
     $fields=['command'=>'launch-app','csrf'=>$csrf,'request'=>$launch[1],'source'=>'image','label'=>'web-demo','server'=>'web','domain'=>'demo.example.com','image'=>'registry.example.com/demo@sha256:'.str_repeat('a',64),'environment'=>'PASSWORD=web-fixture-secret'];
     if (request($fields,'/?page=new-app')[0]!==303 || request($fields,'/?page=new-app')[0]!==303) { throw new RuntimeException('Wizard launch or duplicate failed'); }
     if ((int)$store->run('SELECT COUNT(*) FROM jobs')->fetchColumn()!==1) { throw new RuntimeException('Repeated HTTP submission duplicated deployment'); }
@@ -35,6 +40,9 @@ try {
     if ($code!==200 || json_decode($page,true)['job']['status']!=='pending' || str_contains($page,'web-fixture-secret')) { throw new RuntimeException('Deployment polling failed'); }
     if (request(null,'/assets/flows.js')[0]!==200 || request(null,'/assets/wizard.css')[0]!==200) { throw new RuntimeException('Flow assets not served'); }
     request(['command'=>'logout','csrf'=>$csrf]);
+    [$code,$error]=request(['command'=>'connect-server','inline'=>'server','csrf'=>$csrf],'/?page=connect-server');
+    // A destroyed session has a new CSRF token, so the request must fail before mutation.
+    if ($code!==403) { throw new RuntimeException('Logged-out inline enrollment accepted'); }
     if (request(null,'/?page=deployment&poll=1&operation='.$id)[0]!==401) { throw new RuntimeException('Unauthenticated polling allowed'); }
     echo "HTTP login, CSRF and authenticated console passed\n";
 } finally {
