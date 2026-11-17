@@ -32,7 +32,7 @@ try {
         networking.hostName = inventory.hostname;
         services.trongate-runtime.enable = true;
         services.openssh.ports = [ inventory.port ];
-        system.stateVersion = "26.05";
+        system.stateVersion = nixpkgs.lib.mkDefault "26.05";
       } ];
     };
     deploy.nodes.target = {

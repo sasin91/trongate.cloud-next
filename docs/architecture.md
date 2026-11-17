@@ -70,6 +70,8 @@ events. Do not delete lock rows to make a dashboard turn green.
 The hardware file is **trusted local administrator code**, including boot/filesystem,
 networking and dedicated authorized SSH public keys. It must be self-contained
 (imports through pinned `modulesPath` are fine) and contain no secrets.
+For an existing host, include its existing `system.stateVersion`; the generated
+module supplies only a default and must not silently advance stateful service defaults.
 Do not reuse the control-plane hardware module for application targets. JSON
 inventory settings are imported with `builtins.fromJSON`; web input cannot inject
 Nix expressions. Configuration content determines the revision ID. The revision
