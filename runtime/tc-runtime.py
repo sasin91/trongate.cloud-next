@@ -266,6 +266,8 @@ class Runtime:
                 marker = self.root/'enabled'/(name+'.service')
                 marker.unlink(missing_ok=True)
                 self.run(['systemctl', 'daemon-reload'])
+                if (self.root/'units'/(name+'.service')).exists():
+                    self.run(['systemctl', 'stop', name+'.service'])
                 self.run(['podman', 'rm', '--force', '--ignore', name])
             journal['status'] = 'uncertain' if journal['phase'] == 'migration-started' else 'failed'
             journal['restored'] = previous['operation'] if previous else None

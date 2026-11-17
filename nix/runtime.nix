@@ -13,7 +13,7 @@ let cfg = config.services.trongate-runtime; in {
     # Retained profile generations + explicit runtime roots protect rollback inputs.
     nix.gc.automatic = lib.mkDefault false;
     systemd.tmpfiles.rules = [ "d /var/lib/tc/runtime 0700 root root -" ];
-    environment.etc."systemd/system-generators/tc-runtime".source = pkgs.writeShellScript "tc-systemd-generator" ''
+    systemd.generators.tc-runtime = pkgs.writeShellScript "tc-systemd-generator" ''
       export PATH=${lib.makeBinPath [ pkgs.coreutils ]}
       ${builtins.readFile ../runtime/tc-systemd-generator.sh}
     '';
