@@ -1,0 +1,43 @@
+name: verify
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  operations:
+    runs-on: ubuntu-24.04
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: test-only
+          MARIADB_DATABASE: tc
+        ports: ['3306:3306']
+        options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, pdo_sqlite, sodium, curl
+      - run: find lib modules public bin tests -type f \( -name '*.php' -o -name tc \) -print0 | xargs -0 -n1 php -l
+      - run: composer test
+      - run: python3 -m unittest discover -s tests -p '*_test.py' -v
+      - run: php tests/mariadb.php
+        env:
+          TC_DSN: mysql:host=127.0.0.1;dbname=tc
+          TC_DB_USER: root
+          TC_DB_PASSWORD: test-only
+  nix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: experimental-features = nix-command flakes
+      - run: nix flake lock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flake-lock
+          path: flake.lock
+      - run: nix flake check --no-build
+      - run: nix build .#default .#runtime

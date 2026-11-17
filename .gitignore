@@ -1,0 +1,6 @@
+/var/
+/.env
+/vendor/
+__pycache__/
+*.pyc
+/result*

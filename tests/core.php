@@ -1,0 +1,78 @@
+<?php
+require __DIR__.'/bootstrap.php';
+require dirname(__DIR__).'/lib/bootstrap.php';
+function database(): Store { $s=new Store(new PDO('sqlite::memory:')); $s->migrate(); return $s; }
+test('queue claims atomically, fences conflicts, recovers same expired claim',function() {
+    $s=database(); $a=$s->enqueue('deploy','server:a',[]); $b=$s->enqueue('deploy','server:a',[]);
+    $claimed=$s->claim('worker-a'); assert_same($a,$claimed['id']); assert_same(null,$s->claim('worker-b'));
+    $s->run('UPDATE jobs SET lease=0 WHERE id=?',[$a]); assert_same($a,$s->claim('worker-b')['id']);
+    assert_throws(fn()=>$s->finish($a,'worker-a','succeeded',[]),'lease lost');
+    $s->finish($a,'worker-b','uncertain',[]); assert_same(null,$s->claim('worker-c'));
+    (new Control($s))->execute('reconcile',['operation'=>$a]); assert_same($a,$s->claim('worker-c')['id']);
+    $s->finish($a,'worker-c','succeeded',[]); assert_same($b,$s->claim('worker-d')['id']);
+});
+test('parallel resources can progress and pending provider polling keeps its lock',function() {
+    $s=database(); $a=$s->enqueue('provision','provider:a',[]); $b=$s->enqueue('deploy','server:a',[]);
+    $j=$s->claim('one'); $k=$s->claim('two'); assert_same(true,$j['resource']!==$k['resource']);
+    $s->finish($j['id'],'one','pending',[]); assert_same($j['id'],$s->claim('three')['id']);
+});
+test('input validation rejects shell and Nix interpolation',function() {
+    assert_throws(fn()=>Validate::host('-oProxyCommand=bad'),'hostname');
+    assert_throws(fn()=>Validate::id('x;touch /tmp/bad'),'identifier');
+    assert_throws(fn()=>Validate::image('image:latest'),'digest');
+    assert_throws(fn()=>Validate::release(['image'=>'repo/image@sha256:'.str_repeat('a',64),'domain'=>'x.test','mounts'=>['uploads'=>'/etc/shadow']]),'mount');
+    assert_throws(fn()=>DeployRs::configuration(['host'=>'x.test','port'=>22,'user'=>'root','credential'=>'key'],['hostname'=>'${bad}','system'=>'x86_64-linux']),'identifier');
+});
+test('deterministic host settings are JSON data',function() {
+    $s=['host'=>'x.test','port'=>22,'user'=>'root','credential'=>'key']; $p=['hostname'=>'web','system'=>'x86_64-linux'];
+    assert_same(DeployRs::configuration($s,$p),DeployRs::configuration($s,$p));
+    assert_same('web',json_decode(DeployRs::configuration($s,$p),true)['hostname']);
+});
+test('credentials authenticate ciphertext and do not appear in records',function() {
+    $key=Encryptor::generate_key(); $cipher=Encryptor::encrypt('secret-value',$key);
+    assert_same(false,str_contains($cipher,'secret-value')); assert_same('secret-value',Encryptor::decrypt($cipher,$key));
+    assert_same(false,Encryptor::decrypt($cipher,Encryptor::generate_key()));
+});
+class FixtureHttp extends Http {
+    public array $calls=[];
+    function __construct(public array $responses) {}
+    function request(string $method,string $path,string $token,?array $body=null): array {
+        $this->calls[]=[$method,$path,$body];
+        $next=array_shift($this->responses); if ($next instanceof Throwable) { throw $next; } return $next;
+    }
+}
+test('Hetzner action status mapping includes asynchronous errors',function() {
+    $http=new FixtureHttp([['action'=>['status'=>'running']],['action'=>['status'=>'success']],['action'=>['status'=>'error','error'=>['code'=>'resource_unavailable']]]]);
+    $p=new Hetzner('never-logged',$http);
+    assert_same('pending',$p->action(1)['status']); assert_same('succeeded',$p->action(1)['status']); assert_same('failed',$p->action(1)['status']);
+});
+test('ambiguous create reconciles by stable operation label without a second POST',function() {
+    $http=new FixtureHttp([['images'=>[]],['servers'=>[['id'=>99]]]]);
+    $p=new Hetzner('secret',$http); $p->list('images'); assert_same(99,$p->reconcile_create(str_repeat('a',32))['id']);
+    assert_same(['GET','GET'],array_column($http->calls,0)); assert_contains('label_selector=tc-operation',$http->calls[1][1]);
+});
+test('duplicate matching provider resources fail closed',function() {
+    $p=new Hetzner('secret',new FixtureHttp([['servers'=>[['id'=>1],['id'=>2]]]]));
+    assert_throws(fn()=>$p->reconcile_create(str_repeat('a',32)),'Multiple provider');
+});
+class FixtureProcess extends Process {
+    public array $args=[];
+    function run(array $argv,string $input='',int $timeout=60,?callable $heartbeat=null,array $extra_env=[]): array {
+        $this->args=$argv; return ['exit'=>0,'out'=>"os=ubuntu\narch=x86_64\nprivileged=yes\n",'err'=>''];
+    }
+}
+test('SSH prerequisites are explicit and pinned identities are required',function() {
+    $dir=sys_get_temp_dir().'/tc-test-'.bin2hex(random_bytes(5)); mkdir($dir); putenv('TC_STATE='.$dir); file_put_contents($dir.'/key',Encryptor::generate_key());
+    $s=database(); $s->secret('key','not-a-real-key'); $process=new FixtureProcess; $ssh=new Ssh($s,$process);
+    $server=['host'=>'localhost','port'=>22,'user'=>'root','credential'=>'key'];
+    assert_throws(fn()=>$ssh->inspect($server),'identity');
+    $server['host_key']='ssh-ed25519 '.base64_encode('fixture'); $r=$ssh->inspect($server);
+    assert_same(false,$r['application_ready']); assert_same(false,$r['managed_eligible']); assert_same(true,in_array('podman',$r['missing']));
+    assert_same(true,in_array('StrictHostKeyChecking=yes',$process->args));
+    unlink($dir.'/key'); rmdir($dir); putenv('TC_STATE');
+});
+test('build plan keeps source pinned and uses inherited command encoding',function() {
+    $p=Build::plan(['repository'=>'owner/repo','commit'=>str_repeat('b',40),'base'=>'repo/base@sha256:'.str_repeat('a',64),'tag'=>'registry.test/app:build','commands'=>'echo hello']);
+    assert_contains(base64_encode("set -e\necho hello\n"),$p['dockerfile']); assert_same(str_repeat('b',40),$p['commit']);
+});
+finish_tests();

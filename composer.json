@@ -1,0 +1,1 @@
+{"name":"sasin91/trongate.cloud-next","license":"proprietary","require":{"php":"^8.4","ext-pdo":"*","ext-pdo_mysql":"*","ext-sodium":"*","ext-curl":"*"},"scripts":{"test":["php tests/core.php","php tests/Build_commands_test.php"]}}

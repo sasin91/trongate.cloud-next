@@ -1,0 +1,33 @@
+#!/usr/bin/env php
+<?php
+declare(strict_types=1);
+require dirname(__DIR__).'/lib/bootstrap.php';
+umask(0077);
+try {
+    $command=$argv[1] ?? 'help';
+    if ($command==='help') {
+        echo "tc init | migrate | worker [--once] | COMMAND [payload.json|-]\n";
+        echo "Commands: credential, provider-connect, provider-options, server-scan, server-confirm, server-inspect, app-create, release, deploy, rollback, host-update, host-rollback, provision, provider-inspect, provider-reboot, provider-delete, snapshot-create, snapshot-delete, reconcile, inventory, operations, operation\n"; exit;
+    }
+    $s=Store::open();
+    if ($command==='init') {
+        $key=getenv('TC_KEY_FILE') ?: state_dir().'/key';
+        if (!is_file($key)) { $handle=fopen($key,'x'); fwrite($handle,Encryptor::generate_key()); fclose($handle); chmod($key,0600); }
+        $s->migrate();
+        $p=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+        if (strlen($p['password'])<14) { throw new RuntimeException('Administrator password must be at least 14 characters'); }
+        $s->run('REPLACE INTO admins(name,password) VALUES(?,?)',[$p['name'],password_hash($p['password'],PASSWORD_DEFAULT)]);
+        echo "Installation initialized. Back up the key and database together.\n"; exit;
+    }
+    // Local CLI authorization is OS access to installation key and database.
+    Encryptor::validate_key(installation_key());
+    if ($command==='migrate') { $s->migrate(); echo "Migrations applied\n"; exit; }
+    if ($command==='worker') {
+        $worker=new Worker($s);
+        do { $worker->once(); if (($argv[2] ?? '')==='--once') { break; } sleep(3); } while (true);
+        exit;
+    }
+    $input=isset($argv[2]) && $argv[2]!=='-' ? file_get_contents($argv[2]) : stream_get_contents(STDIN);
+    $payload=trim($input)==='' ? [] : json_decode($input,true,512,JSON_THROW_ON_ERROR);
+    echo json_encode((new Control($s))->execute($command,$payload),JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR)."\n";
+} catch (Throwable $e) { fwrite(STDERR, 'Error: '.$e->getMessage()."\n"); exit(1); }
