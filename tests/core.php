@@ -33,6 +33,11 @@ test('credentials authenticate ciphertext and do not appear in records',function
     assert_same(false,str_contains($cipher,'secret-value')); assert_same('secret-value',Encryptor::decrypt($cipher,$key));
     assert_same(false,Encryptor::decrypt($cipher,Encryptor::generate_key()));
 });
+test('diagnostic redaction removes explicit credentials and PEM blocks',function() {
+    $text="credential-value\nAuthorization: Bearer abc123\n-----BEGIN OPENSSH PRIVATE KEY-----\nencoded\n-----END OPENSSH PRIVATE KEY-----";
+    $redacted=Redact::text($text,['credential-value']);
+    assert_same(false,str_contains($redacted,'credential-value')); assert_same(false,str_contains($redacted,'abc123')); assert_same(false,str_contains($redacted,'encoded'));
+});
 class FixtureHttp extends Http {
     public array $calls=[];
     function __construct(public array $responses) {}
@@ -94,5 +99,30 @@ test('SSH prerequisites are explicit and pinned identities are required',functio
 test('build plan keeps source pinned and uses inherited command encoding',function() {
     $p=Build::plan(['repository'=>'owner/repo','commit'=>str_repeat('b',40),'base'=>'repo/base@sha256:'.str_repeat('a',64),'tag'=>'registry.test/app:build','commands'=>'echo hello']);
     assert_contains(base64_encode("set -e\necho hello\n"),$p['dockerfile']); assert_same(str_repeat('b',40),$p['commit']);
+});
+class BackendProcess extends Process {
+    public array $calls=[];
+    function run(array $argv,string $input='',int $timeout=60,?callable $heartbeat=null,array $extra_env=[]): array {
+        $this->calls[]=$argv;
+        if ($argv[0]==='ssh') {
+            $request=json_decode($input,true);
+            return ['exit'=>0,'out'=>json(['status'=>$request['action']==='host-begin'?'reserved':'succeeded','generation'=>$request['expected'] ?? '/nix/store/observed']),'err'=>''];
+        }
+        return ['exit'=>0,'out'=>'activation completed','err'=>''];
+    }
+}
+test('deploy-rs backend fences activation, passes strict SSH options and maps observed result',function() {
+    $dir=sys_get_temp_dir().'/tc-backend-'.bin2hex(random_bytes(5)); mkdir($dir); putenv('TC_STATE='.$dir); file_put_contents($dir.'/key',Encryptor::generate_key());
+    $s=database(); $s->secret('key','fixture-private-key');
+    $revision=str_repeat('a',64); mkdir($dir.'/revisions/'.$revision,0700,true);
+    file_put_contents($dir.'/revisions/'.$revision.'/flake.lock','{}'); file_put_contents($dir.'/revisions/'.$revision.'/expected-system','/nix/store/expected');
+    $process=new BackendProcess; $backend=new DeployRs(new Ssh($s,$process),$process);
+    $server=['host'=>'web.test','port'=>22,'user'=>'root','credential'=>'key','host_key'=>'ssh-ed25519 Zml4dHVyZQ=='];
+    $result=$backend->deploy($server,['revision'=>$revision,'operation'=>str_repeat('b',32)],fn()=>null);
+    assert_same('succeeded',$result['status']); assert_same('/nix/store/expected',$result['generation']);
+    assert_same(['ssh','deploy','ssh'],array_map(fn($a)=>$a[0],$process->calls));
+    assert_contains('StrictHostKeyChecking=yes',$process->calls[1][2]);
+    assert_same('activation completed',trim($result['diagnostic']));
+    unlink($dir.'/revisions/'.$revision.'/flake.lock'); unlink($dir.'/revisions/'.$revision.'/expected-system'); rmdir($dir.'/revisions/'.$revision); rmdir($dir.'/revisions'); unlink($dir.'/key'); rmdir($dir); putenv('TC_STATE');
 });
 finish_tests();

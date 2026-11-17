@@ -5,7 +5,7 @@ final class Build {
         Validate::match($p['repository'],'~^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$~D','GitHub repository');
         Validate::match($p['commit'],'/^[a-f0-9]{40}$/D','full source commit');
         Validate::image($p['base']);
-        Validate::match($p['tag'],'~^[a-z0-9][a-z0-9./_-]+:[a-z0-9._-]+$~D','registry tag');
+        Validate::match($p['tag'],'~^[a-z0-9][a-z0-9.:/_-]+:[a-z0-9._-]+$~D','registry tag');
         if ($error=Build_commands::error($p['commands'] ?? '')) { throw new RuntimeException($error); }
         $extensions=[];
         foreach ($p['extensions'] ?? [] as $extension) { $extensions[]=Validate::match($extension,'/^[a-z][a-z0-9_]{0,39}$/D','PHP extension'); }

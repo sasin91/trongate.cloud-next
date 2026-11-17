@@ -46,7 +46,11 @@ Prepare them explicitly before enrollment:
 exec /usr/bin/python3 /usr/local/libexec/tc-runtime.py "$@"
 ```
 
-3. Create `/var/lib/tc/runtime` mode 0700, owned by root, and initialize its
+3. Install `runtime/tc-systemd-generator.sh` as root-owned executable
+   `/etc/systemd/system-generators/tc-runtime`. It generates boot-persistent
+   application units from `/var/lib/tc/runtime/units` and `enabled` markers;
+   application deployments do not write into NixOS's immutable `/etc` unit tree.
+   Create `/var/lib/tc/runtime` mode 0700, owned by root, and initialize its
    `Caddyfile` with `{ admin 127.0.0.1:2019 }` using multiline Caddyfile syntax:
 
 ```text
@@ -94,7 +98,7 @@ Stop the worker while taking a consistent initial backup. Back up:
   access to encrypted credentials, even if the database remains intact.
 - Runtime environment files, dedicated SSH key recovery copies, registry config
   and this installation's pinned Nix source/configuration.
-- Each target's `/var/lib/tc/runtime`, systemd `tc-*.service` units and
+- Each target's `/var/lib/tc/runtime` (including persistent units/enabled markers) and
   `/var/lib/tc-caddy`, plus application databases and persistent mounts.
 - Builder registry credentials if builds must resume after recovery.
 

@@ -21,9 +21,11 @@ final class DeployRs implements HostDeployer {
             // This pinned deploy-rs splits on spaces, not shell quoting.
             foreach ($opts as $opt) { if (preg_match('/\s/',$opt)) { throw new RuntimeException('SSH credential directory must not contain whitespace'); } }
             $sshOpts=implode(' ',$opts);
-            return $this->process->run(['deploy','--ssh-opts',$sshOpts,$dir.'#target.system'],'',1800,$heartbeat);
+            $result=$this->process->run(['deploy','--ssh-opts',$sshOpts,$dir.'#target.system'],'',1800,$heartbeat);
+            $result['diagnostic']=Redact::text($result['out']."\n".$result['err'],[file_get_contents($credentials.'/identity')]);
+            return $result;
         });
-        return $this->ssh->runtime($server,['action'=>'host-finish','operation'=>$deployment['operation'],'expected'=>$expected,'tool_exit'=>$r['exit']],$heartbeat);
+        return $this->ssh->runtime($server,['action'=>'host-finish','operation'=>$deployment['operation'],'expected'=>$expected,'tool_exit'=>$r['exit']],$heartbeat)+['tool_exit'=>$r['exit'],'diagnostic'=>$r['diagnostic']];
     }
     function rollback(array $server,array $deployment,callable $heartbeat): array {
         return $this->ssh->runtime($server,['action'=>'host-rollback','operation'=>$deployment['operation'],'generation'=>Validate::match($deployment['generation'],'~^/nix/store/[a-z0-9]{32}-nixos-system-[A-Za-z0-9._-]+$~D','generation')],$heartbeat);

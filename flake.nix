@@ -15,7 +15,7 @@
       };
       builder = pkgs.writeShellApplication {
         name = "tc-build";
-        runtimeInputs = with pkgs; [ python3 podman git ];
+        runtimeInputs = with pkgs; [ python3 podman git systemd ];
         text = ''exec python3 ${./runtime/tc-build.py} "$@"'';
       };
       snapshot = import "${nixpkgs}/nixos/lib/make-disk-image.nix" {

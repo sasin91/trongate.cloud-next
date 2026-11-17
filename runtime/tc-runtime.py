@@ -21,7 +21,7 @@ class Runtime:
     def __init__(self, root='/var/lib/tc/runtime'):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        for name in ['operations', 'apps', 'routes', 'roots']:
+        for name in ['operations', 'apps', 'routes', 'roots', 'units', 'enabled']:
             (self.root / name).mkdir(exist_ok=True, mode=0o700)
 
     def run(self, args, timeout=120):
@@ -84,10 +84,14 @@ class Runtime:
 
     def stop(self, release):
         if release:
-            self.run(['systemctl', 'disable', '--now', release['unit']])
+            (self.root/'enabled'/release['unit']).unlink(missing_ok=True)
+            self.run(['systemctl', 'daemon-reload'])
+            self.run(['systemctl', 'stop', release['unit']])
 
     def start(self, release):
-        self.run(['systemctl', 'enable', '--now', release['unit']])
+        self.write(self.root/'enabled'/release['unit'], '')
+        self.run(['systemctl', 'daemon-reload'])
+        self.run(['systemctl', 'start', release['unit']])
 
     def healthy(self, release):
         return release is not None and self.health(f'http://127.0.0.1:{release["port"]}{release["health"]}')
@@ -135,7 +139,7 @@ class Runtime:
         args.append(image)
         self.run(args)
         unit = name+'.service'
-        unit_path = Path('/etc/systemd/system')/unit
+        unit_path = self.root/'units'/unit
         podman = self.run(['which', 'podman'])
         self.write(unit_path, '[Unit]\nAfter=network-online.target\nWants=network-online.target\n'
                    '[Service]\nRestart=always\nRestartSec=3\nTimeoutStopSec=45\n'
@@ -317,6 +321,9 @@ class Runtime:
 
 if __name__ == '__main__':
     os.umask(0o077)
+    if sys.argv[1:] == ['--version']:
+        print('1')
+        sys.exit(0)
     try:
         data = sys.stdin.read(1048577)
         if len(data) > 1048576:

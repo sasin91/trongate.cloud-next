@@ -23,7 +23,7 @@ def run(args, timeout=1800):
 
 def build(p):
     for value, pattern in [(p['operation'], r'[a-f0-9]{32}'), (p['repository'], r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'),
-                           (p['commit'], r'[a-f0-9]{40}'), (p['tag'], r'[a-z0-9][a-z0-9./_-]+:[a-z0-9._-]+')]:
+                           (p['commit'], r'[a-f0-9]{40}'), (p['tag'], r'[a-z0-9][a-z0-9.:/_-]+:[a-z0-9._-]+')]:
         if not re.fullmatch(pattern, value):
             raise ValueError('invalid builder input')
     root = Path.home()/'.local/state/tc-build'
@@ -52,8 +52,10 @@ def build(p):
                 dockerfile += 'COPY Caddyfile /Caddyfile\n'
             (work/'Dockerfile').write_text(dockerfile)
             # Never use a repository Dockerfile. Rootless Podman owns an isolated namespace.
-            run(['podman', 'build', '--memory=2g', '--cpu-quota=200000', '--pids-limit=512',
-                 '--cap-drop=all', '--security-opt=no-new-privileges', '--tag', p['tag'],
+            run(['systemd-run', '--user', '--scope', '--quiet', '--property=MemoryMax=2G',
+                 '--property=CPUQuota=200%', '--property=TasksMax=512',
+                 'podman', 'build', '--memory=2g', '--cpu-quota=200000',
+                 '--security-opt=no-new-privileges', '--tag', p['tag'],
                  '--file', str(work/'Dockerfile'), str(source)])
             digest_file = work/'digest'
             run(['podman', 'push', '--digestfile', str(digest_file), p['tag']])

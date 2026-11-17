@@ -35,11 +35,14 @@ done
 if test -x /run/current-system/sw/bin/tc-runtime || command -v tc-runtime >/dev/null 2>&1; then echo agent=yes; fi
 if test "$(id -u)" = 0; then echo privileged=yes; fi
 if systemctl is-active --quiet tc-proxy; then echo proxy=yes; fi
+if podman info >/dev/null 2>&1; then echo podman-ready=yes; fi
+if test -f /sys/fs/cgroup/cgroup.controllers && grep -qw memory /sys/fs/cgroup/cgroup.controllers && grep -qw cpu /sys/fs/cgroup/cgroup.controllers; then echo cgroups=yes; fi
+if test "$(tc-runtime --version 2>/dev/null)" = 1; then echo protocol=yes; fi
 SH;
         $r=$this->command($s,'sh -s',$script);
         if ($r['exit']!==0) { throw new RuntimeException('SSH inspection failed (identity, credentials or host unavailable)'); }
         $facts=[]; foreach (explode("\n",trim($r['out'])) as $line) { $parts=explode('=',$line,2); if (count($parts)===2) { $facts[$parts[0]]=$parts[1]; } }
-        $missing=[]; foreach (['podman','systemctl','curl','python3','flock','caddy','agent','privileged','proxy'] as $tool) { if (($facts[$tool] ?? '')!=='yes') { $missing[]=$tool; } }
+        $missing=[]; foreach (['podman','systemctl','curl','python3','flock','caddy','agent','privileged','proxy','podman-ready','cgroups','protocol'] as $tool) { if (($facts[$tool] ?? '')!=='yes') { $missing[]=$tool; } }
         return ['facts'=>$facts,'missing'=>$missing,'application_ready'=>$missing===[], 'managed_eligible'=>($facts['os'] ?? '')==='nixos' && ($facts['nix'] ?? '')==='yes' && ($facts['privileged'] ?? '')==='yes','inspected_at'=>time(),'connected_at'=>time()];
     }
     function runtime(array $server, array $request, ?callable $heartbeat=null): array {
