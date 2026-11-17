@@ -70,6 +70,9 @@ Create those credentials from complete valid PHP configuration files. They are
 encrypted in SQL, materialized only on the target in 0600 release files, and
 mounted read-only. They never enter the image or Nix store. Environment `secrets`
 map environment names to credential IDs; multiline values require a file secret.
+Use new credential IDs and a new `config_version` when changing application
+configuration. A retained deployed release keeps its original materialized files;
+redeploying a specification resolves its referenced credential IDs at execution time.
 For private images, `registry_secret` refers to an encrypted Podman auth.json;
 the target uses a temporary auth file only during pull and removes it afterwards.
 
