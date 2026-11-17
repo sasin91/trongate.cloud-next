@@ -115,8 +115,11 @@ The result records whether that check was requested.
   `php bin/prepare-host.php host.json`, then `tc host-update update.json`.
   See [host operations](docs/architecture.md#managed-host-operations).
 - **Hetzner:** save a token as a credential, then `provider-connect`,
-  `provider-options` and `provision`. Only compatible, available NixOS snapshots
-  labeled `tc-nixos=true` are accepted. Reboot/deletion require explicit operator
+  `provider-options` and `provision`. The panel offers inline provider creation
+  with live options, a price review and explicit cost confirmation, or SSH connection
+  to an existing server. Compatible NixOS snapshots labeled `tc-nixos=true` are
+  accepted by default; explicitly selected system images require runtime preparation
+  before enrollment can pass readiness checks. Reboot/deletion require explicit operator
   confirmation. See [snapshot bootstrap and cleanup](docs/hetzner.md).
 - **Recovery:** `tc reconcile operation.json` resumes observation of an uncertain
   operation. It does not release its resource lock or blindly repeat a mutation.

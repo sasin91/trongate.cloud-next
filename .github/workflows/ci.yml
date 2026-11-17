@@ -28,6 +28,7 @@ jobs:
       - run: composer test
       - run: php tests/web.php
       - run: php tests/flows.php
+      - run: php tests/server_flow.php
       - run: python3 -m unittest discover -s tests -p '*_test.py' -v
       - run: php tests/mariadb.php
         env:

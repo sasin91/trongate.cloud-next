@@ -26,6 +26,9 @@ try {
     if ($code!==200 || !str_contains($page,'Which app are we putting online?')) { throw new RuntimeException('Wizard missing'); }
     if (!str_contains($page,'id="server-dialog"') || str_contains($page,'href="/?page=connect-server">Connect a server</a>')) { throw new RuntimeException('Wizard must enroll servers inline'); }
     preg_match('/name="request" value="([a-f0-9]+)"/',$page,$launch);
+    if (!str_contains($page,'Create at a provider') || !str_contains($page,'Connect an existing server')) { throw new RuntimeException('Server onboarding choices missing'); }
+    [$code,$error]=request(['command'=>'create-provider-server','inline'=>'server','csrf'=>$csrf,'quote'=>'unconfirmed'],'/?page=connect-server');
+    if ($code!==422) { throw new RuntimeException('Provider creation without cost confirmation accepted'); }
     [$code,$error]=request(['command'=>'connect-server','inline'=>'server','csrf'=>$csrf,'id'=>'new-server','host'=>'192.0.2.11','user'=>'root','port'=>22,'private_key'=>''],'/?page=connect-server');
     if ($code!==422 || !isset(json_decode($error,true)['error'])) { throw new RuntimeException('Inline errors must return JSON without navigating away'); }
     [$code,$error]=request(['command'=>'confirm-server','inline'=>'server','csrf'=>$csrf,'enrollment'=>'expired','fingerprint'=>'SHA256:fixture'],'/?page=connect-server');

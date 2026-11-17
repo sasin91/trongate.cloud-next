@@ -22,8 +22,8 @@ final class Hetzner {
     function create(string $operation,array $p): array {
         $image=$this->call('GET','/images/'.Validate::number($p['image'],1,PHP_INT_MAX))['image'];
         $bootstrap=($p['bootstrap'] ?? false)===true;
-        if ($bootstrap) {
-            if (($image['type'] ?? '')!=='system') { throw new RuntimeException('Bootstrap requires a stock system image'); }
+        if ($bootstrap || ($p['image_kind'] ?? '')==='system') {
+            if (($image['type'] ?? '')!=='system' || ($image['status'] ?? 'available')!=='available') { throw new RuntimeException('Select an available stock system image'); }
         } elseif (($image['type'] ?? '')!=='snapshot' || ($image['status'] ?? '')!=='available' || ($image['labels']['tc-nixos'] ?? '')!=='true') { throw new RuntimeException('Select an available tc-nixos=true snapshot'); }
         $type=$this->call('GET','/server_types/'.rawurlencode($p['server_type']))['server_type'];
         if (($type['architecture'] ?? '')!==($image['architecture'] ?? '')) { throw new RuntimeException('Snapshot architecture mismatch'); }

@@ -7,13 +7,16 @@ $field=function($name,$label,$default='',$type='text',$required=true) use($value
 <?php };
 $ready=array_filter($inventory['servers'] ?? [],fn($s)=>$s['application_ready']);
 ?>
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trongate Cloud · <?= $e(ucwords(str_replace('-',' ',$page))) ?></title><link rel="stylesheet" href="/assets/wizard.css"><link rel="stylesheet" href="/assets/deployments.css"><link rel="stylesheet" href="/assets/panel.css"><script src="/assets/flows.js" defer></script><script src="/assets/server-dialog.js" defer></script></head>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trongate Cloud · <?= $e(ucwords(str_replace('-',' ',$page))) ?></title><link rel="stylesheet" href="/assets/wizard.css"><link rel="stylesheet" href="/assets/deployments.css"><link rel="stylesheet" href="/assets/panel.css"><script src="/assets/flows.js" defer></script><script src="/assets/server-dialog.js" defer></script><script src="/assets/provider-server.js" defer></script></head>
 <body class="wz-body"><header class="wz-top"><div class="wz-top-row"><a class="wz-brand" href="/"><?php require __DIR__.'/_mark.php'; ?><span>trongate<b>.cloud</b></span></a>
 <?php if ($signedIn): ?><nav><a href="/">Apps</a><a href="/?page=connect-server">Servers</a><a href="/?page=advanced">Advanced</a><form method="post"><?= $csrf() ?><button class="link-button" name="command" value="logout">Sign out</button></form></nav><?php endif ?><span id="wz-counter" class="wz-counter"></span></div><div id="wz-progress" class="wz-progress" aria-hidden="true"></div></header>
 <?php if ($message!==null): ?><div class="notice wz-errors" role="alert"><?= $e($message) ?></div><?php endif ?>
 <?php if (!$signedIn): ?>
 <main class="wz-wrap"><div class="wz-main"><form method="post" class="wz-stage"><?= $csrf() ?><input type="hidden" name="command" value="login"><div class="wz-q"><h1>Welcome back.</h1><p>Sign in to manage your servers and put your apps online.</p></div><?php $field('name','Administrator'); $field('password','Password','','password'); ?><button class="wz-ok">Sign in</button></form></div></main>
-<?php elseif ($page==='connect-server' || $page==='confirm-server'): ?>
+<?php elseif ($page==='connect-server'): ?>
+<main class="panel"><div class="wz-q"><h1>Add an application server.</h1><p>Create a new server at a supported provider, or connect a server you already have.</p></div><button type="button" class="wz-ok" data-connect-server>Add a server</button></main>
+<?php require __DIR__.'/server_dialog.php'; ?>
+<?php elseif ($page==='confirm-server'): ?>
 <div class="wz-wrap"><main class="wz-main"><div class="wz-stage"><div class="wz-q"><h1><?= $page==='confirm-server'?'Confirm your server’s identity.':'Let’s connect your server.' ?></h1><p>Use a prepared application server. Keep application workloads separate from this control plane.</p></div>
 <?php if ($page==='confirm-server' && isset($_SESSION['enrollment'])): $pending=$_SESSION['enrollment']; ?>
 <p>Server: <strong><?= $e($pending['host']) ?></strong></p><p>Observed fingerprint: <code><?= $e($pending['fingerprint']) ?></code></p><div class="wz-help">Open the server’s independent console and run <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code>. Enter the SHA256 fingerprint from that console below.</div><form method="post"><?= $csrf() ?><input type="hidden" name="command" value="confirm-server"><?php $field('fingerprint','Verified fingerprint'); ?><button class="wz-ok">Confirm and inspect server</button></form>
