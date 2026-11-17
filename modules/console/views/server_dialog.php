@@ -13,6 +13,6 @@
 <form data-server-confirm hidden><?= $csrf() ?><input type="hidden" name="inline" value="server"><input type="hidden" name="command" value="confirm-server"><input type="hidden" name="enrollment">
 <p>Observed fingerprint: <code data-server-fingerprint></code></p>
 <p>Use the server’s independent console to run <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code>, then enter its SHA256 fingerprint below.</p>
-<label class="wz-field"><span class="wz-label">Verified fingerprint</span><input class="wz-in" name="fingerprint" required autocomplete="off"></label><button class="wz-ok">Confirm and use server</button></form>
-<div data-server-unready hidden><p>The server was connected, but is not ready for applications:</p><p data-server-missing></p><p>Finish preparing its runtime, then inspect it again from Advanced.</p><button type="button" class="wz-ok" data-close-server>Back to app setup</button></div>
+<label class="wz-field"><span class="wz-label">Verified fingerprint</span><input class="wz-in" name="fingerprint" required autocomplete="off"></label><button class="wz-ok">Confirm and use server</button> <button type="button" class="link-button" data-retry-server>Connect again</button></form>
+<form data-server-unready hidden><?= $csrf() ?><input type="hidden" name="inline" value="server"><input type="hidden" name="command" value="inspect-connected-server"><input type="hidden" name="server"><p>The server was connected, but is not ready for applications:</p><p data-server-missing></p><p>Finish preparing its runtime, then check it again here.</p><button class="wz-ok">Check readiness again</button></form>
 </dialog>

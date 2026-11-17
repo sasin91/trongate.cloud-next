@@ -11,12 +11,14 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('[data-connect-server],a[href="/?page=connect-server"]').forEach(button => button.addEventListener('click', event => {
         event.preventDefault();
         opener = button;
-        if (!unready.hidden) { unready.hidden = true; connect.hidden = false; connect.reset(); }
         dialog.showModal();
     }));
     dialog.querySelectorAll('[data-close-server]').forEach(button => button.addEventListener('click', () => dialog.close()));
     dialog.addEventListener('close', () => opener?.focus());
-    [connect, confirm].forEach(form => form.addEventListener('submit', async event => {
+    dialog.querySelector('[data-retry-server]').addEventListener('click', () => {
+        confirm.hidden = true; connect.hidden = false; error.hidden = true;
+    });
+    [connect, confirm, unready].forEach(form => form.addEventListener('submit', async event => {
         event.preventDefault();
         const button = form.querySelector('button[type=submit],button:not([type])');
         const label = button.textContent;
@@ -38,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 confirm.hidden = true;
                 if (!result.application_ready) {
+                    unready.elements.server.value = result.id;
                     dialog.querySelector('[data-server-missing]').textContent = (result.missing || []).join(', ');
                     unready.hidden = false;
                     return;
@@ -49,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 select.dispatchEvent(new Event('change',{bubbles:true}));
                 const builder = app.elements.builder;
                 if (builder && ![...builder.options].some(option => option.value === result.id)) builder.add(new Option(result.id,result.id));
-                dialog.close(); connect.hidden = false; connect.reset(); confirm.reset();
+                dialog.close(); connect.hidden = false; unready.hidden = true; connect.reset(); confirm.reset();
                 select.focus();
             }
         } catch (failure) {

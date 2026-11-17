@@ -41,6 +41,10 @@ class Console extends Trongate {
                         $result=$control->execute('server-confirm',['id'=>$pending['id'] ?? '', 'enrollment'=>$pending['enrollment'] ?? '', 'fingerprint'=>trim($_POST['fingerprint'] ?? '')]);
                         if ($inline) { unset($_SESSION['enrollment']); $this->_server_response($result+['host'=>$pending['host']]); return; }
                         unset($_SESSION['enrollment']); header('Location: /',true,303); exit;
+                    } elseif ($command==='inspect-connected-server' && $inline) {
+                        $id=Validate::id($_POST['server'] ?? '');
+                        $result=$control->execute('server-inspect',['server'=>$id]);
+                        $this->_server_response($result+['id'=>$id,'host'=>$store->get('server',$id)['host']]); return;
                     } elseif ($command==='redeploy-app' || $command==='rollback-app') {
                         $app=Validate::id($_POST['app'] ?? '');
                         $operation=$control->execute($command==='rollback-app'?'rollback':'deploy',['app'=>$app,'release'=>$_POST['release'] ?? '']);
