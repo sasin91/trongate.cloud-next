@@ -17,7 +17,7 @@ final class Worker {
         } catch (Throwable $e) {
             // Exceptions may originate in libraries with credential-bearing messages.
             // Keep a safe class and step; raw provider/build/customer output is not logged.
-            $this->store->finish($id,$owner,'uncertain',['error'=>get_class($e),'message'=>'Operation not verified; inspect remote/provider state and reconcile.']);
+            $this->store->finish($id,$owner,'uncertain',['error'=>get_class($e),'message'=>$e instanceof ProviderError ? $e->getMessage() : 'Operation not verified; inspect remote/provider state and reconcile.']);
         }
         return true;
     }

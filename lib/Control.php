@@ -26,7 +26,9 @@ final class Control {
                 $pending=$s->get('enrollment',$p['enrollment']);
                 if ($pending['expires']<time() || !hash_equals($pending['identity']['fingerprint'],$p['fingerprint'])) { throw new RuntimeException('Expired enrollment or fingerprint mismatch'); }
                 $id=Validate::id($p['id']);
-                foreach ($s->all('server') as $existing) { if ($existing['id']===$id) { throw new RuntimeException('Server already enrolled; identity rotation requires a new inventory record'); } }
+                foreach ($s->all('server') as $existing) {
+                    if ($existing['id']===$id || $existing['host_key']===$pending['identity']['key']) { throw new RuntimeException('Server identity already enrolled; do not create aliases for the same host'); }
+                }
                 $server=$pending['server']+['host_key'=>$pending['identity']['key']];
                 if (isset($p['provider_id'],$p['provider'])) {
                     $observed=$this->provider($p['provider'])->call('GET','/servers/'.Validate::number($p['provider_id'],1,PHP_INT_MAX))['server'];

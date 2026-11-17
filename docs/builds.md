@@ -15,6 +15,9 @@ nix profile install /opt/trongate-cloud-next#builder
 ```
 
 Make `tc-build` available in the dedicated builder SSH user's noninteractive PATH.
+Enable its systemd user manager (for example `loginctl enable-linger BUILDER_USER`)
+and cgroup delegation; build commands run in a bounded user scope. Rootless Podman
+still needs its ordinary in-namespace build capabilities to install PHP extensions.
 Configure registry credentials on that builder with `podman login REGISTRY` as
 the builder user; use credentials scoped to pushing its application repositories.
 They stay outside the source/build context. Do not mount a container-engine socket,

@@ -14,8 +14,9 @@ final class Store {
     }
     function migrate(): void {
         foreach (explode(';', file_get_contents(dirname(__DIR__) . '/db/001.sql')) as $sql) {
-            if (trim($sql) !== '') { $this->db->exec($sql); }
+            if (trim($sql) !== '') { $this->db->exec($sql.($this->db->getAttribute(PDO::ATTR_DRIVER_NAME)==='mysql'?' ENGINE=InnoDB':'')); }
         }
+        if ($this->db->getAttribute(PDO::ATTR_DRIVER_NAME)==='mysql' && $this->run("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('records','credentials','admins','jobs','resource_locks','steps') AND engine <> 'InnoDB'")->fetchColumn()>0) { throw new RuntimeException('All control-plane tables must use InnoDB'); }
     }
     function get(string $kind, string $id): array {
         $row = $this->run('SELECT data FROM records WHERE kind=? AND id=?', [$kind,$id])->fetch();

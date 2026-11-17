@@ -11,19 +11,22 @@ Executed successfully during implementation:
   status mapping/label reconciliation, SSH prerequisite reporting and build planning.
 - Ten inherited Build_commands tests.
 - Real local HTTP test of login, CSRF rejection and authenticated console operation.
-- Eight Linux simulated runtime tests: success/rollback/idempotent replay,
+- Nine Linux simulated runtime tests: success/rollback/idempotent replay,
   candidate failure, failed public check restoration, interrupted switch recovery,
-  uncertain migration, host fencing, flock exclusion and persistent data retention.
-- Real MariaDB 11.4 queue claim/heartbeat/result persistence in CI.
+  uncertain migration, host fencing, flock exclusion, persistent data retention and
+  explicit interrupted-host reconciliation.
+- Real MariaDB 11.4 queue claim/heartbeat/result persistence and four-process
+  conflicting-resource serialization in CI.
 - Initial Nix flake evaluation and control-plane/runtime package builds in CI
   (`44026312954`, commit `738a736`).
 
-The expanded NixOS VM test uses actual SSH enrollment, independent fingerprint
+The NixOS runtime VM passed in CI run `44029177049` (commit `973ad96`). It uses actual SSH enrollment, independent fingerprint
 comparison, a local OCI registry, Podman, persistent systemd units, Caddy routing,
-PHP CLI queue operations, successful release/rollback, failed candidate and changed
-host-key rejection. Its execution status is recorded in the final implementation
-report and CI; the initial expanded run failed during Nix parsing and was corrected.
-Do not count that failed run as a VM test pass.
+PHP CLI queue operations, successful release/rollback, failed candidate, persistent
+files, real proxy routing and changed-host-key rejection. Earlier runs found and
+fixed Nix quoting, PHP empty-map encoding and immutable NixOS unit-path issues.
+The latest test also boots the complete control-plane installation module; its
+final result is recorded in the implementation report and CI.
 
 Not established by unit tests: live Hetzner snapshot boot/provisioning, cloud-init
 behavior in a real project, a real external Git-to-registry build, a production TLS

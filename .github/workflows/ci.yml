@@ -1,5 +1,10 @@
 name: verify
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    paths-ignore: ['docs/**', 'README.md', 'NOTICE']
+  pull_request:
+    paths-ignore: ['docs/**', 'README.md', 'NOTICE']
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

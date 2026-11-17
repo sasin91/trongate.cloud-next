@@ -18,12 +18,6 @@
         runtimeInputs = with pkgs; [ python3 podman git systemd ];
         text = ''exec python3 ${./runtime/tc-build.py} "$@"'';
       };
-      snapshot = import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
-        inherit pkgs; inherit (pkgs) lib;
-        config = self.nixosConfigurations.snapshot.config;
-        format = "raw"; partitionTableType = "legacy"; diskSize = 8192;
-        name = "trongate-nixos-hetzner-x86";
-      };
       default = pkgs.stdenvNoCC.mkDerivation {
         pname = "trongate-cloud-next"; version = "0.1.0"; src = self;
         nativeBuildInputs = [ pkgs.makeWrapper ];
@@ -33,6 +27,13 @@
           makeWrapper ${pkgs.php84}/bin/php $out/bin/tc --add-flags "$out/share/tc/bin/tc" \
             --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.openssh pkgs.nix deploy-rs.packages.${system}.default pkgs.git ]}
         '';
+      };
+    } // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+      snapshot = import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
+        inherit pkgs; inherit (pkgs) lib;
+        config = self.nixosConfigurations.snapshot.config;
+        format = "raw"; partitionTableType = "legacy"; diskSize = 8192;
+        name = "trongate-nixos-hetzner-x86";
       };
     });
     nixosModules.runtime = { pkgs, ... }: {

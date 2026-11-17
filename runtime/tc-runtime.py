@@ -129,7 +129,9 @@ class Runtime:
         args = ['podman', 'create', '--name', name, '--label', 'tc.operation='+operation,
                 '--publish', '127.0.0.1::'+str(int(spec['container_port'])),
                 '--memory', str(int(spec['memory_mb']))+'m', '--cpus', str(int(spec['cpus'])),
-                '--pids-limit', '256', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+                # The inherited FrankenPHP binary carries cap_net_bind_service.
+                # Retain just that capability so existing OCI images can execute it.
+                '--pids-limit', '256', '--cap-drop', 'ALL', '--cap-add', 'NET_BIND_SERVICE', '--security-opt', 'no-new-privileges',
                 '--env', 'PORT='+str(int(spec['container_port'])), '--env-file', str(directory/'environment')]
         for volume, target in (spec.get('mounts') or {}).items():
             self.match(volume, r'[a-z][a-z0-9-]{0,39}')
