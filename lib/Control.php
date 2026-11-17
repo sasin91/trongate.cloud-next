@@ -16,6 +16,8 @@ final class Control {
                 $s->put('provider',$id,['type'=>'hetzner','credential'=>$credential]); return $id;
             case 'provider-options':
                 return $this->provider($p['provider'])->options();
+            case 'bootstrap-options':
+                return $this->provider($p['provider'])->list('images','&type=system');
             case 'server-scan':
                 $server=Validate::server($p); $identity=(new Ssh($s))->scan($server);
                 $id=bin2hex(random_bytes(16)); $s->put('enrollment',$id,['server'=>$server,'identity'=>$identity,'expires'=>time()+900]);
@@ -51,13 +53,17 @@ final class Control {
                 if ($command==='host-update') { Validate::match($p['revision'],'/^[a-f0-9]{64}$/D','revision'); }
                 return $s->enqueue($command,'server:'.$p['server'],$p);
             case 'provision':
+            case 'bootstrap-create':
+            case 'provider-rescue':
+            case 'provider-poweroff':
             case 'provider-reboot':
             case 'provider-delete':
             case 'snapshot-create':
             case 'snapshot-delete':
                 $s->get('provider',$p['provider']);
                 if (($p['confirm'] ?? false)!==true) { throw new RuntimeException('Explicit operator confirmation required for provider mutation'); }
-                if ($command==='provision') {
+                if (in_array($command,['provision','bootstrap-create'])) {
+                    $p['bootstrap']=$command==='bootstrap-create';
                     Validate::id($p['name']); Validate::id($p['server_type']); Validate::id($p['location']);
                     Validate::number($p['image'],1,PHP_INT_MAX);
                     if (empty($p['ssh_keys'])) { throw new RuntimeException('Select at least one SSH public key'); }

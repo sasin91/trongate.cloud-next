@@ -37,7 +37,7 @@ in pkgs.testers.runNixOSTest {
     machine.succeed("podman push --tls-verify=false --digestfile=/tmp/bad.digest tc-fixture:bad docker://localhost:5000/demo:bad")
     good_digest = machine.succeed("cat /tmp/good.digest").strip()
     bad_digest = machine.succeed("cat /tmp/bad.digest").strip()
-    machine.succeed("mkdir -p /root/.ssh; ssh-keygen -t ed25519 -N '' -f /root/.ssh/id_ed25519; cp /root/.ssh/id_ed25519.pub /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys")
+    machine.succeed("mkdir -p /root/.ssh; ssh-keygen -t ed25519 -N \"\" -f /root/.ssh/id_ed25519; cp /root/.ssh/id_ed25519.pub /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys")
     machine.succeed("mkdir -p /var/lib/tc-control; cp -r ${self} /tmp/product; chmod -R u+w /tmp/product")
     machine.succeed("TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc init <<'EOF'\n{\"name\":\"admin\",\"password\":\"disposable-test-password\"}\nEOF")
     def cli(command, payload):
@@ -69,7 +69,7 @@ in pkgs.testers.runNixOSTest {
     machine.succeed("test $(cat /var/lib/tc/runtime/apps/demo/data/uploads/keep) = retained")
     machine.wait_until_succeeds("curl -ksf --resolve demo.localhost:443:127.0.0.1 https://demo.localhost | grep 'immutable release'")
     # Real host-key rotation must fail closed on the next normal CLI inspection.
-    machine.succeed("rm /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub; ssh-keygen -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_key; systemctl restart sshd")
+    machine.succeed("rm /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub; ssh-keygen -t ed25519 -N \"\" -f /etc/ssh/ssh_host_ed25519_key; systemctl restart sshd")
     machine.fail("echo '{\"server\":\"web\"}' | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc server-inspect")
   '';
 }

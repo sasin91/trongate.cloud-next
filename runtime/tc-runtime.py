@@ -248,6 +248,10 @@ class Runtime:
             self.run(['systemctl', 'is-active', 'sshd', 'tc-proxy'])
         except Exception:
             healthy = False
+        for state in (self.root/'apps').glob('*/state.json'):
+            active = self.read(state, {}).get('active')
+            if active and not self.healthy(active):
+                healthy = False
         return {'generation': current, 'services_healthy': healthy,
                 'reservation': self.read(self.root/'host-reservation.json')}
 
@@ -273,7 +277,8 @@ class Runtime:
             before = self.host_inspect()['generation']
             self.match(before, r'/nix/store/[a-z0-9]{32}-nixos-system-[A-Za-z0-9._-]+')
             self.run(['nix-store', '--add-root', str(self.root/'roots'/operation), '--realise', before])
-            self.write(reservation_path, {'operation': operation, 'previous_generation': before})
+            self.write(reservation_path, {'operation': operation, 'previous_generation': before,
+                                         'expected': req.get('expected'), 'revision': req.get('revision')})
             return {'status': 'reserved', 'previous_generation': before}
         if action == 'host-rollback':
             generation = self.match(req['generation'], r'/nix/store/[a-z0-9]{32}-nixos-system-[A-Za-z0-9._-]+')

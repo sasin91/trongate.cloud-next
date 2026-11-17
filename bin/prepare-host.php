@@ -13,8 +13,9 @@ try {
     if (!is_file($source.'/flake.lock')) { throw new RuntimeException('Run nix flake lock before freezing a revision'); }
     $revision=hash('sha256',$data.$hardware.file_get_contents($source.'/flake.lock').file_get_contents($source.'/runtime/tc-runtime.py').file_get_contents($source.'/nix/runtime.nix'));
     $dir=state_dir().'/revisions/'.$revision;
-    if (is_dir($dir)) { echo $revision."\n"; exit; }
-    mkdir($dir.'/source/runtime',0700,true); mkdir($dir.'/source/nix',0700,true);
+    if (is_file($dir.'/expected-system')) { echo $revision."\n"; exit; }
+    if (!is_dir($dir.'/source/runtime')) { mkdir($dir.'/source/runtime',0700,true); }
+    if (!is_dir($dir.'/source/nix')) { mkdir($dir.'/source/nix',0700,true); }
     foreach (['flake.nix','flake.lock','runtime/tc-runtime.py','nix/runtime.nix','nix/control-plane.nix'] as $f) { copy($source.'/'.$f,$dir.'/source/'.$f); }
     file_put_contents($dir.'/inventory.json',$data); file_put_contents($dir.'/hardware.nix',$hardware);
     $flake=<<<'NIX'

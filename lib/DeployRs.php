@@ -12,8 +12,9 @@ final class DeployRs implements HostDeployer {
     function deploy(array $server,array $deployment,callable $heartbeat): array {
         $revision=Validate::match($deployment['revision'],'/^[a-f0-9]{64}$/D','revision');
         $dir=state_dir().'/revisions/'.$revision;
-        if (!is_file($dir.'/flake.lock')) { throw new RuntimeException('Frozen configuration revision missing'); }
-        $before=$this->ssh->runtime($server,['action'=>'host-begin','operation'=>$deployment['operation']],$heartbeat);
+        if (!is_file($dir.'/flake.lock') || !is_file($dir.'/expected-system')) { throw new RuntimeException('Frozen configuration revision missing'); }
+        $expected=trim(file_get_contents($dir.'/expected-system'));
+        $before=$this->ssh->runtime($server,['action'=>'host-begin','operation'=>$deployment['operation'],'expected'=>$expected,'revision'=>$revision],$heartbeat);
         if (($before['status'] ?? '')!=='reserved') { return $before; }
         $r=$this->ssh->with_credentials($server,function($opts,$credentials) use($dir,$heartbeat) {
             // deploy-rs owns the use of OpenSSH options; no secrets enter the Nix store.
@@ -22,7 +23,6 @@ final class DeployRs implements HostDeployer {
             $sshOpts=implode(' ',$opts);
             return $this->process->run(['deploy','--ssh-opts',$sshOpts,$dir.'#target.system'],'',1800,$heartbeat);
         });
-        $expected=trim(file_get_contents($dir.'/expected-system'));
         return $this->ssh->runtime($server,['action'=>'host-finish','operation'=>$deployment['operation'],'expected'=>$expected,'tool_exit'=>$r['exit']],$heartbeat);
     }
     function rollback(array $server,array $deployment,callable $heartbeat): array {

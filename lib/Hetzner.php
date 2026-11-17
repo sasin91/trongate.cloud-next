@@ -21,10 +21,13 @@ final class Hetzner {
     }
     function create(string $operation,array $p): array {
         $image=$this->call('GET','/images/'.Validate::number($p['image'],1,PHP_INT_MAX))['image'];
-        if (($image['type'] ?? '')!=='snapshot' || ($image['status'] ?? '')!=='available' || ($image['labels']['tc-nixos'] ?? '')!=='true') { throw new RuntimeException('Select an available tc-nixos=true snapshot'); }
+        $bootstrap=($p['bootstrap'] ?? false)===true;
+        if ($bootstrap) {
+            if (($image['type'] ?? '')!=='system') { throw new RuntimeException('Bootstrap requires a stock system image'); }
+        } elseif (($image['type'] ?? '')!=='snapshot' || ($image['status'] ?? '')!=='available' || ($image['labels']['tc-nixos'] ?? '')!=='true') { throw new RuntimeException('Select an available tc-nixos=true snapshot'); }
         $type=$this->call('GET','/server_types/'.rawurlencode($p['server_type']))['server_type'];
         if (($type['architecture'] ?? '')!==($image['architecture'] ?? '')) { throw new RuntimeException('Snapshot architecture mismatch'); }
-        return $this->call('POST','/servers',['name'=>Validate::id($p['name']),'server_type'=>$p['server_type'],'location'=>$p['location'],'image'=>(int)$p['image'],'ssh_keys'=>array_map(fn($n)=>Validate::number($n,1,PHP_INT_MAX),$p['ssh_keys']),'labels'=>['tc-operation'=>$operation],'public_net'=>['enable_ipv4'=>true,'enable_ipv6'=>true]]);
+        return $this->call('POST','/servers',['name'=>Validate::id($p['name']),'server_type'=>$p['server_type'],'location'=>$p['location'],'image'=>(int)$p['image'],'ssh_keys'=>array_map(fn($n)=>Validate::number($n,1,PHP_INT_MAX),$p['ssh_keys']),'labels'=>['tc-operation'=>$operation,'tc-temporary'=>$bootstrap?'true':'false'],'public_net'=>['enable_ipv4'=>true,'enable_ipv6'=>true]]);
     }
     function action(int $id): array {
         $a=$this->call('GET',"/actions/$id")['action'];

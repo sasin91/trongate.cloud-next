@@ -53,14 +53,14 @@ final class Worker {
         try { $intent=$s->get('external',$id); } catch (RuntimeException) { $intent=[]; }
         if (isset($intent['action'])) {
             $observed=$provider->action($intent['action']);
-            if ($observed['status']==='succeeded' && $kind==='provision') {
+            if ($observed['status']==='succeeded' && in_array($kind,['provision','bootstrap-create'])) {
                 $server=$provider->call('GET','/servers/'.$intent['provider_id'])['server'];
                 $s->put('provider-server',(string)$server['id'],['provider'=>$p['provider'],'server'=>$server,'operation'=>$id,'enrollment'=>'pending independent host-key confirmation']);
                 $observed['server']=$server;
             }
             return $observed+$intent;
         }
-        if ($kind==='provision') {
+        if (in_array($kind,['provision','bootstrap-create'])) {
             $found=$provider->reconcile_create($id);
             if ($found) {
                 $s->put('provider-server',(string)$found['id'],['provider'=>$p['provider'],'server'=>$found,'operation'=>$id]);
@@ -82,6 +82,8 @@ final class Worker {
         $s->put('external',$id,['submitted'=>time(),'kind'=>$kind,'provider_id'=>$p['provider_id']]);
         $resource=(int)$p['provider_id'];
         $response=match($kind) {
+            'provider-rescue'=>$provider->call('POST',"/servers/$resource/actions/enable_rescue",['type'=>'linux64','ssh_keys'=>array_map(fn($n)=>Validate::number($n,1,PHP_INT_MAX),$p['ssh_keys'])]),
+            'provider-poweroff'=>$provider->call('POST',"/servers/$resource/actions/poweroff",[]),
             'provider-reboot'=>$provider->call('POST',"/servers/$resource/actions/reboot",[]),
             'provider-delete'=>$provider->call('DELETE',"/servers/$resource"),
             'snapshot-create'=>$provider->call('POST',"/servers/$resource/actions/create_image",['type'=>'snapshot','description'=>'Trongate NixOS '.$id,'labels'=>['tc-operation'=>$id,'tc-nixos'=>'true']]),
