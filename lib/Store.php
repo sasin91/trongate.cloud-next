@@ -84,4 +84,14 @@ final class Store {
     function step(string $id, string $step, array $data): void {
         $this->run('INSERT INTO steps VALUES(?,?,?,?,?)', [bin2hex(random_bytes(16)),$id,time(),$step,json($data)]);
     }
+    function resolve(string $id,array $result): void {
+        if (!in_array($result['status'],['succeeded','failed'])) { return; }
+        $this->db->beginTransaction();
+        try {
+            $n=$this->run("UPDATE jobs SET status=?,result=? WHERE id=? AND status='uncertain'",[$result['status'],json($result),$id])->rowCount();
+            if (!$n) { throw new RuntimeException('Operation changed during recovery; inspect it again'); }
+            $this->run('DELETE FROM resource_locks WHERE operation=?',[$id]);
+            $this->step($id,'operator-reconciled',$result); $this->db->commit();
+        } catch (Throwable $e) { $this->db->rollBack(); throw $e; }
+    }
 }

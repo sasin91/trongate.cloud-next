@@ -9,6 +9,9 @@ final class DeployRs implements HostDeployer {
         return json(['hostname'=>$settings['hostname'],'system'=>$settings['system'],'address'=>$server['host'],'port'=>$server['port'],'user'=>$server['user']]);
     }
     function inspect(array $server): array { return $this->ssh->runtime($server,['action'=>'host-inspect']); }
+    function reconcile(array $server,array $deployment): array {
+        return $this->ssh->runtime($server,['action'=>'host-reconcile','operation'=>$deployment['operation'],'workers_stopped'=>$deployment['workers_stopped'] ?? false]);
+    }
     function deploy(array $server,array $deployment,callable $heartbeat): array {
         $revision=Validate::match($deployment['revision'],'/^[a-f0-9]{64}$/D','revision');
         $dir=state_dir().'/revisions/'.$revision;

@@ -298,7 +298,7 @@ class Runtime:
         operation = self.match(req['operation'], r'[a-f0-9]{32}')
         journal_path = self.root/'operations'/('host-'+operation+'.json')
         terminal = self.read(journal_path)
-        if terminal and terminal.get('status') == 'succeeded':
+        if terminal and terminal.get('status') in ('succeeded', 'failed'):
             observed = self.host_inspect()
             if observed['generation'] == terminal['generation'] and observed['services_healthy']:
                 return terminal
@@ -307,6 +307,28 @@ class Runtime:
         reservation = self.read(reservation_path)
         if reservation and reservation['operation'] != operation:
             return {'status': 'uncertain', 'reason': 'host reserved by another operation'}
+        if action == 'host-reconcile':
+            if not reservation or req.get('workers_stopped') is not True:
+                return {'status': 'uncertain', 'reason': 'stop all workers before explicit host recovery'}
+            for process in Path('/proc').glob('[0-9]*/cmdline'):
+                try:
+                    command = process.read_bytes()
+                except OSError:
+                    continue
+                if b'activate-rs' in command or b'/bin/switch-to-configuration' in command:
+                    return {'status': 'uncertain', 'reason': 'remote activation process still exists'}
+            observed = self.host_inspect()
+            if not observed['services_healthy']:
+                return {'status': 'uncertain', **observed}
+            if observed['generation'] == reservation.get('expected'):
+                result = {'status': 'succeeded', **observed}
+            elif observed['generation'] == reservation['previous_generation']:
+                result = {'status': 'failed', 'restored_generation': observed['generation'], **observed}
+            else:
+                return {'status': 'uncertain', **observed}
+            self.write(journal_path, result)
+            reservation_path.unlink()
+            return result
         if action == 'host-begin':
             if reservation:
                 return {'status': 'uncertain', 'reason': 'prior host activation requires reconciliation', **self.host_inspect()}
@@ -317,11 +339,15 @@ class Runtime:
                                          'expected': req.get('expected'), 'revision': req.get('revision')})
             return {'status': 'reserved', 'previous_generation': before}
         if action == 'host-rollback':
+            if reservation:
+                return {'status': 'uncertain', 'reason': 'interrupted rollback requires explicit reconciliation', **self.host_inspect()}
             generation = self.match(req['generation'], r'/nix/store/[a-z0-9]{32}-nixos-system-[A-Za-z0-9._-]+')
             # Rollback targets must be retained by this product, never arbitrary paths.
             if generation not in [os.path.realpath(p) for p in (self.root/'roots').iterdir()]:
                 raise ValueError('generation is not retained')
-            self.write(reservation_path, {'operation': operation, 'previous_generation': self.host_inspect()['generation']})
+            previous = self.host_inspect()['generation']
+            self.run(['nix-store', '--add-root', str(self.root/'roots'/operation), '--realise', previous])
+            self.write(reservation_path, {'operation': operation, 'previous_generation': previous, 'expected': generation})
             self.run(['nix-env', '--profile', '/nix/var/nix/profiles/system', '--set', generation])
             self.run([generation+'/bin/switch-to-configuration', 'switch'], 600)
             req['expected'] = generation

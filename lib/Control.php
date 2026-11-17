@@ -93,6 +93,12 @@ final class Control {
                 $job=$s->job($p['operation']);
                 if ($job['status']!=='uncertain') { throw new RuntimeException('Only uncertain operations can be reconciled'); }
                 $s->run("UPDATE jobs SET status='pending',attempts=0 WHERE id=? AND status='uncertain'",[$job['id']]); return $job['id'];
+            case 'host-reconcile':
+                $job=$s->job($p['operation']);
+                if (!in_array($job['kind'],['host-update','host-rollback']) || $job['status']!=='uncertain' || ($p['confirm_workers_stopped'] ?? false)!==true) { throw new RuntimeException('Stop all installation workers and explicitly confirm before recovering an uncertain host operation'); }
+                $payload=json_decode($job['payload'],true);
+                $result=(new DeployRs(new Ssh($s)))->reconcile($s->get('server',$payload['server']),['operation'=>$job['id'],'workers_stopped'=>true]);
+                $s->resolve($job['id'],$result); return $result;
             case 'operations':
                 return $s->run('SELECT id,resource,kind,status,attempts,created,result FROM jobs ORDER BY created DESC LIMIT 100')->fetchAll();
             case 'operation':

@@ -7,7 +7,7 @@ try {
     $command=$argv[1] ?? 'help';
     if ($command==='help') {
         echo "tc init | migrate | worker [--once] | COMMAND [payload.json|-]\n";
-        echo "Commands: credential, provider-connect, provider-options, server-scan, server-confirm, server-inspect, app-create, release, deploy, rollback, build, host-update, host-rollback, provision, provider-inspect, provider-reboot, provider-delete, provider-rescue, provider-poweroff, bootstrap-options, bootstrap-create, snapshot-create, snapshot-delete, reconcile, inventory, operations, operation\n"; exit;
+        echo "Commands: credential, provider-connect, provider-options, server-scan, server-confirm, server-inspect, app-create, release, deploy, rollback, build, host-update, host-rollback, host-reconcile, provision, provider-inspect, provider-reboot, provider-delete, provider-rescue, provider-poweroff, bootstrap-options, bootstrap-create, snapshot-create, snapshot-delete, reconcile, inventory, operations, operation\n"; exit;
     }
     $s=Store::open();
     if ($command==='init') {

@@ -97,6 +97,21 @@ An SSH interruption does not prove deploy-rs stopped. A repeated activation with
 an existing reservation stays uncertain instead of racing it. If the original
 finishes, its terminal journal lets reconciliation observe success.
 
+If the worker was lost before recording a terminal result, stop **all** installation
+workers first, including detached/manual workers, and use:
+
+```sh
+tc host-reconcile recovery.json
+# {"operation":"HOST OPERATION ID","confirm_workers_stopped":true}
+```
+
+The backend refuses recovery while a remote activation process exists. It compares
+the current healthy generation with the reserved intended and previous generations:
+intended becomes succeeded; verified previous becomes failed/restored; anything else
+remains uncertain. Only a verified terminal result releases the database/host fence.
+Restart workers after reconciliation. The explicit confirmation is an operator
+assertion that no old worker can resume a delayed activation.
+
 Failed reboots can require provider rescue/console access. Activation rollback
 cannot undo application data, migrations, external APIs, firmware or disk layout
 changes. This PoC performs live configuration activation, not unattended reboot

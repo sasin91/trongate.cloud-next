@@ -115,6 +115,21 @@ class RuntimeTests(unittest.TestCase):
         r.dispatch(dict(self.request(3), action='rollback'))
         self.assertEqual('keep me', data.read_text())
 
+    def test_host_recovery_requires_quiescence_and_observed_previous_generation(self):
+        r = self.runtime
+        before = '/nix/store/'+'a'*32+'-nixos-system-before'
+        expected = '/nix/store/'+'b'*32+'-nixos-system-after'
+        r.host_inspect = lambda: {'generation': before, 'services_healthy': True,
+                                 'reservation': r.read(r.root/'host-reservation.json')}
+        operation = f'{9:032x}'
+        self.assertEqual('reserved', r.dispatch({'action': 'host-begin', 'operation': operation, 'expected': expected})['status'])
+        self.assertEqual('uncertain', r.dispatch({'action': 'host-begin', 'operation': operation, 'expected': expected})['status'])
+        self.assertEqual('uncertain', r.dispatch({'action': 'host-reconcile', 'operation': operation})['status'])
+        restored = r.dispatch({'action': 'host-reconcile', 'operation': operation, 'workers_stopped': True})
+        self.assertEqual('failed', restored['status'])
+        self.assertEqual(before, restored['restored_generation'])
+        self.assertFalse((r.root/'host-reservation.json').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

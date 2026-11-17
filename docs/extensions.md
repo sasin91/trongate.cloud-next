@@ -17,7 +17,7 @@ new provider ID is not successful provisioning. Validate architecture/image/type
 compatibility using that provider's live catalog. New provider code does not own
 SSH, application rollout or Nix activation.
 
-To replace deploy-rs, implement `HostDeployer::deploy`, `inspect` and `rollback`
+To replace deploy-rs, implement `HostDeployer::deploy`, `inspect`, `rollback` and `reconcile`
 using the existing server inventory and frozen revision directory. Return our
 structured statuses, intended/observed store generation, prior generation and
 health findings. Preserve remote fencing and generation roots. Keep backend CLI
