@@ -11,19 +11,23 @@ handlers and views. Apps compose server onboarding, which composes provider
 selection; neither step navigates away from the app draft.
 
 Internal module methods use an underscore prefix, which Core rejects during URL
-dispatch. `public/index.php` additionally permits only the existing root/index
-controller entry points and narrowly matched module CSS/JS URLs. It passes those
-asset requests to Core using `ASSUMED_URL` and `SEGMENTS`; Core performs asset
-directory, extension and path checks. Arbitrary controller, PHP source and view
-URLs remain inaccessible. Existing query-string page URLs are preserved.
+dispatch. The front controller supplies the request URL and one-based segments
+to Core without a parallel route or asset allowlist. Public module pages call
+the console's shared session/CSRF gateway before rendering or processing commands.
+`/apps/create`, `/servers`, and `/deployments?operation=...` are normal Core routes;
+existing query-string page links remain compatible. A standard `error_pages`
+module handles missing routes. Core owns module asset directory, extension and
+path checks.
 
 Feature assets live alongside their modules and use Trongate's `_module` URL
-convention. Shared visual styles live in `console/css`. Standalone utility
-modules `app_flow`, `server_flow`, and `hetzner` contain launch planning, reviewed
-provider provisioning, and provider HTTP operations respectively. They do not
-extend Trongate. A small explicit loader map also makes these utilities available
-to CLI and worker processes. Infrastructure services such as the queue, encrypted
-store, SSH transport and host deployment backend remain in `lib`.
+convention. Shared visual styles live in `console/css`. Launch planning and build
+handoff are internal methods on `Apps`; provider configuration, pricing and
+provisioning are internal methods on `Providers`. These accept a store explicitly
+so workers and tests can call the same controller logic without an HTTP session.
+The bootstrap autoloader follows module folder/controller naming for CLI use;
+there is no per-utility registration map. Shared transport and infrastructure
+services (including `Hetzner`, the queue, encrypted store, SSH and deployment
+backends) remain ordinary classes in `lib`.
 
 ## Services
 

@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 class Console extends Trongate {
+    function _page(string $page): void {
+        $_GET['page']=$page;
+        $this->index();
+    }
     function index(): void {
         $store=Store::open(); $control=new Control($store); $message=null;
         $_SESSION['csrf'] ??= bin2hex(random_bytes(32));

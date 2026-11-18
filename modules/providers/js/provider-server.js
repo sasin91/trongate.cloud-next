@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const back = dialog.querySelector('[data-server-path-back]');
     let options, operation, timer;
     const request = async data => {
-        const response = await fetch('/?page=connect-server',{method:'POST',body:data,credentials:'same-origin'});
+        const response = await fetch('/servers',{method:'POST',body:data,credentials:'same-origin'});
         if (!(response.headers.get('content-type') || '').includes('application/json')) throw new Error('Request could not be verified. Your app draft is still here; sign in again in another tab if needed.');
         const result = await response.json();
         if (!response.ok || result.error) throw new Error(result.error || 'Provider request failed.');
@@ -78,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 const result = await request(new FormData(review)); operation = result.operation;
                 review.hidden = true; project.hidden = true; connect.closest('details').hidden = true; progress.hidden = false; back.hidden = true;
-                panel.querySelector('[data-provider-operation]').href = `/?page=deployment&operation=${encodeURIComponent(operation)}`;
+                panel.querySelector('[data-provider-operation]').href = `/deployments?operation=${encodeURIComponent(operation)}`;
                 await poll();
             }
         } catch (failure) { error.textContent = failure.message; error.hidden = false; }

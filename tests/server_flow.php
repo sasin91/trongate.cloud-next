@@ -22,36 +22,44 @@ final class ProviderFixture extends Http {
         throw new RuntimeException('Unexpected fixture request: '.$path);
     }
 }
+class ProviderModuleFixture extends Providers {
+    function _options(Store $store,string $id,Http $http=new Http): array {
+        return parent::_options($store,$id,$GLOBALS['http']);
+    }
+    function _connect_project(Store $store,string $id,string $token,Http $http=new Http): array {
+        return parent::_connect_project($store,$id,$token,$GLOBALS['http']);
+    }
+}
 function verify(bool $condition,string $message): void { if (!$condition) throw new LogicException($message); }
 $dir=sys_get_temp_dir().'/tc-provider-'.bin2hex(random_bytes(6)); mkdir($dir); putenv('TC_STATE='.$dir);
 file_put_contents($dir.'/key',Encryptor::generate_key());
-$s=new Store(new PDO('sqlite::memory:')); $s->migrate(); $http=new ProviderFixture; $flow=new Server_flow($s,$http);
+$s=new Store(new PDO('sqlite::memory:')); $s->migrate(); $http=new ProviderFixture; $flow=new ProviderModuleFixture;
 try {
-    $flow->connect('project','fixture-token');
+    $flow->_connect_project($s,'project','fixture-token');
     verify(!str_contains(json($s->all('provider')),'fixture-token'),'Provider token exposed');
     $input=['provider'=>'project','name'=>'web','server_type'=>'cax11','location'=>'nbg1','image'=>11,'ssh_key'=>7];
-    $quote=$flow->quote($input);
+    $quote=$flow->_quote($s,$input);
     verify($quote['monthly_net']==='6.49' && $quote['preparation_required'],'Incorrect price or preparation status');
-    try { $flow->create($quote['quote'],false); throw new LogicException('Missing consent accepted'); } catch (RuntimeException) {}
+    try { $flow->_create($s,$quote['quote'],false); throw new LogicException('Missing consent accepted'); } catch (RuntimeException) {}
     verify((int)$s->run('SELECT COUNT(*) FROM jobs')->fetchColumn()===0,'Unconfirmed creation queued');
-    $queued=$flow->create($quote['quote'],true);
-    verify($queued===$flow->create($quote['quote'],true),'Repeated request duplicated server');
+    $queued=$flow->_create($s,$quote['quote'],true);
+    verify($queued===$flow->_create($s,$quote['quote'],true),'Repeated request duplicated server');
     verify((int)$s->run('SELECT COUNT(*) FROM jobs')->fetchColumn()===1,'Duplicate creation job');
     $worker=new Worker($s,$http); $worker->once(); $worker->once();
     verify(count($http->writes)===1,'Provider server was created more than once');
     verify($http->writes[0]['labels']['tc-temporary']==='false','Application server marked temporary');
-    $status=$flow->status($queued['operation']);
+    $status=$flow->_status($s,$queued['operation']);
     verify($status['status']==='succeeded' && $status['host']==='192.0.2.99' && $status['provider_id']===99,'Enrollment handoff missing');
     $http->available=false;
-    try { $flow->quote($input); throw new LogicException('Unavailable type accepted'); } catch (RuntimeException) {}
+    try { $flow->_quote($s,$input); throw new LogicException('Unavailable type accepted'); } catch (RuntimeException) {}
     $http->available=true;
     $http->imageArchitecture='x86';
-    try { $flow->quote($input); throw new LogicException('Architecture mismatch accepted'); } catch (RuntimeException) {}
+    try { $flow->_quote($s,$input); throw new LogicException('Architecture mismatch accepted'); } catch (RuntimeException) {}
     $http->imageArchitecture='arm';
     try { (new Hetzner('fixture-token',$http))->create('fixture',$input); throw new LogicException('Implicit stock image accepted'); } catch (RuntimeException) {}
-    try { $flow->quote(array_replace($input,['ssh_key'=>8])); throw new LogicException('Unknown SSH key accepted'); } catch (RuntimeException) {}
-    $expired=$flow->quote($input); $record=$s->get('server-quote',$expired['quote']); $record['expires']=0; $s->put('server-quote',$expired['quote'],$record);
-    try { $flow->create($expired['quote'],true); throw new LogicException('Expired review accepted'); } catch (RuntimeException) {}
+    try { $flow->_quote($s,array_replace($input,['ssh_key'=>8])); throw new LogicException('Unknown SSH key accepted'); } catch (RuntimeException) {}
+    $expired=$flow->_quote($s,$input); $record=$s->get('server-quote',$expired['quote']); $record['expires']=0; $s->put('server-quote',$expired['quote'],$record);
+    try { $flow->_create($s,$expired['quote'],true); throw new LogicException('Expired review accepted'); } catch (RuntimeException) {}
     verify(count($http->writes)===1,'Invalid request mutated provider');
     echo "PASS: provider options, price review, confirmation, idempotent creation, worker polling, enrollment handoff\n";
 } finally { unlink($dir.'/key'); rmdir($dir); }

@@ -1,12 +1,14 @@
 <?php
 declare(strict_types=1);
 class Servers extends Trongate {
+    function confirm(): void { $this->console->_page('confirm-server'); }
+    function index(): void { $this->console->_page('connect-server'); }
     // Internal HMVC entry points: Core blocks underscore methods from URL dispatch.
     function _connect(Store $store, Control $control, string $command, bool $inline): void {
         $id=Validate::id($_POST['id'] ?? '');
         $created=[];
         if (!empty($_POST['provision_operation'])) {
-            $created=(new Server_flow($store))->status($_POST['provision_operation']);
+            $created=$this->providers->_status($store,$_POST['provision_operation']);
             if ($created['status']!=='succeeded') { throw new RuntimeException('Wait for server creation to finish.'); }
             if ($created['host']!==($_POST['host'] ?? '')) { throw new RuntimeException('Use the address returned by the provider.'); }
         }
@@ -17,7 +19,7 @@ class Servers extends Trongate {
         $_SESSION['enrollment']=$control->execute('server-scan',$server)+['id'=>$id,'host'=>$server['host']];
         if ($created) { $_SESSION['enrollment']+=['provider'=>$created['provider'],'provider_id'=>$created['provider_id']]; }
         if ($inline) { $this->console->_server_response($_SESSION['enrollment']); return; }
-        header('Location: /?page=confirm-server',true,303); exit;
+        header('Location: /servers/confirm',true,303); exit;
     }
     function _confirm(Store $store, Control $control, string $command, bool $inline): void {
         $pending=$_SESSION['enrollment'] ?? [];

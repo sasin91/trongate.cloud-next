@@ -1,14 +1,13 @@
 <?php
 declare(strict_types=1);
+require_once dirname(__DIR__).'/engine/Trongate.php';
 spl_autoload_register(function (string $class): void {
-    // Standalone Trongate utility modules are also shared by CLI/worker entry points.
-    $utilities=['App_flow'=>'app_flow','Server_flow'=>'server_flow','Hetzner'=>'hetzner'];
-    if (isset($utilities[$class])) {
-        require_once dirname(__DIR__).'/modules/'.$utilities[$class].'/'.$class.'.php';
-        return;
-    }
     if (preg_match('/^[A-Za-z_]+$/D', $class) && is_file(__DIR__ . "/$class.php")) {
         require_once __DIR__ . "/$class.php";
+    } elseif (preg_match('/^[A-Z][A-Za-z_]*$/D',$class)) {
+        // CLI and worker processes load the same conventional module controllers.
+        $path=dirname(__DIR__).'/modules/'.strtolower($class).'/'.$class.'.php';
+        if (is_file($path)) { require_once $path; }
     }
 });
 function state_dir(): string {

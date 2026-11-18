@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const status = document.getElementById('deployment-status');
         const poll = async () => {
             try {
-                const response = await fetch(`/?page=deployment&poll=1&operation=${encodeURIComponent(panel.dataset.operation)}`, {credentials:'same-origin'});
+                const response = await fetch(`/deployments?poll=1&operation=${encodeURIComponent(panel.dataset.operation)}`, {credentials:'same-origin'});
                 if (!response.ok) throw new Error(response.status === 401 ? 'Your session expired. Sign in again.' : 'Could not refresh. Reload to retry.');
                 const data = await response.json();
                 if (!data?.job) throw new Error('Operation not found.');
@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('uncertain-help').hidden = data.job.status !== 'uncertain';
                 if (result.deployment) {
                     const link = document.getElementById('next-deployment'); link.hidden = false;
-                    link.href = `/?page=deployment&operation=${encodeURIComponent(result.deployment)}`;
+                    link.href = `/deployments?operation=${encodeURIComponent(result.deployment)}`;
                 }
                 if (['pending','running'].includes(data.job.status)) setTimeout(poll, 2500);
             } catch (error) { document.getElementById('poll-message').textContent = error.message; }

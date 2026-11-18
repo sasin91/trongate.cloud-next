@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         note.textContent = server.preparation_required ? 'Server created. Prepare its application runtime using the instructions above, then connect with the private key matching the public key you selected.' : 'Server created from your prepared snapshot. Connect with the matching SSH private key to verify its identity and readiness.';
     });
     let opener;
-    document.querySelectorAll('[data-connect-server],a[href="/?page=connect-server"]').forEach(button => button.addEventListener('click', event => {
+    document.querySelectorAll('[data-connect-server],a[href="/servers"]').forEach(button => button.addEventListener('click', event => {
         event.preventDefault();
         opener = button;
         dialog.showModal();
@@ -45,7 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const label = button.textContent;
         button.disabled = true; button.textContent = 'Connecting…'; error.hidden = true;
         try {
-            const response = await fetch('/?page=connect-server', {method:'POST', body:new FormData(form), credentials:'same-origin'});
+            const response = await fetch('/servers', {method:'POST', body:new FormData(form), credentials:'same-origin'});
             if (!(response.headers.get('content-type') || '').includes('application/json')) {
                 throw new Error('The request could not be verified. Your app draft is still here; sign in again in another tab if your session expired.');
             }

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 class Authentication extends Trongate {
+    function index(): void { $this->console->_page('dashboard'); }
     function _login(Store $store): ?string {
         $name=substr((string)($_POST['name'] ?? ''),0,100);
         $rateId=hash('sha256',($_SERVER['REMOTE_ADDR'] ?? '').':'.$name);

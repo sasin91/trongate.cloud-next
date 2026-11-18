@@ -45,18 +45,24 @@ try {
         [$code,$body]=request(null,$asset);
         if ($code!==200 || strlen($body)<100 || str_contains($body,'Control plane unavailable')) { throw new RuntimeException('Module asset not served: '.$asset); }
     }
-    foreach (['/?page=new-app','/?page=connect-server','/?page=confirm-server','/?page=advanced','/'] as $route) {
+    foreach (['/apps/create','/apps','/servers','/servers/confirm','/providers','/authentication','/console/index','/?page=new-app','/?page=connect-server','/?page=confirm-server','/?page=advanced','/'] as $route) {
         [$code,$body]=request(null,$route);
         if ($code!==200 || str_contains($body,'Warning:') || str_contains($body,'Control plane unavailable')) { throw new RuntimeException('Module view failed: '.$route); }
     }
-    foreach (['/servers/_connect','/providers/_handle','/authentication/_logout','/app_flow/launch','/console/index','/servers_module/views/dialog.php','/providers_module/js/../../Providers.php','/servers_module/js/%2e%2e/Servers.php'] as $route) {
-        if (request(null,$route)[0]!==404) { throw new RuntimeException('Internal module path exposed: '.$route); }
+    foreach (['/servers/_connect','/providers/_handle','/providers/_quote','/apps/_plan_launch','/apps/_deploy_built','/authentication/_logout','/app_flow/launch','/servers_module/views/dialog.php','/providers_module/js/../../Providers.php','/servers_module/js/%2e%2e/Servers.php'] as $route) {
+        if (!in_array(request(null,$route)[0],[400,403,404],true)) { throw new RuntimeException('Internal module path exposed: '.$route); }
     }
     request(['command'=>'logout','csrf'=>$csrf]);
     [$code,$error]=request(['command'=>'connect-server','inline'=>'server','csrf'=>$csrf],'/?page=connect-server');
     // A destroyed session has a new CSRF token, so the request must fail before mutation.
     if ($code!==403) { throw new RuntimeException('Logged-out inline enrollment accepted'); }
     if (request(null,'/?page=deployment&poll=1&operation='.$id)[0]!==401) { throw new RuntimeException('Unauthenticated polling allowed'); }
+    [$code,$login]=request(null,'/apps/create');
+    if ($code!==200 || !str_contains($login,'Welcome back.') || str_contains($login,'Which app are we putting online?')) { throw new RuntimeException('Module route bypassed login'); }
+    preg_match('/name="csrf" value="([a-f0-9]+)"/',$login,$m);
+    [$code,$error]=request(['command'=>'create-provider-server','inline'=>'server','csrf'=>$m[1],'quote'=>'fixture','confirm_cost'=>'1'],'/providers');
+    if ($code!==401 || !isset(json_decode($error,true)['error'])) { throw new RuntimeException('Provider route bypassed authentication'); }
+    if (request(null,'/deployments?poll=1&operation='.$id)[0]!==401) { throw new RuntimeException('Module polling bypassed authentication'); }
     echo "HTTP login, CSRF and authenticated console passed\n";
 } finally {
     proc_terminate($proc); fclose($pipes[0]); proc_close($proc); unset($store);
