@@ -28,7 +28,7 @@ final class Worker {
             $result=json_decode($r['out'],true);
             if ($r['exit']!==0 || !is_array($result)) { throw new RuntimeException('Builder interrupted'); }
             if (($result['status'] ?? '')==='succeeded' && isset($p['launch'])) {
-                $result['deployment']=(new AppFlow($s))->deploy_built($id,$p['launch'],$result);
+                $result['deployment']=(new App_flow($s))->deploy_built($id,$p['launch'],$result);
             }
             return $result;
         }

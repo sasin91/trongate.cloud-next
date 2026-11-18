@@ -1,5 +1,32 @@
 # Operation boundaries and recovery
 
+## Trongate modules and routing
+
+The panel uses the bundled Trongate engine without modifying `engine/Core.php`.
+`console` owns the shared page shell and the authenticated request gateway.
+It checks session access and CSRF before invoking feature modules through
+Trongate's lazy module properties (`$this->servers`, `$this->apps`, etc.).
+`authentication`, `apps`, `servers`, `providers`, and `deployments` own their
+handlers and views. Apps compose server onboarding, which composes provider
+selection; neither step navigates away from the app draft.
+
+Internal module methods use an underscore prefix, which Core rejects during URL
+dispatch. `public/index.php` additionally permits only the existing root/index
+controller entry points and narrowly matched module CSS/JS URLs. It passes those
+asset requests to Core using `ASSUMED_URL` and `SEGMENTS`; Core performs asset
+directory, extension and path checks. Arbitrary controller, PHP source and view
+URLs remain inaccessible. Existing query-string page URLs are preserved.
+
+Feature assets live alongside their modules and use Trongate's `_module` URL
+convention. Shared visual styles live in `console/css`. Standalone utility
+modules `app_flow`, `server_flow`, and `hetzner` contain launch planning, reviewed
+provider provisioning, and provider HTTP operations respectively. They do not
+extend Trongate. A small explicit loader map also makes these utilities available
+to CLI and worker processes. Infrastructure services such as the queue, encrypted
+store, SSH transport and host deployment backend remain in `lib`.
+
+## Services
+
 `Control` validates operator intent and writes inventory/queue records.
 `Store` owns MariaDB state and SQL queue transitions. `Worker` orchestrates actual
 operations. `Hetzner` owns provider HTTP resources/actions. `Ssh` owns host identity,

@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /** Provider selection, reviewed provisioning and enrollment handoff for the app wizard. */
-final class ServerFlow {
+final class Server_flow {
     function __construct(private Store $store,private Http $http=new Http) {}
     function provider(string $id): Hetzner {
         $record=$this->store->get('provider',Validate::id($id));

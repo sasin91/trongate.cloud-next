@@ -4,7 +4,7 @@
 <p class="wz-hint">Use a separate, prepared application host. <a href="https://github.com/sasin91/trongate.cloud-next/blob/main/docs/self-hosting.md#prepared-linux-target" target="_blank" rel="noreferrer">Open preparation instructions ↗</a></p>
 <p data-server-error role="alert" hidden></p>
 <div data-server-choice class="wz-choices"><button type="button" class="wz-choice" data-choose-provider><span class="wz-key">A</span><span class="wz-choice-text"><strong>Create at a provider</strong><small>Choose a Hetzner project, region and server size</small></span></button><button type="button" class="wz-choice" data-choose-existing><span class="wz-key">B</span><span class="wz-choice-text"><strong>Connect an existing server</strong><small>Use SSH to connect a server you already have</small></span></button></div>
-<?php require __DIR__.'/provider_server.php'; ?>
+<?php $this->providers->_display('server',$viewData); ?>
 <form data-server-connect method="post" hidden><?= $csrf() ?><input type="hidden" name="inline" value="server"><input type="hidden" name="command" value="connect-server"><input type="hidden" name="provision_operation">
 <p data-created-server-note hidden></p>
 <label class="wz-field"><span class="wz-label">Server name</span><input class="wz-in" name="id" required pattern="[a-z][a-z0-9-]{0,39}" placeholder="web"></label>

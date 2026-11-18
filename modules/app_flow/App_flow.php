@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /** UI adapter for the original app wizard, backed by durable control-plane jobs. */
-final class AppFlow {
+final class App_flow {
     function __construct(private Store $store) {}
 
     static function repository(string $value): string {

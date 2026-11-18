@@ -25,7 +25,7 @@ final class ProviderFixture extends Http {
 function verify(bool $condition,string $message): void { if (!$condition) throw new LogicException($message); }
 $dir=sys_get_temp_dir().'/tc-provider-'.bin2hex(random_bytes(6)); mkdir($dir); putenv('TC_STATE='.$dir);
 file_put_contents($dir.'/key',Encryptor::generate_key());
-$s=new Store(new PDO('sqlite::memory:')); $s->migrate(); $http=new ProviderFixture; $flow=new ServerFlow($s,$http);
+$s=new Store(new PDO('sqlite::memory:')); $s->migrate(); $http=new ProviderFixture; $flow=new Server_flow($s,$http);
 try {
     $flow->connect('project','fixture-token');
     verify(!str_contains(json($s->all('provider')),'fixture-token'),'Provider token exposed');

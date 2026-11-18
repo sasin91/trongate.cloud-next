@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 spl_autoload_register(function (string $class): void {
+    // Standalone Trongate utility modules are also shared by CLI/worker entry points.
+    $utilities=['App_flow'=>'app_flow','Server_flow'=>'server_flow','Hetzner'=>'hetzner'];
+    if (isset($utilities[$class])) {
+        require_once dirname(__DIR__).'/modules/'.$utilities[$class].'/'.$class.'.php';
+        return;
+    }
     if (preg_match('/^[A-Za-z_]+$/D', $class) && is_file(__DIR__ . "/$class.php")) {
         require_once __DIR__ . "/$class.php";
     }

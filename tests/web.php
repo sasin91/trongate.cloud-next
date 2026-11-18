@@ -41,7 +41,17 @@ try {
     if ($code!==200 || !str_contains($page,'Deploy progress') || str_contains($page,'web-fixture-secret')) { throw new RuntimeException('Deployment view failed or exposed secret'); }
     [$code,$page]=request(null,'/?page=deployment&poll=1&operation='.$id);
     if ($code!==200 || json_decode($page,true)['job']['status']!=='pending' || str_contains($page,'web-fixture-secret')) { throw new RuntimeException('Deployment polling failed'); }
-    if (request(null,'/assets/flows.js')[0]!==200 || request(null,'/assets/wizard.css')[0]!==200) { throw new RuntimeException('Flow assets not served'); }
+    foreach (['/apps_module/js/flows.js','/console_module/css/wizard.css','/console_module/css/panel.css','/servers_module/js/server-dialog.js','/providers_module/js/provider-server.js','/deployments_module/js/progress.js','/deployments_module/css/deployments.css'] as $asset) {
+        [$code,$body]=request(null,$asset);
+        if ($code!==200 || strlen($body)<100 || str_contains($body,'Control plane unavailable')) { throw new RuntimeException('Module asset not served: '.$asset); }
+    }
+    foreach (['/?page=new-app','/?page=connect-server','/?page=confirm-server','/?page=advanced','/'] as $route) {
+        [$code,$body]=request(null,$route);
+        if ($code!==200 || str_contains($body,'Warning:') || str_contains($body,'Control plane unavailable')) { throw new RuntimeException('Module view failed: '.$route); }
+    }
+    foreach (['/servers/_connect','/providers/_handle','/authentication/_logout','/app_flow/launch','/console/index','/servers_module/views/dialog.php','/providers_module/js/../../Providers.php','/servers_module/js/%2e%2e/Servers.php'] as $route) {
+        if (request(null,$route)[0]!==404) { throw new RuntimeException('Internal module path exposed: '.$route); }
+    }
     request(['command'=>'logout','csrf'=>$csrf]);
     [$code,$error]=request(['command'=>'connect-server','inline'=>'server','csrf'=>$csrf],'/?page=connect-server');
     // A destroyed session has a new CSRF token, so the request must fail before mutation.

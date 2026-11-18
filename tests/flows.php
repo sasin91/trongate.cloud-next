@@ -3,7 +3,7 @@ require dirname(__DIR__).'/lib/bootstrap.php';
 $dir=sys_get_temp_dir().'/tc-flow-'.bin2hex(random_bytes(6)); mkdir($dir);
 putenv('TC_STATE='.$dir); putenv('TC_DSN=sqlite:'.$dir.'/db');
 file_put_contents($dir.'/key',Encryptor::generate_key());
-$s=Store::open(); $s->migrate(); $flow=new AppFlow($s);
+$s=Store::open(); $s->migrate(); $flow=new App_flow($s);
 function check(bool $ok,string $message): void { if (!$ok) { throw new RuntimeException($message); } }
 try {
     $s->put('server','web',['application_ready'=>true]);
@@ -27,7 +27,7 @@ try {
     $deployment=$flow->deploy_built('build-one',$launch,['image'=>'registry.example.com/demo@sha256:'.str_repeat('b',64)]);
     check($deployment===$flow->deploy_built('build-one',$launch,['image'=>'registry.example.com/demo@sha256:'.str_repeat('b',64)]),'Build retry created duplicate deployment');
     check((int)$s->run('SELECT COUNT(*) FROM jobs')->fetchColumn()===2,'Build handoff not idempotent');
-    check(AppFlow::repository('https://github.com/owner/repo.git')==='owner/repo','Repository URL conversion');
-    try { AppFlow::repository('https://evil.example/repo'); throw new LogicException('Foreign URL accepted'); } catch (RuntimeException) {}
+    check(App_flow::repository('https://github.com/owner/repo.git')==='owner/repo','Repository URL conversion');
+    try { App_flow::repository('https://evil.example/repo'); throw new LogicException('Foreign URL accepted'); } catch (RuntimeException) {}
     echo "PASS: launch, encrypted environment, invalid inputs, duplicate submission, build handoff\n";
 } finally { unset($flow,$s); foreach (glob($dir.'/*') as $file) { unlink($file); } rmdir($dir); }
