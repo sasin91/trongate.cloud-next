@@ -36,7 +36,7 @@ file_put_contents($dir.'/key',Encryptor::generate_key());
 $s=new Store(new PDO('sqlite::memory:')); $s->migrate(); $http=new ProviderFixture; $flow=new ProviderModuleFixture;
 try {
     $flow->_connect_project($s,'project','fixture-token');
-    verify(!str_contains(json($s->all('provider')),'fixture-token'),'Provider token exposed');
+    verify(!str_contains(tc_json($s->all('provider')),'fixture-token'),'Provider token exposed');
     $input=['provider'=>'project','name'=>'web','server_type'=>'cax11','location'=>'nbg1','image'=>11,'ssh_key'=>7];
     $quote=$flow->_quote($s,$input);
     verify($quote['monthly_net']==='6.49' && $quote['preparation_required'],'Incorrect price or preparation status');

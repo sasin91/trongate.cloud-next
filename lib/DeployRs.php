@@ -6,7 +6,7 @@ final class DeployRs implements HostDeployer {
         // JSON is imported as data, never interpolated as a Nix expression.
         Validate::server($server); Validate::id($settings['hostname']);
         if (!in_array($settings['system'],['x86_64-linux','aarch64-linux'],true)) { throw new RuntimeException('Unsupported system'); }
-        return json(['hostname'=>$settings['hostname'],'system'=>$settings['system'],'address'=>$server['host'],'port'=>$server['port'],'user'=>$server['user']]);
+        return tc_json(['hostname'=>$settings['hostname'],'system'=>$settings['system'],'address'=>$server['host'],'port'=>$server['port'],'user'=>$server['user']]);
     }
     function inspect(array $server): array { return $this->ssh->runtime($server,['action'=>'host-inspect']); }
     function reconcile(array $server,array $deployment): array {

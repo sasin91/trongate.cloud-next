@@ -74,7 +74,7 @@ in pkgs.testers.runNixOSTest {
     machine.succeed("TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc worker --once")
     assert cli("operation", {"operation": rollback})["job"]["status"] == "succeeded"
     machine.succeed("test $(cat /var/lib/tc/runtime/apps/demo/data/uploads/keep) = retained")
-    machine.wait_until_succeeds("curl -ksf --resolve demo.localhost:443:127.0.0.1 https://demo.localhost | grep 'immutable release'")
+    machine.wait_until_succeeds("curl -ksfL --resolve demo.localhost:443:127.0.0.1 https://demo.localhost | grep 'immutable release'")
     # Real host-key rotation must fail closed on the next normal CLI inspection.
     machine.succeed("rm /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub; ssh-keygen -t ed25519 -N \"\" -f /etc/ssh/ssh_host_ed25519_key; systemctl restart sshd")
     machine.fail("echo '{\"server\":\"web\"}' | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc server-inspect")
@@ -85,7 +85,7 @@ in pkgs.testers.runNixOSTest {
     control.succeed("printf '%s' '{\"name\":\"admin\",\"password\":\"disposable-test-password\"}' | sudo -u tc env TC_STATE=/var/lib/tc-control tc init")
     control.wait_for_unit("phpfpm-tc.service")
     control.wait_for_unit("caddy.service")
-    control.wait_until_succeeds("curl -ksf --resolve control.localhost:443:127.0.0.1 https://control.localhost/ | grep 'Sign in'")
+    control.wait_until_succeeds("curl -ksfL --resolve control.localhost:443:127.0.0.1 https://control.localhost/ | grep 'Sign in'")
     control.succeed("sudo -u tc env TC_STATE=/var/lib/tc-control tc inventory </dev/null")
     control.wait_for_unit("tc-worker.service")
   '';

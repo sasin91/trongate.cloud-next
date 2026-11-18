@@ -17,6 +17,31 @@ final class Store {
             if (trim($sql) !== '') { $this->db->exec($sql.($this->db->getAttribute(PDO::ATTR_DRIVER_NAME)==='mysql'?' ENGINE=InnoDB':'')); }
         }
         if ($this->db->getAttribute(PDO::ATTR_DRIVER_NAME)==='mysql' && $this->run("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('records','credentials','admins','jobs','resource_locks','steps') AND engine <> 'InnoDB'")->fetchColumn()>0) { throw new RuntimeException('All control-plane tables must use InnoDB'); }
+        $this->migrate_login();
+    }
+    function migrate_login(): void {
+        $mysql=$this->db->getAttribute(PDO::ATTR_DRIVER_NAME)==='mysql';
+        $id=$mysql?'INTEGER PRIMARY KEY AUTO_INCREMENT':'INTEGER PRIMARY KEY AUTOINCREMENT';
+        foreach ([
+            "trongate_user_levels (id INTEGER PRIMARY KEY, level_title VARCHAR(100) NOT NULL)",
+            "trongate_users (id $id, code VARCHAR(64) NOT NULL, user_level_id INTEGER NOT NULL)",
+            "trongate_administrators (id $id, username VARCHAR(100) NOT NULL UNIQUE, password VARCHAR(255) NOT NULL, trongate_user_id INTEGER NOT NULL UNIQUE)",
+            "trongate_tokens (id $id, token VARCHAR(64) NOT NULL UNIQUE, user_id INTEGER NOT NULL, expiry_date BIGINT NOT NULL, code VARCHAR(64))",
+            "login_attempts (id $id, target_table VARCHAR(100) NOT NULL, identifier VARCHAR(255) NOT NULL, ip_address VARCHAR(64) NOT NULL, attempted_at BIGINT NOT NULL)"
+        ] as $table) { $this->db->exec('CREATE TABLE IF NOT EXISTS '.$table.($mysql?' ENGINE=InnoDB':'')); }
+        $this->run("REPLACE INTO trongate_user_levels(id,level_title) VALUES(1,'Administrator')");
+        // Preserve existing hashes; repeated migrations never overwrite native login accounts.
+        foreach ($this->run('SELECT name,password FROM admins')->fetchAll() as $admin) {
+            $this->db->beginTransaction();
+            try {
+                if (!$this->run('SELECT id FROM trongate_administrators WHERE username=?',[$admin['name']])->fetchColumn()) {
+                    $this->run('INSERT INTO trongate_users(code,user_level_id) VALUES(?,1)',[bin2hex(random_bytes(16))]);
+                    $user=(int)$this->db->lastInsertId();
+                    $this->run('INSERT INTO trongate_administrators(username,password,trongate_user_id) VALUES(?,?,?)',[$admin['name'],$admin['password'],$user]);
+                }
+                $this->db->commit();
+            } catch (Throwable $e) { $this->db->rollBack(); throw $e; }
+        }
     }
     function get(string $kind, string $id): array {
         $row = $this->run('SELECT data FROM records WHERE kind=? AND id=?', [$kind,$id])->fetch();
@@ -25,7 +50,7 @@ final class Store {
     }
     function put(string $kind, string $id, array $data): void {
         // REPLACE is portable to MariaDB and SQLite; records have no dependent FKs.
-        $this->run('REPLACE INTO records(kind,id,data) VALUES(?,?,?)', [$kind,$id,json($data)]);
+        $this->run('REPLACE INTO records(kind,id,data) VALUES(?,?,?)', [$kind,$id,tc_json($data)]);
     }
     function all(string $kind): array {
         return array_map(fn($r) => ['id'=>$r['id']] + json_decode($r['data'], true), $this->run('SELECT id,data FROM records WHERE kind=? ORDER BY id', [$kind])->fetchAll());
@@ -42,7 +67,7 @@ final class Store {
     }
     function enqueue(string $kind, string $resource, array $payload): string {
         $id = bin2hex(random_bytes(16));
-        $this->run('INSERT INTO jobs(id,resource,kind,payload,status,created,result) VALUES(?,?,?,?,?,?,?)', [$id,$resource,$kind,json($payload),'pending',(int)(microtime(true)*1000000),'{}']);
+        $this->run('INSERT INTO jobs(id,resource,kind,payload,status,created,result) VALUES(?,?,?,?,?,?,?)', [$id,$resource,$kind,tc_json($payload),'pending',(int)(microtime(true)*1000000),'{}']);
         return $id;
     }
     function claim(string $owner): ?array {
@@ -76,20 +101,20 @@ final class Store {
     function finish(string $id, string $owner, string $status, array $result): void {
         $this->db->beginTransaction();
         try {
-            $n = $this->run("UPDATE jobs SET status=?,result=?,lease=0 WHERE id=? AND owner=? AND status='running'", [$status,json($result),$id,$owner])->rowCount();
+            $n = $this->run("UPDATE jobs SET status=?,result=?,lease=0 WHERE id=? AND owner=? AND status='running'", [$status,tc_json($result),$id,$owner])->rowCount();
             if (!$n) { throw new RuntimeException('Worker lease lost'); }
             if (in_array($status,['succeeded','failed'])) { $this->run('DELETE FROM resource_locks WHERE operation=?', [$id]); }
             $this->db->commit();
         } catch (Throwable $e) { $this->db->rollBack(); throw $e; }
     }
     function step(string $id, string $step, array $data): void {
-        $this->run('INSERT INTO steps VALUES(?,?,?,?,?)', [bin2hex(random_bytes(16)),$id,time(),$step,json($data)]);
+        $this->run('INSERT INTO steps VALUES(?,?,?,?,?)', [bin2hex(random_bytes(16)),$id,time(),$step,tc_json($data)]);
     }
     function resolve(string $id,array $result): void {
         if (!in_array($result['status'],['succeeded','failed'])) { return; }
         $this->db->beginTransaction();
         try {
-            $n=$this->run("UPDATE jobs SET status=?,result=? WHERE id=? AND status='uncertain'",[$result['status'],json($result),$id])->rowCount();
+            $n=$this->run("UPDATE jobs SET status=?,result=? WHERE id=? AND status='uncertain'",[$result['status'],tc_json($result),$id])->rowCount();
             if (!$n) { throw new RuntimeException('Operation changed during recovery; inspect it again'); }
             $this->run('DELETE FROM resource_locks WHERE operation=?',[$id]);
             $this->step($id,'operator-reconciled',$result); $this->db->commit();

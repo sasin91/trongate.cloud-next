@@ -16,7 +16,7 @@ try {
     $release=$s->get('release',$payload['release'])['spec'];
     check($release['mounts']['data-0']==='/app/public/uploads','Mount was not mapped');
     check($s->secret($release['secrets']['DB_PASSWORD'])==='fixture-private-value','Encrypted environment missing');
-    check(!str_contains(json($s->all('release')),'fixture-private-value'),'Secret leaked to release metadata');
+    check(!str_contains(tc_json($s->all('release')),'fixture-private-value'),'Secret leaked to release metadata');
     foreach ([array_replace($p,['label'=>'bad','server'=>'unready']),array_replace($p,['label'=>'bad','environment'=>'INVALID']),array_replace($p,['label'=>'demo'])] as $invalid) {
         try { $flow->_plan_launch($s,$invalid,bin2hex(random_bytes(4))); throw new LogicException('Invalid launch accepted'); }
         catch (RuntimeException) {}

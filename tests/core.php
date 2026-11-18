@@ -106,7 +106,7 @@ class BackendProcess extends Process {
         $this->calls[]=$argv;
         if ($argv[0]==='ssh') {
             $request=json_decode($input,true);
-            return ['exit'=>0,'out'=>json(['status'=>$request['action']==='host-begin'?'reserved':'succeeded','generation'=>$request['expected'] ?? '/nix/store/observed']),'err'=>''];
+            return ['exit'=>0,'out'=>tc_json(['status'=>$request['action']==='host-begin'?'reserved':'succeeded','generation'=>$request['expected'] ?? '/nix/store/observed']),'err'=>''];
         }
         return ['exit'=>0,'out'=>'activation completed','err'=>''];
     }

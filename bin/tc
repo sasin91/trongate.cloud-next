@@ -17,6 +17,8 @@ try {
         $p=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
         if (strlen($p['password'])<14) { throw new RuntimeException('Administrator password must be at least 14 characters'); }
         $s->run('REPLACE INTO admins(name,password) VALUES(?,?)',[$p['name'],password_hash($p['password'],PASSWORD_DEFAULT)]);
+        $s->migrate_login();
+        $s->run('UPDATE trongate_administrators SET password=? WHERE username=?',[$s->run('SELECT password FROM admins WHERE name=?',[$p['name']])->fetchColumn(),$p['name']]);
         echo "Installation initialized. Back up the key and database together.\n"; exit;
     }
     // Local CLI authorization is OS access to installation key and database.

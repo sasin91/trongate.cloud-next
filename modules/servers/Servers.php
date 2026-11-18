@@ -1,8 +1,33 @@
 <?php
 declare(strict_types=1);
 class Servers extends Trongate {
-    function confirm(): void { $this->console->_page('confirm-server'); }
-    function index(): void { $this->console->_page('connect-server'); }
+    function index(): void {
+        $this->trongate_security->make_sure_allowed();
+        if ($_SERVER['REQUEST_METHOD']==='POST') { $this->action(); return; }
+        $this->templates->_render('servers','connect','connect-server');
+    }
+    function confirm(): void {
+        $this->trongate_security->make_sure_allowed();
+        if ($_SERVER['REQUEST_METHOD']==='POST') { $this->action(); return; }
+        $this->templates->_render('servers','confirm','confirm-server');
+    }
+    function action(): void {
+        $this->trongate_security->make_sure_allowed(); $this->trongate_security->_csrf();
+        $store=Store::open(); $control=new Control($store); $inline=($_POST['inline'] ?? '')==='server';
+        $command=(string)($_POST['command'] ?? '');
+        try {
+            match($command) {
+                'connect-server'=>$this->_connect($store,$control,$command,$inline),
+                'confirm-server'=>$this->_confirm($store,$control,$command,$inline),
+                'inspect-connected-server'=>$this->_inspect($store,$control,$command,$inline),
+                default=>throw new RuntimeException('Unknown server action')
+            };
+        } catch (Throwable $e) {
+            $message=$e instanceof RuntimeException?$e->getMessage():'Invalid input';
+            if ($inline) { $this->trongate_security->_json(['error'=>$message],422); }
+            else { $this->templates->_render('servers','confirm','confirm-server',['message'=>$message]); }
+        }
+    }
     // Internal HMVC entry points: Core blocks underscore methods from URL dispatch.
     function _connect(Store $store, Control $control, string $command, bool $inline): void {
         $id=Validate::id($_POST['id'] ?? '');
@@ -18,7 +43,7 @@ class Servers extends Trongate {
         $store->secret($server['credential'],$_POST['private_key']);
         $_SESSION['enrollment']=$control->execute('server-scan',$server)+['id'=>$id,'host'=>$server['host']];
         if ($created) { $_SESSION['enrollment']+=['provider'=>$created['provider'],'provider_id'=>$created['provider_id']]; }
-        if ($inline) { $this->console->_server_response($_SESSION['enrollment']); return; }
+        if ($inline) { $this->trongate_security->_json($_SESSION['enrollment']); return; }
         header('Location: /servers/confirm',true,303); exit;
     }
     function _confirm(Store $store, Control $control, string $command, bool $inline): void {
@@ -27,13 +52,13 @@ class Servers extends Trongate {
         $confirmation=['id'=>$pending['id'] ?? '', 'enrollment'=>$pending['enrollment'] ?? '', 'fingerprint'=>trim($_POST['fingerprint'] ?? '')];
         if (isset($pending['provider_id'])) { $confirmation+=['provider'=>$pending['provider'],'provider_id'=>$pending['provider_id']]; }
         $result=$control->execute('server-confirm',$confirmation);
-        if ($inline) { unset($_SESSION['enrollment']); $this->console->_server_response($result+['host'=>$pending['host']]); return; }
+        if ($inline) { unset($_SESSION['enrollment']); $this->trongate_security->_json($result+['host'=>$pending['host']]); return; }
         unset($_SESSION['enrollment']); header('Location: /',true,303); exit;
     }
     function _inspect(Store $store, Control $control, string $command, bool $inline): void {
         $id=Validate::id($_POST['server'] ?? '');
         $result=$control->execute('server-inspect',['server'=>$id]);
-        $this->console->_server_response($result+['id'=>$id,'host'=>$store->get('server',$id)['host']]); return;
+        $this->trongate_security->_json($result+['id'=>$id,'host'=>$store->get('server',$id)['host']]); return;
     }
     function _display(string $view, array $data): void {
         $data['viewData']=$data;

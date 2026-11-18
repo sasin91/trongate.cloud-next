@@ -121,3 +121,11 @@ cannot be reached using its restored SSH key.
 Do not copy a running application database's raw files as a backup. Coordinate its
 own consistent backup with persistent file snapshots. Code rollback cannot recover
 data corruption or an incompatible migration.
+
+## Upgrading to native Trongate login
+
+Back up the database, then run `tc migrate` using the new package before activating
+the updated panel. Existing administrator names and password hashes are imported
+into Trongate's login tables. Sign in again at `/login/login/1`; existing custom
+sessions are not reused. Re-running the migration preserves native accounts.
+`tc init` remains the explicit local password setup/reset command.

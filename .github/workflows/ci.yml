@@ -27,6 +27,12 @@ jobs:
       - run: find lib modules public bin tests -type f \( -name '*.php' -o -name tc \) -print0 | xargs -0 -n1 php -l
       - run: composer test
       - run: php tests/web.php
+      - run: php tests/web.php
+        name: Native login and module routes on MariaDB
+        env:
+          TC_WEB_MYSQL: mysql:host=127.0.0.1
+          TC_DB_USER: root
+          TC_DB_PASSWORD: test-only
       - run: php tests/flows.php
       - run: php tests/server_flow.php
       - run: python3 -m unittest discover -s tests -p '*_test.py' -v

@@ -7,3 +7,11 @@ command tests originate from sasin91/trongate.cloud at
 The onboarding wizard CSS, brand mark, deployment CSS and adapted question/progress
 flows also originate from the owner's local trongate.cloud project, reused at
 their explicit request. These remain subject to the same application license.
+
+The bundled Trongate Model/Modules classes, helpers, and login, token, database,
+form, validation, language, URL, string and flashdata modules were copied from
+the owner's local Trongate installation (repository HEAD
+d2a318687205f2ae2fbeb98036918730cea761bb). Local integration changes are documented
+in docs/architecture.md: the database connection, configured login view, session
+rotation/lifetime and CSRF-protected logout. See engine/LICENSE.txt for the
+framework license. Application-specific views retain the application license.

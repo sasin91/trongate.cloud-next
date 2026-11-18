@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const back = dialog.querySelector('[data-server-path-back]');
     let options, operation, timer;
     const request = async data => {
-        const response = await fetch('/servers',{method:'POST',body:data,credentials:'same-origin'});
+        const response = await fetch('/providers/action',{method:'POST',body:data,credentials:'same-origin'});
         if (!(response.headers.get('content-type') || '').includes('application/json')) throw new Error('Request could not be verified. Your app draft is still here; sign in again in another tab if needed.');
         const result = await response.json();
         if (!response.ok || result.error) throw new Error(result.error || 'Provider request failed.');
@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(timer);
         if (!operation) return;
         try {
-            const data = new FormData(); data.set('csrf',project.elements.csrf.value); data.set('inline','server'); data.set('command','provider-server-status'); data.set('operation',operation);
+            const data = new FormData(); data.set('csrf_token',project.elements.csrf_token.value); data.set('inline','server'); data.set('command','provider-server-status'); data.set('operation',operation);
             const result = await request(data);
             panel.querySelector('[data-provider-status]').textContent = result.message || `Server creation: ${result.status}`;
             if (result.status === 'succeeded') {

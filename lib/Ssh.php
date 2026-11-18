@@ -46,7 +46,7 @@ SH;
         return ['facts'=>$facts,'missing'=>$missing,'application_ready'=>$missing===[], 'managed_eligible'=>($facts['os'] ?? '')==='nixos' && ($facts['nix'] ?? '')==='yes' && ($facts['privileged'] ?? '')==='yes','inspected_at'=>time(),'connected_at'=>time()];
     }
     function runtime(array $server, array $request, ?callable $heartbeat=null): array {
-        $r=$this->command($server,'tc-runtime',json($request),1800,$heartbeat);
+        $r=$this->command($server,'tc-runtime',tc_json($request),1800,$heartbeat);
         $data=json_decode($r['out'],true);
         if ($r['exit']!==0 || !is_array($data)) { throw new RuntimeException('Remote operation interrupted; reconcile required'); }
         return $data;

@@ -24,7 +24,7 @@ final class Worker {
     function perform(array $job,callable $heartbeat): array {
         $s=$this->store; $p=json_decode($job['payload'],true,512,JSON_THROW_ON_ERROR); $id=$job['id']; $kind=$job['kind'];
         if ($kind==='build') {
-            $r=(new Ssh($s))->command($s->get('server',$p['builder']),'tc-build',json($p['plan']+['operation'=>$id]),3600,$heartbeat);
+            $r=(new Ssh($s))->command($s->get('server',$p['builder']),'tc-build',tc_json($p['plan']+['operation'=>$id]),3600,$heartbeat);
             $result=json_decode($r['out'],true);
             if ($r['exit']!==0 || !is_array($result)) { throw new RuntimeException('Builder interrupted'); }
             if (($result['status'] ?? '')==='succeeded' && isset($p['launch'])) {

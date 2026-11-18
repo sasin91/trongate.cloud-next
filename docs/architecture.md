@@ -2,32 +2,37 @@
 
 ## Trongate modules and routing
 
-The panel uses the bundled Trongate engine without modifying `engine/Core.php`.
-`console` owns the shared page shell and the authenticated request gateway.
-It checks session access and CSRF before invoking feature modules through
-Trongate's lazy module properties (`$this->servers`, `$this->apps`, etc.).
-`authentication`, `apps`, `servers`, `providers`, and `deployments` own their
-handlers and views. Apps compose server onboarding, which composes provider
-selection; neither step navigates away from the app draft.
+Core routes directly to `apps`, `servers`, `providers`, `deployments`, and
+`operations`. Each public feature entry point calls
+`$this->trongate_security->make_sure_allowed()` before handling its own request.
+There is no console command dispatcher or custom authentication module.
+`templates` composes the shared layout and module-owned views. Server onboarding
+remains inline inside the app wizard, with provider selection composed inside it.
 
-Internal module methods use an underscore prefix, which Core rejects during URL
-dispatch. The front controller supplies the request URL and one-based segments
-to Core without a parallel route or asset allowlist. Public module pages call
-the console's shared session/CSRF gateway before rendering or processing commands.
-`/apps/create`, `/servers`, and `/deployments?operation=...` are normal Core routes;
-existing query-string page links remain compatible. A standard `error_pages`
-module handles missing routes. Core owns module asset directory, extension and
-path checks.
+The `login`, `trongate_tokens`, form, validation and supporting framework modules
+come from the existing Trongate installation. `login/config/login.php` maps the
+administrator level to `trongate_administrators`. Native password validation,
+rate limiting and token issuance handle sign-in; the application security scenario
+requires level 1 and validates `csrf_token` for mutations. Login uses the native
+validation CSRF check. Logout requires POST and CSRF. Remember-me and password
+reset are disabled for this installation. Sessions rotate on login and tokens
+retain the previous one-hour lifetime.
 
-Feature assets live alongside their modules and use Trongate's `_module` URL
-convention. Shared visual styles live in `console/css`. Launch planning and build
-handoff are internal methods on `Apps`; provider configuration, pricing and
-provisioning are internal methods on `Providers`. These accept a store explicitly
-so workers and tests can call the same controller logic without an HTTP session.
-The bootstrap autoloader follows module folder/controller naming for CLI use;
-there is no per-utility registration map. Shared transport and infrastructure
-services (including `Hetzner`, the queue, encrypted store, SSH and deployment
-backends) remain ordinary classes in `lib`.
+`tc migrate` creates the native login tables and copies legacy administrator
+password hashes once per username. Repeated migrations do not overwrite native
+accounts; `tc init` remains the explicit local administrator password setup path.
+Old custom sessions no longer authorize requests. Migration is additive, so the
+legacy tables remain available for rollback. Back up the database before upgrading.
+
+The native `Db` module uses the control plane's configured PDO connection; its
+table-existence check also supports SQLite test fixtures. Other framework code
+is kept in the bundled engine/modules. The local JSON serialization helper is
+named `tc_json` to avoid shadowing Trongate's `json()` response helper.
+
+Internal methods use the underscore convention enforced by Core. Feature assets
+use normal `_module` URLs and Core's asset checks. Shared styles live in
+`templates/css`. Launch and provider flow logic lives in the owning controllers;
+queue, transport, encryption and deployment infrastructure stays in `lib`.
 
 ## Services
 

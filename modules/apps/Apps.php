@@ -1,8 +1,20 @@
 <?php
 declare(strict_types=1);
 class Apps extends Trongate {
-    function index(): void { $this->console->_page('dashboard'); }
-    function create(): void { $this->console->_page('new-app'); }
+    function index(): void {
+        $this->trongate_security->make_sure_allowed();
+        $this->templates->_render('apps','dashboard','dashboard');
+    }
+    function create(): void {
+        $this->trongate_security->make_sure_allowed();
+        $_SESSION['launch_request'] ??= bin2hex(random_bytes(16));
+        $message=null;
+        if ($_SERVER['REQUEST_METHOD']==='POST') {
+            try { $store=Store::open(); $this->_launch($store,new Control($store),'launch-app',false); }
+            catch (Throwable $e) { $message=$e instanceof RuntimeException?$e->getMessage():'Invalid input'; }
+        } else { $_SESSION['launch_request']=bin2hex(random_bytes(16)); }
+        $this->templates->_render('apps','wizard','new-app',['message'=>$message]);
+    }
     // Internal HMVC entry points: Core blocks underscore methods from URL dispatch.
     function _launch(Store $store, Control $control, string $command, bool $inline): void {
         if (!hash_equals($_SESSION['launch_request'],(string)($_POST['request'] ?? ''))) { throw new RuntimeException('This launch form has expired. Reload and try again.'); }
@@ -63,7 +75,7 @@ class Apps extends Trongate {
         $s=$store; $s->db->beginTransaction();
         try {
             // Unique records reject concurrent submissions instead of replacing another app.
-            $s->run('INSERT INTO records(kind,id,data) VALUES(?,?,?)',['app',$id,json(['server'=>$server,'label'=>$id,'domain'=>$spec['domain'],'source'=>$source])]);
+            $s->run('INSERT INTO records(kind,id,data) VALUES(?,?,?)',['app',$id,tc_json(['server'=>$server,'label'=>$id,'domain'=>$spec['domain'],'source'=>$source])]);
             foreach ($environment as $name=>$value) {
                 $ref='env-'.substr(hash('sha256',$id.':'.$name),0,32);
                 $s->secret($ref,$value); $spec['secrets'][$name]=$ref;
@@ -74,7 +86,7 @@ class Apps extends Trongate {
                 $release=(new Control($s))->execute('release',['app'=>$id,'release'=>$spec]);
                 $operation=(new Control($s))->execute('deploy',['app'=>$id,'release'=>$release]);
             }
-            $s->run('INSERT INTO records(kind,id,data) VALUES(?,?,?)',['launch',$request,json(['operation'=>$operation])]);
+            $s->run('INSERT INTO records(kind,id,data) VALUES(?,?,?)',['launch',$request,tc_json(['operation'=>$operation])]);
             $s->db->commit(); return $operation;
         } catch (Throwable $e) {
             $s->db->rollBack();

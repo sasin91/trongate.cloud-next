@@ -46,7 +46,7 @@ final class Control {
                 $s->put('app',$id,['server'=>$server]); return $id;
             case 'release':
                 $app=Validate::id($p['app']); $s->get('app',$app);
-                $release=Validate::release($p['release']); $id=hash('sha256',json($release));
+                $release=Validate::release($p['release']); $id=hash('sha256',tc_json($release));
                 $s->put('release',$id,['app'=>$app,'spec'=>$release]); return $id;
             case 'deploy':
             case 'rollback':
