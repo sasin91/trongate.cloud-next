@@ -5,7 +5,7 @@ umask(0077);
 try {
     Encryptor::validate_key(installation_key());
     $p=json_decode(file_get_contents($argv[1]),true,512,JSON_THROW_ON_ERROR);
-    $server=Store::open()->get('server',$p['server']);
+    $server=(new Operations_model('operations'))->get('server',$p['server']);
     $data=DeployRs::configuration($server,$p);
     // Hardware module is trusted installation-administrator input, never web input.
     $hardware=file_get_contents($p['hardware_file']);

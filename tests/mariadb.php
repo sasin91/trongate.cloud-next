@@ -1,9 +1,9 @@
 <?php
 require dirname(__DIR__).'/lib/bootstrap.php';
 if (($argv[1] ?? '')==='claim-child') {
-    $job=Store::open()->claim(bin2hex(random_bytes(16))); echo $job ? $job['id'] : 'none'; exit;
+    $job=(new Operations_model('operations'))->claim(bin2hex(random_bytes(16))); echo $job ? $job['id'] : 'none'; exit;
 }
-$s=Store::open(); $s->migrate();
+$s=new Operations_model('operations'); (new Setup_model('setup',$s->connection()))->migrate();
 $id=$s->enqueue('deploy','server:test',[]); $job=$s->claim('test');
 if ($job['id']!==$id || $s->claim('other')!==null) { throw new RuntimeException('Claim isolation failed'); }
 $s->heartbeat($id,'test'); $s->finish($id,'test','succeeded',['verified'=>true]);

@@ -6,7 +6,9 @@
  * 
  * Security features include prepared statements and environment-aware error handling.
  */
+require_once __DIR__.'/traits/Database_connection.php';
 class Db extends Trongate {
+    use Database_connection;
 
     private $host;
     private $port;
@@ -62,7 +64,7 @@ class Db extends Trongate {
         // Determine environment mode
         $this->is_dev_mode = defined('ENV') && strtolower(ENV) === 'dev';
         
-        $this->dbh = Store::open()->db;
+        $this->dbh = self::_connect_database();
 
     }
 

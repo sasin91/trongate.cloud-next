@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 final class Ssh {
-    function __construct(private Store $store, private Process $process = new Process) {}
+    function __construct(private Model $store, private Process $process = new Process) {}
     function scan(array $server): array {
         $s=Validate::server($server);
         $r=$this->process->run(['ssh-keyscan','-T','10','-p',(string)$s['port'],'-t','ed25519',$s['host']]);

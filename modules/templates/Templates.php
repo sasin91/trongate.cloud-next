@@ -2,7 +2,7 @@
 class Templates extends Trongate {
     function _render(string $module,string $view,string $page,array $data=[]): void {
         $_SESSION['csrf_token'] ??= bin2hex(random_bytes(32));
-        $control=new Control(Store::open());
+        $control=new Control(new Operations_model('operations'));
         $data+=['page'=>$page,'operation'=>null,'signedIn'=>true,'message'=>null,
             'inventory'=>$control->execute('inventory',[]),'operations'=>$control->execute('operations',[])];
         $data['view_module']=$module; $data['view_file']=$view;

@@ -9,10 +9,10 @@ if ($mysqlDsn=getenv('TC_WEB_MYSQL')) {
     $mysqlAdmin->exec('CREATE DATABASE '.$testDatabase);
     putenv('TC_DSN='.$mysqlDsn.';dbname='.$testDatabase);
 }
-$store=Store::open(); $store->migrate(); $store->run('INSERT INTO admins VALUES(?,?)',['admin',password_hash('test-only-long-password',PASSWORD_DEFAULT)]);
-$store->migrate_login();
+$store=new Operations_model('operations'); (new Setup_model('setup',$store->connection()))->migrate(); $store->run('INSERT INTO admins VALUES(?,?)',['admin',password_hash('test-only-long-password',PASSWORD_DEFAULT)]);
+(new Login_model('login',$store->connection()))->_import_legacy_admins();
 $originalHash=$store->run('SELECT password FROM admins WHERE name=?',['admin'])->fetchColumn();
-$store->migrate_login();
+(new Login_model('login',$store->connection()))->_import_legacy_admins();
 if ($store->run('SELECT password FROM trongate_administrators WHERE username=?',['admin'])->fetchColumn()!==$originalHash || (int)$store->run('SELECT COUNT(*) FROM trongate_users')->fetchColumn()!==1) { throw new RuntimeException('Administrator migration changed credentials or duplicated users'); }
 file_put_contents($dir.'/key',Encryptor::generate_key());
 $proc=proc_open([PHP_BINARY,'-S','127.0.0.1:18781','-t',dirname(__DIR__).'/public',dirname(__DIR__).'/public/index.php'],[0=>['pipe','r'],1=>['file',$dir.'/server.log','w'],2=>['file',$dir.'/server.log','a']],$pipes);

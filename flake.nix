@@ -23,7 +23,7 @@
         nativeBuildInputs = [ pkgs.makeWrapper ];
         installPhase = ''
           mkdir -p $out/share/tc $out/bin
-          cp -r engine lib modules public bin db nix runtime flake.nix flake.lock $out/share/tc/
+          cp -r engine lib modules public bin nix runtime setup.sql flake.nix flake.lock $out/share/tc/
           makeWrapper ${pkgs.php84}/bin/php $out/bin/tc --add-flags "$out/share/tc/bin/tc" \
             --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.openssh pkgs.nix deploy-rs.packages.${system}.default pkgs.git ]}
         '';

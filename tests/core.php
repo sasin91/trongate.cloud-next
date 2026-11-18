@@ -1,7 +1,7 @@
 <?php
 require __DIR__.'/bootstrap.php';
 require dirname(__DIR__).'/lib/bootstrap.php';
-function database(): Store { $s=new Store(new PDO('sqlite::memory:')); $s->migrate(); return $s; }
+function database(): Operations_model { $s=new Operations_model('operations',new PDO('sqlite::memory:')); (new Setup_model('setup',$s->connection()))->migrate(); return $s; }
 test('queue claims atomically, fences conflicts, recovers same expired claim',function() {
     $s=database(); $a=$s->enqueue('deploy','server:a',[]); $b=$s->enqueue('deploy','server:a',[]);
     $claimed=$s->claim('worker-a'); assert_same($a,$claimed['id']); assert_same(null,$s->claim('worker-b'));

@@ -6,18 +6,11 @@
  * and password resets against configurable user tables.
  * Supports multiple user levels with independent configurations.
  */
+require_once dirname(__DIR__).'/db/traits/Database_access.php';
 class Login_model extends Model {
+    use Database_access;
 
     private array $full_config = [];
-
-    /**
-     * Constructor
-     *
-     * @param string|null $module_name The module name (auto-provided by framework)
-     */
-    public function __construct(?string $module_name = null) {
-        parent::__construct($module_name);
-    }
 
     // -----------------------------------------------------------------
     // Configuration
@@ -774,4 +767,18 @@ class Login_model extends Model {
         return '`' . preg_replace('/[^a-zA-Z0-9_]/', '', $id) . '`';
     }
 
+    function _import_legacy_admins(): void {
+        // Preserve existing hashes; repeated migrations never overwrite native login accounts.
+        foreach ($this->run('SELECT name,password FROM admins')->fetchAll() as $admin) {
+            $this->connection()->beginTransaction();
+            try {
+                if (!$this->run('SELECT id FROM trongate_administrators WHERE username=?',[$admin['name']])->fetchColumn()) {
+                    $this->run('INSERT INTO trongate_users(code,user_level_id) VALUES(?,1)',[bin2hex(random_bytes(16))]);
+                    $user=(int)$this->connection()->lastInsertId();
+                    $this->run('INSERT INTO trongate_administrators(username,password,trongate_user_id) VALUES(?,?,?)',[$admin['name'],$admin['password'],$user]);
+                }
+                $this->connection()->commit();
+            } catch (Throwable $e) { $this->connection()->rollBack(); throw $e; }
+        }
+    }
 }

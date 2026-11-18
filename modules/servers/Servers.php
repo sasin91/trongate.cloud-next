@@ -13,7 +13,7 @@ class Servers extends Trongate {
     }
     function action(): void {
         $this->trongate_security->make_sure_allowed(); $this->trongate_security->_csrf();
-        $store=Store::open(); $control=new Control($store); $inline=($_POST['inline'] ?? '')==='server';
+        $store=$this->model; $control=new Control($store); $inline=($_POST['inline'] ?? '')==='server';
         $command=(string)($_POST['command'] ?? '');
         try {
             match($command) {
@@ -29,11 +29,11 @@ class Servers extends Trongate {
         }
     }
     // Internal HMVC entry points: Core blocks underscore methods from URL dispatch.
-    function _connect(Store $store, Control $control, string $command, bool $inline): void {
+    function _connect(Model $store, Control $control, string $command, bool $inline): void {
         $id=Validate::id($_POST['id'] ?? '');
         $created=[];
         if (!empty($_POST['provision_operation'])) {
-            $created=$this->providers->_status($store,$_POST['provision_operation']);
+            $created=$this->providers->model->_status($_POST['provision_operation']);
             if ($created['status']!=='succeeded') { throw new RuntimeException('Wait for server creation to finish.'); }
             if ($created['host']!==($_POST['host'] ?? '')) { throw new RuntimeException('Use the address returned by the provider.'); }
         }
@@ -46,7 +46,7 @@ class Servers extends Trongate {
         if ($inline) { $this->trongate_security->_json($_SESSION['enrollment']); return; }
         header('Location: /servers/confirm',true,303); exit;
     }
-    function _confirm(Store $store, Control $control, string $command, bool $inline): void {
+    function _confirm(Model $store, Control $control, string $command, bool $inline): void {
         $pending=$_SESSION['enrollment'] ?? [];
         if ($inline && !hash_equals($pending['enrollment'] ?? '',(string)($_POST['enrollment'] ?? ''))) { throw new RuntimeException('This server confirmation expired. Connect again.'); }
         $confirmation=['id'=>$pending['id'] ?? '', 'enrollment'=>$pending['enrollment'] ?? '', 'fingerprint'=>trim($_POST['fingerprint'] ?? '')];
@@ -55,7 +55,7 @@ class Servers extends Trongate {
         if ($inline) { unset($_SESSION['enrollment']); $this->trongate_security->_json($result+['host'=>$pending['host']]); return; }
         unset($_SESSION['enrollment']); header('Location: /',true,303); exit;
     }
-    function _inspect(Store $store, Control $control, string $command, bool $inline): void {
+    function _inspect(Model $store, Control $control, string $command, bool $inline): void {
         $id=Validate::id($_POST['server'] ?? '');
         $result=$control->execute('server-inspect',['server'=>$id]);
         $this->trongate_security->_json($result+['id'=>$id,'host'=>$store->get('server',$id)['host']]); return;

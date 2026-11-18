@@ -2,7 +2,7 @@
 class Operations extends Trongate {
     function index(): void {
         $this->trongate_security->make_sure_allowed();
-        $control=new Control(Store::open()); $message=null;
+        $control=new Control($this->model); $message=null;
         if ($_SERVER['REQUEST_METHOD']==='POST') {
             try { $message=json_encode($control->execute((string)($_POST['command'] ?? ''),json_decode($_POST['payload'] ?? '{}',true,512,JSON_THROW_ON_ERROR)),JSON_PRETTY_PRINT|JSON_THROW_ON_ERROR); }
             catch (Throwable $e) { $message=$e instanceof RuntimeException?$e->getMessage():'Invalid input'; }

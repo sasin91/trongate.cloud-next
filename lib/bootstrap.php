@@ -7,8 +7,9 @@ spl_autoload_register(function (string $class): void {
     } elseif (preg_match('/^[A-Za-z_]+$/D', $class) && is_file(__DIR__ . "/$class.php")) {
         require_once __DIR__ . "/$class.php";
     } elseif (preg_match('/^[A-Z][A-Za-z_]*$/D',$class)) {
-        // CLI and worker processes load the same conventional module controllers.
-        $path=dirname(__DIR__).'/modules/'.strtolower($class).'/'.$class.'.php';
+        // CLI and worker processes load the same conventional module controllers and models.
+        $module=preg_replace('/_model$/','',strtolower($class));
+        $path=dirname(__DIR__).'/modules/'.$module.'/'.$class.'.php';
         if (is_file($path)) { require_once $path; }
     }
 });

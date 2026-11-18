@@ -31,13 +31,22 @@ named `tc_json` to avoid shadowing Trongate's `json()` response helper.
 
 Internal methods use the underscore convention enforced by Core. Feature assets
 use normal `_module` URLs and Core's asset checks. Shared styles live in
-`templates/css`. Launch and provider flow logic lives in the owning controllers;
-queue, transport, encryption and deployment infrastructure stays in `lib`.
+`templates/css`. Launch and provider flow logic lives in `Apps_model` and `Providers_model`,
+accessed through Trongate’s `$this->model`. Shared inventory, credential encryption
+and queue access use traits. `Operations_model` owns atomic queue transitions;
+queue delegation shares the calling model’s PDO connection so launch writes and
+job creation commit or roll back together. CLI and workers load the same models.
+Transport and deployment infrastructure stays in `lib`.
+
+The canonical MariaDB schema is root `setup.sql`; SQLite tests use
+`modules/setup/fixtures/setup.sqlite.sql`. The CLI-only `Setup_model` applies these
+SQL files and asks `Login_model` to import legacy administrator hashes. There is
+no browser setup controller or schema creation during ordinary requests.
 
 ## Services
 
 `Control` validates operator intent and writes inventory/queue records.
-`Store` owns MariaDB state and SQL queue transitions. `Worker` orchestrates actual
+Feature models own persistence. `Worker` orchestrates actual
 operations. `Hetzner` owns provider HTTP resources/actions. `Ssh` owns host identity,
 credential materialization and fixed remote entry points. `HostDeployer` is the
 only host-backend interface; `DeployRs` implements it. The small Python host helper

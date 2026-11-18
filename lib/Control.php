@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 final class Control {
-    function __construct(public Store $store) {}
+    function __construct(public Model $store) {}
     function execute(string $command,array $p): mixed {
         $s=$this->store;
         switch ($command) {
