@@ -1,5 +1,5 @@
 <?php
-require dirname(__DIR__).'/lib/bootstrap.php';
+require dirname(__DIR__).'/modules/operations/bootstrap.php';
 final class ProviderFixture extends Http {
     public array $writes=[];
     public bool $available=true;

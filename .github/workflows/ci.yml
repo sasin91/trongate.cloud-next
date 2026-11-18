@@ -24,7 +24,7 @@ jobs:
         with:
           php-version: '8.4'
           extensions: pdo_mysql, pdo_sqlite, sodium, curl
-      - run: find lib modules public bin tests -type f \( -name '*.php' -o -name tc \) -print0 | xargs -0 -n1 php -l
+      - run: find modules public bin tests -type f \( -name '*.php' -o -name tc \) -print0 | xargs -0 -n1 php -l
       - run: composer test
       - run: php tests/web.php
       - run: php tests/web.php

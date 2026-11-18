@@ -36,7 +36,10 @@ accessed through Trongate’s `$this->model`. Shared inventory, credential encrypt
 and queue access use traits. `Operations_model` owns atomic queue transitions;
 queue delegation shares the calling model’s PDO connection so launch writes and
 job creation commit or roll back together. CLI and workers load the same models.
-Transport and deployment infrastructure stays in `lib`.
+Supporting classes live under their owning modules in `services/`: app builds,
+provider HTTP, server SSH, deployment backends, security and operations. Shared
+web/CLI initialization lives in `modules/operations/bootstrap.php`. Service files
+are loaded explicitly and are not module controllers.
 
 The canonical MariaDB schema is root `setup.sql`; SQLite tests use
 `modules/setup/fixtures/setup.sqlite.sql`. The CLI-only `Setup_model` applies these

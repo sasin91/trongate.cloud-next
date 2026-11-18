@@ -1,5 +1,5 @@
 <?php
-require dirname(__DIR__).'/lib/bootstrap.php';
+require dirname(__DIR__).'/modules/operations/bootstrap.php';
 $dir=sys_get_temp_dir().'/tc-flow-'.bin2hex(random_bytes(6)); mkdir($dir);
 putenv('TC_STATE='.$dir); putenv('TC_DSN=sqlite:'.$dir.'/db');
 file_put_contents($dir.'/key',Encryptor::generate_key());

@@ -1,6 +1,6 @@
 <?php
 require __DIR__.'/bootstrap.php';
-require dirname(__DIR__).'/lib/bootstrap.php';
+require dirname(__DIR__).'/modules/operations/bootstrap.php';
 function database(): Operations_model { $s=new Operations_model('operations',new PDO('sqlite::memory:')); (new Setup_model('setup',$s->connection()))->migrate(); return $s; }
 test('queue claims atomically, fences conflicts, recovers same expired claim',function() {
     $s=database(); $a=$s->enqueue('deploy','server:a',[]); $b=$s->enqueue('deploy','server:a',[]);

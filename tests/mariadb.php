@@ -1,5 +1,5 @@
 <?php
-require dirname(__DIR__).'/lib/bootstrap.php';
+require dirname(__DIR__).'/modules/operations/bootstrap.php';
 if (($argv[1] ?? '')==='claim-child') {
     $job=(new Operations_model('operations'))->claim(bin2hex(random_bytes(16))); echo $job ? $job['id'] : 'none'; exit;
 }

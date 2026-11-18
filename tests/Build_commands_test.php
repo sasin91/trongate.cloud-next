@@ -9,7 +9,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 
-require_once dirname(__DIR__) . '/lib/Build_commands.php';
+require_once dirname(__DIR__) . '/modules/apps/services/Build_commands.php';
 
 $with_build = '{"scripts": {"build": "vite build"}}';
 
