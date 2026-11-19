@@ -6,8 +6,10 @@ Core routes directly to `apps`, `servers`, `providers`, `deployments`, and
 `operations`. Each public feature entry point calls
 `$this->trongate_security->make_sure_allowed()` before handling its own request.
 There is no console command dispatcher or custom authentication module.
-`templates` composes the shared layout and module-owned views. Server onboarding
-remains inline inside the app wizard, with provider selection composed inside it.
+`templates` composes the shared layout and module-owned views. Providers and servers have dedicated management pages. Server creation keeps
+its configuration, review and operation ID in the session. App setup saves an
+encrypted session draft before navigation and restores the current question
+when returning. Tokens and SSH private keys are never stored in localStorage.
 
 The `login`, `trongate_tokens`, form, validation and supporting framework modules
 come from the existing Trongate installation. `login/config/login.php` maps the

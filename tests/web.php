@@ -41,9 +41,21 @@ try {
     $store->put('server','web',['application_ready'=>true,'host'=>'192.0.2.10','managed_eligible'=>false,'missing'=>[]]);
     [$code,$page]=request(null,'/apps/create');
     if ($code!==200 || !str_contains($page,'Which app are we putting online?')) { throw new RuntimeException('Wizard missing'); }
-    if (!str_contains($page,'id="server-dialog"') || str_contains($page,'href="/?page=connect-server">Connect a server</a>')) { throw new RuntimeException('Wizard must enroll servers inline'); }
+    if (str_contains($page,'id="server-dialog"') || !str_contains($page,'href="/servers"')) { throw new RuntimeException('Wizard must link to server pages'); }
     preg_match('/name="request" value="([a-f0-9]+)"/',$page,$launch);
-    if (!str_contains($page,'Create at a provider') || !str_contains($page,'Connect an existing server')) { throw new RuntimeException('Server onboarding choices missing'); }
+    if (request(['csrf_token'=>'bad','label'=>'draft'],'/apps/draft')[0]!==403) { throw new RuntimeException('Draft bypassed CSRF'); }
+    [$code,$saved]=request(['csrf_token'=>$csrf,'source'=>'image','label'=>'saved-app','environment'=>'PASSWORD=draft-secret','wizard_step'=>'3'],'/apps/draft');
+    if ($code!==200 || !json_decode($saved,true)['saved']) { throw new RuntimeException('Draft not saved'); }
+    [$code,$page]=request(null,'/servers');
+    if (!str_contains($page,'Create at a provider') || !str_contains($page,'Connect an existing server')) { throw new RuntimeException('Server pages missing'); }
+    [$code,$page]=request(null,'/apps/create');
+    if (!str_contains($page,'saved-app') || !str_contains($page,'PASSWORD=draft-secret') || !str_contains($page,'data-step="3"') || !str_contains($page,$launch[1])) { throw new RuntimeException('App draft or launch identity lost'); }
+    $store->put('provider','test-provider',['type'=>'hetzner','label'=>'Test project','credential'=>'test-token']);
+    $store->secret('test-token','old-token');
+    [$code,$page]=request(null,'/providers');
+    if ($code!==200 || !str_contains($page,'Test project') || !str_contains($page,'Validate and update token') || str_contains($page,'old-token')) { throw new RuntimeException('Provider management missing or token exposed'); }
+    if (request(['csrf_token'=>'bad','command'=>'update-token','provider'=>'test-provider','token'=>'replacement'],'/providers')[0]!==403) { throw new RuntimeException('Token update bypassed CSRF'); }
+
     [$code,$error]=request(['command'=>'create-provider-server','inline'=>'server','csrf_token'=>$csrf,'quote'=>'unconfirmed'],'/providers/action');
     if ($code!==422) { throw new RuntimeException('Provider creation without cost confirmation accepted'); }
     [$code,$error]=request(['command'=>'connect-server','inline'=>'server','csrf_token'=>$csrf,'id'=>'new-server','host'=>'192.0.2.11','user'=>'root','port'=>22,'private_key'=>''],'/servers/action');
@@ -58,11 +70,11 @@ try {
     if ($code!==200 || !str_contains($page,'Deploy progress') || str_contains($page,'web-fixture-secret')) { throw new RuntimeException('Deployment view failed or exposed secret'); }
     [$code,$page]=request(null,'/deployments?poll=1&operation='.$id);
     if ($code!==200 || json_decode($page,true)['job']['status']!=='pending' || str_contains($page,'web-fixture-secret')) { throw new RuntimeException('Deployment polling failed'); }
-    foreach (['/apps_module/js/flows.js','/templates_module/css/wizard.css','/templates_module/css/panel.css','/servers_module/js/server-dialog.js','/providers_module/js/provider-server.js','/deployments_module/js/progress.js','/deployments_module/css/deployments.css'] as $asset) {
+    foreach (['/apps_module/js/flows.js','/templates_module/css/wizard.css','/templates_module/css/panel.css','/deployments_module/js/progress.js','/deployments_module/css/deployments.css'] as $asset) {
         [$code,$body]=request(null,$asset);
         if ($code!==200 || strlen($body)<100 || str_contains($body,'Control plane unavailable')) { throw new RuntimeException('Module asset not served: '.$asset); }
     }
-    foreach (['/apps/create','/apps','/servers','/servers/confirm','/providers','/operations','/'] as $route) {
+    foreach (['/apps/create','/apps','/servers','/servers/connect','/servers/create','/servers/confirm','/providers','/operations','/'] as $route) {
         [$code,$body]=request(null,$route);
         if ($code!==200 || str_contains($body,'Warning:') || str_contains($body,'Control plane unavailable')) { throw new RuntimeException('Module view failed: '.$route); }
     }

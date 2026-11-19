@@ -37,6 +37,19 @@ $s=new Operations_model('operations',new PDO('sqlite::memory:')); (new Setup_mod
 try {
     $flow->_connect_project('project','fixture-token');
     verify(!str_contains(tc_json($s->all('provider')),'fixture-token'),'Provider token exposed');
+    $named=$flow->_connect_project('Trongate.cloud Next','fixture-token');
+    verify($named['id']==='trongate-cloud-next','Project display name rejected');
+    verify($s->get('provider',$named['id'])['label']==='Trongate.cloud Next','Project display name lost');
+    $flow->_update_token('project','replacement-token',$http);
+    $ref=$s->get('provider','project')['credential'];
+    verify($s->secret($ref)==='replacement-token','Token not replaced');
+    $reject=new class extends Http {
+        function request(string $method,string $path,string $token,?array $body=null): array {
+            throw new RuntimeException('Rejected token');
+        }
+    };
+    try { $flow->_update_token('project','bad-token',$reject); throw new LogicException('Bad token accepted'); } catch (RuntimeException) {}
+    verify($s->secret($ref)==='replacement-token','Rejected token overwrote working credential');
     $input=['provider'=>'project','name'=>'web','server_type'=>'cax11','location'=>'nbg1','image'=>11,'ssh_key'=>7];
     $quote=$flow->_quote($input);
     verify($quote['monthly_net']==='6.49' && $quote['preparation_required'],'Incorrect price or preparation status');

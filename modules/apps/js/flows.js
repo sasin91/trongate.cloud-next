@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const all = [...form.querySelectorAll('.wz-step')];
         const next = form.querySelector('[data-next]');
         const back = form.querySelector('[data-back]');
-        let current = 0;
+        let current = Number(form.dataset.step) || 0;
         let steps = all;
         form.noValidate = true;
         form.classList.add('wz-js');
@@ -65,6 +65,20 @@ document.addEventListener('DOMContentLoaded', () => {
         back.addEventListener('click', () => show(current - 1));
         form.addEventListener('change', event => { if (event.target.name === 'source') applySource(); summary(); });
         form.addEventListener('input', summary);
+        document.querySelectorAll('a[href^="/"]').forEach(link => link.addEventListener('click', async event => {
+            if (event.ctrlKey || event.metaKey || event.shiftKey || link.target === '_blank') return;
+            event.preventDefault();
+            const data = new FormData(form);
+            data.set('wizard_step', String(current));
+            try {
+                const response = await fetch('/apps/draft', {method: 'POST', body: data, credentials: 'same-origin'});
+                const result = await response.json();
+                if (!response.ok || !result.saved) throw new Error(result.error || 'Could not save the app draft.');
+                window.location.assign(link.href);
+            } catch (error) {
+                window.alert(error.message);
+            }
+        }));
         applySource(); summary();
     }
 });
