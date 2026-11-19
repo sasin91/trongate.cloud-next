@@ -29,7 +29,9 @@ in pkgs.testers.runNixOSTest {
   nodes.control = { pkgs, ... }: {
     imports = [ self.nixosModules.control-plane ];
     services.trongate-cloud = { enable = true; domain = "control.localhost"; };
-    environment.systemPackages = [ pkgs.curl ];
+    environment.systemPackages = [ pkgs.curl pkgs.python3 ];
+    services.openssh.enable = true;
+    networking.extraHosts = "127.0.0.1 control.localhost";
     virtualisation.memorySize = 1024;
   };
   testScript = ''
@@ -87,6 +89,9 @@ in pkgs.testers.runNixOSTest {
     control.wait_for_unit("caddy.service")
     control.wait_until_succeeds("curl -ksfL --resolve control.localhost:443:127.0.0.1 https://control.localhost/ | grep 'Sign in'")
     control.succeed("sudo -u tc env TC_STATE=/var/lib/tc-control tc inventory </dev/null")
+    control.succeed("printf '%s' '{\"name\":\"admin\",\"password\":\"disposable-test-password\"}' > /run/scan-admin.json")
+    control.succeed("python3 ${./fpm_scan.py} --url https://control.localhost --credentials /run/scan-admin.json --insecure")
+
     control.wait_for_unit("tc-worker.service")
   '';
 }

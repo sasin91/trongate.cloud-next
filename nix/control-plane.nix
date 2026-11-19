@@ -1,6 +1,7 @@
 { config, lib, pkgs, ... }:
 let cfg = config.services.trongate-cloud;
     root = "${cfg.package}/share/tc";
+    commandPackages = [ pkgs.openssh pkgs.nix pkgs.git cfg.deployPackage ];
     environment = { TC_STATE = "/var/lib/tc-control"; TC_KEY_FILE = "/var/lib/tc-control/key"; TC_BASE_URL = "https://${cfg.domain}"; TC_DSN = cfg.databaseDsn; TC_DB_USER = "tc"; };
 in {
   options.services.trongate-cloud = {
@@ -31,6 +32,7 @@ in {
     };
     systemd.services.phpfpm-tc = lib.mkIf cfg.panel {
       inherit environment;
+      path = commandPackages;
       serviceConfig.EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
     };
     services.caddy = lib.mkIf cfg.panel {
@@ -47,7 +49,7 @@ in {
       wantedBy = [ "multi-user.target" ]; after = [ "network-online.target" "mysql.service" ];
       wants = [ "network-online.target" ];
       inherit environment;
-      path = [ pkgs.openssh pkgs.nix pkgs.git cfg.deployPackage ];
+      path = commandPackages;
       serviceConfig = {
         User = "tc"; Group = "tc"; UMask = "0077";
         ExecStart = "${cfg.package}/bin/tc worker"; Restart = "always"; RestartSec = 5;
