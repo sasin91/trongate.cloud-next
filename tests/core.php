@@ -95,6 +95,17 @@ test('SSH prerequisites are explicit and pinned identities are required',functio
     $server['host_key']='ssh-ed25519 '.base64_encode('fixture'); $r=$ssh->inspect($server);
     assert_same(false,$r['application_ready']); assert_same(false,$r['managed_eligible']); assert_same(true,in_array('podman',$r['missing']));
     assert_same(true,in_array('StrictHostKeyChecking=yes',$process->args));
+    $s->secret('key', "  -----BEGIN OPENSSH PRIVATE KEY-----\r\nfixture\r\n-----END OPENSSH PRIVATE KEY-----  ");
+    $ssh->with_credentials($server, function($opts, $temporary) {
+        assert_same("-----BEGIN OPENSSH PRIVATE KEY-----\nfixture\n-----END OPENSSH PRIVATE KEY-----\n", file_get_contents($temporary.'/identity'));
+    });
+    $failed = new class extends Process {
+        function run(array $argv, string $input = '', int $timeout = 60, ?callable $heartbeat = null, array $extra_env = []): array {
+            return ['exit'=>255, 'out'=>'', 'err'=>'Permission denied (publickey).'];
+        }
+    };
+    assert_throws(fn()=>(new Ssh($s,$failed))->inspect($server),'server rejected');
+
     unlink($dir.'/key'); rmdir($dir); putenv('TC_STATE');
 });
 test('build plan keeps source pinned and uses inherited command encoding',function() {

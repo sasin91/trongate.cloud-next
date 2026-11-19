@@ -20,7 +20,8 @@ final class Ssh {
         $dir = state_dir() . '/ssh-' . bin2hex(random_bytes(12));
         mkdir($dir, 0700);
         try {
-            file_put_contents($dir . '/identity', $this->store->secret($s['credential']));
+            $key = str_replace(["\r\n", "\r"], "\n", $this->store->secret($s['credential']));
+            file_put_contents($dir . '/identity', trim($key) . "\n");
             chmod($dir . '/identity', 0600);
             // HostKeyAlias makes IPv6/port handling independent from known_hosts syntax.
             file_put_contents($dir . '/known_hosts', 'tc-target ' . $s['host_key'] . "\n");
@@ -53,7 +54,16 @@ if test "$(tc-runtime --version 2>/dev/null)" = 1; then echo protocol=yes; fi
 SH;
         $r = $this->command($s, 'sh -s', $script);
         if ($r['exit'] !== 0) {
-            throw new RuntimeException('SSH inspection failed (identity, credentials or host unavailable)');
+            $error = strtolower($r['err']);
+            $message = match (true) {
+                str_contains($error, 'invalid format'), str_contains($error, 'error in libcrypto') => 'The SSH private key could not be read. Paste the complete private key, including its BEGIN and END lines.',
+                str_contains($error, 'permission denied') => 'The server rejected the SSH key. Check the SSH username and use the private key matching the public key installed on this server.',
+                str_contains($error, 'host key verification failed'), str_contains($error, 'remote host identification has changed') => 'The server SSH identity has changed. Reconnect the server to check its new identity.',
+                str_contains($error, 'connection refused') => 'The server refused the SSH connection. Check its SSH port and that SSH is running.',
+                str_contains($error, 'timed out'), str_contains($error, 'no route to host') => 'The SSH server could not be reached. Check its address, firewall, and SSH port.',
+                default => 'The server readiness check failed. Check SSH access and the application runtime.'
+            };
+            throw new RuntimeException($message);
         }
         $facts = [];
         foreach (explode("\n", trim($r['out'])) as $line) {
