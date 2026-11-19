@@ -10,6 +10,9 @@ const serverChoices = {
             image.status === 'available' && !image.deprecated && Number(image.disk_size || 0) <= Number(type.disk) &&
             (image.type === 'system' || (image.type === 'snapshot' && image.labels?.['tc-nixos'] === 'true'))) : [];
     },
+    suggestedSize(rows) {
+        return rows.find(type => type.name === 'cax11') || rows.find(type => Number(type.memory) >= 4) || rows[0];
+    },
     preferred(rows, saved, key, fallback) {
         return rows.find(row => String(row[key]) === String(saved)) || rows.find(fallback) || rows[0];
     }
@@ -31,7 +34,7 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
         const images = serverChoices.images(options, type);
         const previous = fields.image.value || saved.image;
         select(fields.image, images, 'id', image => `${image.description} · ${image.architecture}${image.type === 'snapshot' ? ' · Prepared runtime' : ''}`,
-            serverChoices.preferred(images, previous, 'id', image => image.type === 'snapshot'));
+            serverChoices.preferred(images, previous, 'id', image => image.id === (images.find(item => item.type === 'snapshot') || images.find(item => item.name === 'debian-12') || images[0])?.id));
         const price = type?.prices.find(p => p.location === fields.location.value);
         const ip = options.pricing.primary_ips.find(ip => ip.type === 'ipv4')?.prices.find(p => p.location === fields.location.value);
         form.querySelector('[data-size-summary]').textContent = type ? `${type.name.toUpperCase()} · ${type.cores} vCPU · ${type.memory} GB RAM · ${type.disk} GB disk · ${type.architecture}` : 'No sizes available in this region';
@@ -46,8 +49,8 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
         const previous = fields.server_type.value || saved.server_type;
         select(fields.server_type, sizes, 'name', type => {
             const price = type.prices.find(p => p.location === fields.location.value);
-            return `${type.name.toUpperCase()} · ${type.cores} vCPU / ${type.memory} GB · ${price.price_monthly.net} ${currency}/mo + IPv4${type.name === 'cax11' ? ' · Suggested' : ''}`;
-        }, serverChoices.preferred(sizes, previous, 'name', type => type.name === 'cax11'));
+            return `${type.name.toUpperCase()} · ${type.cores} vCPU / ${type.memory} GB · ${Number(price.price_monthly.net).toFixed(2)} ${currency}/mo + IPv4${type.name === 'cax11' ? ' · Suggested' : ''}`;
+        }, serverChoices.preferred(sizes, previous, 'name', type => type === serverChoices.suggestedSize(sizes)));
         updateImages();
     };
     const regions = options.locations.filter(location => serverChoices.sizes(options, location.name).length);

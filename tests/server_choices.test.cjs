@@ -18,3 +18,6 @@ assert.deepEqual(choices.sizes(options,'unavailable'),[]);
 assert.deepEqual(choices.images(options,sizes[0]).map(i=>i.id),[1,4]);
 assert.deepEqual(choices.images(options,undefined),[]);
 console.log('PASS: availability, defaults, saved choices, price ordering and image compatibility');
+
+assert.equal(choices.suggestedSize([size('small',true,'1',{memory:1}),size('medium',true,'2',{memory:4})]).name,'medium');
+assert.equal(choices.suggestedSize([size('small',true,'1',{memory:1}),size('cax11',true,'2',{memory:4})]).name,'cax11');
