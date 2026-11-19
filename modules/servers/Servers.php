@@ -15,6 +15,14 @@ class Servers extends Trongate {
             $this->action();
             return;
         }
+        if (isset($_GET['operation'])) {
+            $created = $this->providers->model->_status((string) $_GET['operation']);
+            if ($created['status'] !== 'succeeded') {
+                header('Location: /servers/provision?operation=' . rawurlencode($created['operation']), true, 303);
+                return;
+            }
+            $_SESSION['created_server'] = $created;
+        }
         if (isset($_SESSION['created_server'])) {
             $created = $_SESSION['created_server'];
             $_POST = ['id' => $created['name'], 'host' => $created['host'], 'provision_operation' => $created['operation']];
@@ -64,7 +72,9 @@ class Servers extends Trongate {
         $this->trongate_security->make_sure_allowed();
         $message = null;
         try {
-            $status = $this->providers->model->_status($_SESSION['server_operation'] ?? '');
+            unset($_SESSION['server_status']);
+            $status = $this->providers->model->_status((string) ($_GET['operation'] ?? $_SESSION['server_operation'] ?? ''));
+            $_SESSION['server_operation'] = $status['operation'];
             $_SESSION['server_status'] = $status;
             if ($status['status'] === 'succeeded') {
                 $_SESSION['created_server'] = $status;

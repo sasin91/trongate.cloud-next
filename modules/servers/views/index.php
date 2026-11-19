@@ -1,4 +1,5 @@
 <main class="panel"><h1>Servers</h1><p><a class="wz-ok" href="/servers/create">Create at a provider</a> <a class="wz-ok" href="/servers/connect">Connect an existing server</a></p>
 <?php if (isset($_SESSION['app_draft'])): ?><p><a href="/apps/create">Continue app setup</a></p><?php endif ?>
+<?php $this->servers->_display('pending', $viewData); ?>
 <?php foreach ($inventory['servers'] as $server): ?><section class="card"><h2><?= $e($server['id']) ?></h2><p><?= $e($server['host']) ?> / <?= $server['application_ready'] ? 'Ready for apps' : 'Runtime preparation required' ?></p><?php if (!$server['application_ready']): ?><p>Missing: <?= $e(implode(', ', $server['missing'] ?? [])) ?></p><form method="post" action="/servers/action"><?= $csrf() ?><input type="hidden" name="command" value="inspect-connected-server"><input type="hidden" name="server" value="<?= $e($server['id']) ?>"><button class="wz-ok">Recheck readiness</button></form><?php endif ?></section><?php endforeach ?>
 <?php if (isset($_SESSION['server_operation'])): ?><p><a href="/servers/provision">View server creation progress</a></p><?php endif ?></main>

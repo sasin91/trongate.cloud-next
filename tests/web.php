@@ -76,6 +76,22 @@ try {
     if ($code!==422 || !isset(json_decode($error,true)['error'])) { throw new RuntimeException('Inline errors must return JSON without navigating away'); }
     [$code,$error]=request(['command'=>'confirm-server','inline'=>'server','csrf_token'=>$csrf,'enrollment'=>'expired','fingerprint'=>'SHA256:fixture'],'/servers/action');
     if ($code!==422 || !str_contains(json_decode($error,true)['error'],'expired')) { throw new RuntimeException('Inline confirmation must reject stale enrollment'); }
+    $provision=$store->enqueue('provision','provider:test-provider',['name'=>'created-web','provider'=>'test-provider','image_kind'=>'snapshot']);
+    $store->put('provider-server','12345',['server'=>['id'=>12345,'public_net'=>['ipv4'=>['ip'=>'192.0.2.25']]]]);
+    $store->run('UPDATE jobs SET status=?,result=? WHERE id=?',['succeeded',tc_json(['provider_id'=>12345]),$provision]);
+    foreach (['/apps','/servers'] as $route) {
+        [$code,$page]=request(null,$route);
+        if ($code!==200 || !str_contains($page,'created-web') || !str_contains($page,'Finish connecting server') || !str_contains($page,'/servers/connect?operation='.$provision)) { throw new RuntimeException('Provisioned server missing from inventory page'); }
+    }
+    [$code,$page]=request(null,'/servers/connect?operation='.$provision);
+    if ($code!==200 || !str_contains($page,'value="192.0.2.25"') || !str_contains($page,'value="'.$provision.'"')) { throw new RuntimeException('Persisted server connection could not resume'); }
+    [$code,$page]=request(null,'/servers/provision?operation='.$provision);
+    if ($code!==200 || !str_contains($page,'192.0.2.25')) { throw new RuntimeException('Provision progress could not resume'); }
+    $store->put('server','created-web',['application_ready'=>true,'provider'=>'test-provider','provider_id'=>12345,'host'=>'192.0.2.25']);
+    $serversModel=new Servers_model('servers',$store->connection());
+    if ($serversModel->_pending_connections()!==[]) { throw new RuntimeException('Connected provider server listed twice'); }
+    unset($serversModel);
+    $store->run('DELETE FROM jobs WHERE id=?',[$provision]);
     $fields=['command'=>'launch-app','csrf_token'=>$csrf,'request'=>$launch[1],'source'=>'image','label'=>'web-demo','server'=>'web','domain'=>'demo.example.com','image'=>'registry.example.com/demo@sha256:'.str_repeat('a',64),'environment'=>'PASSWORD=web-fixture-secret'];
     if (request($fields,'/apps/create')[0]!==303 || request($fields,'/apps/create')[0]!==303) { throw new RuntimeException('Wizard launch or duplicate failed'); }
     if ((int)$store->run('SELECT COUNT(*) FROM jobs')->fetchColumn()!==1) { throw new RuntimeException('Repeated HTTP submission duplicated deployment'); }
@@ -115,4 +131,3 @@ try {
     foreach (glob($dir.'/*') as $f) { unlink($f); } rmdir($dir);
     if ($mysqlAdmin) { $mysqlAdmin->exec('DROP DATABASE '.$testDatabase); }
 }
-
