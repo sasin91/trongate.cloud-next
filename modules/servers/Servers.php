@@ -144,19 +144,15 @@ class Servers extends Trongate {
             $_SESSION['enrollment'] += ['provider' => $created['provider'], 'provider_id' => $created['provider_id']];
             $_SESSION['enrollment']['expected_os'] = 'nixos';
         }
-        if ($inline) {
-            $this->trongate_security->_json($_SESSION['enrollment']);
-            return;
-        }
-        header('Location: /servers/confirm', true, 303);
-        exit;
+        $_POST['enrollment'] = $_SESSION['enrollment']['enrollment'];
+        $this->_confirm($store, $control, 'confirm-server', $inline);
     }
     function _confirm(Model $store, Control $control, string $command, bool $inline): void {
         $pending = $_SESSION['enrollment'] ?? [];
         if ($inline && !hash_equals($pending['enrollment'] ?? '', (string)($_POST['enrollment'] ?? ''))) {
             throw new RuntimeException('This server confirmation expired. Connect again.');
         }
-        $confirmation = ['id' => $pending['id'] ?? '', 'enrollment' => $pending['enrollment'] ?? '', 'fingerprint' => trim($_POST['fingerprint'] ?? '')];
+        $confirmation = ['id' => $pending['id'] ?? '', 'enrollment' => $pending['enrollment'] ?? '', 'fingerprint' => $pending['fingerprint'] ?? ''];
         if (isset($pending['provider_id'])) {
             $confirmation += ['provider' => $pending['provider'], 'provider_id' => $pending['provider_id']];
         }
@@ -164,16 +160,19 @@ class Servers extends Trongate {
             $confirmation['expected_os'] = $pending['expected_os'];
         }
         $result = $control->execute('server-confirm', $confirmation);
+        $this->apps->_restore_draft();
+        $destination = '/servers';
+        if ($result['application_ready'] && isset($_SESSION['app_draft'])) {
+            $_SESSION['draft_server'] = $result['id'] ?? $pending['id'];
+            $destination = '/apps/create';
+        }
         if ($inline) {
-            unset($_SESSION['enrollment']);
+            unset($_SESSION['enrollment'], $_SESSION['created_server']);
             $this->trongate_security->_json($result + ['host' => $pending['host']]);
             return;
         }
         unset($_SESSION['enrollment'], $_SESSION['created_server']);
-        if ($result['application_ready'] && isset($_SESSION['app_draft'])) {
-            $_SESSION['draft_server'] = $result['id'] ?? $pending['id'];
-        }
-        header('Location: /servers', true, 303);
+        header('Location: ' . $destination, true, 303);
         exit;
     }
     function _inspect(Model $store, Control $control, string $command, bool $inline): void {

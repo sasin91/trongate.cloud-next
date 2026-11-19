@@ -129,3 +129,9 @@ the updated panel. Existing administrator names and password hashes are imported
 into Trongate's login tables. Sign in again at `/login/login/1`; existing custom
 sessions are not reused. Re-running the migration preserves native accounts.
 `tc init` remains the explicit local password setup/reset command.
+
+The web server connection flow uses trust on first use: it accepts and pins the
+first observed SSH host key, then checks runtime readiness over that pinned
+connection. Later SSH connections reject changed host keys. No manual fingerprint
+entry is required in the web wizard; the CLI scan/confirm commands remain available
+for independently verified enrollment.

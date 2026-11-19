@@ -87,6 +87,7 @@ try {
     if ($code!==200 || !str_contains($page,'value="192.0.2.25"') || !str_contains($page,'value="'.$provision.'"')) { throw new RuntimeException('Persisted server connection could not resume'); }
     [$code,$page]=request(null,'/servers/provision?operation='.$provision);
     if ($code!==200 || !str_contains($page,'192.0.2.25')) { throw new RuntimeException('Provision progress could not resume'); }
+    if (str_contains($page,'Verified fingerprint') || str_contains($page,'independent console')) { throw new RuntimeException('Manual fingerprint step remains'); }
     $store->put('server','created-web',['application_ready'=>true,'provider'=>'test-provider','provider_id'=>12345,'host'=>'192.0.2.25']);
     $serversModel=new Servers_model('servers',$store->connection());
     if ($serversModel->_pending_connections()!==[]) { throw new RuntimeException('Connected provider server listed twice'); }
