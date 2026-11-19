@@ -21,3 +21,5 @@ console.log('PASS: availability, defaults, saved choices, price ordering and ima
 
 assert.equal(choices.suggestedSize([size('small',true,'1',{memory:1}),size('medium',true,'2',{memory:4})]).name,'medium');
 assert.equal(choices.suggestedSize([size('small',true,'1',{memory:1}),size('cax11',true,'2',{memory:4})]).name,'cax11');
+
+assert.deepEqual(choices.sizes({...options,server_types:[size('x86-only',true,'1',{architecture:'x86'})]},'nbg1'),[]);

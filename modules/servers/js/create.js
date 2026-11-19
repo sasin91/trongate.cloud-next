@@ -2,7 +2,8 @@ const serverChoices = {
     sizes(options, location) {
         return options.server_types.filter(type => !type.deprecated &&
             type.locations?.some(region => region.name === location && region.available) &&
-            type.prices?.some(price => price.location === location))
+            type.prices?.some(price => price.location === location) &&
+            (!options.images.length || serverChoices.images(options, type).length > 0))
             .sort((a, b) => Number(a.prices.find(p => p.location === location).price_monthly.net) - Number(b.prices.find(p => p.location === location).price_monthly.net));
     },
     images(options, type) {
