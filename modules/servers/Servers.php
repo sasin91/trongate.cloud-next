@@ -132,6 +132,7 @@ class Servers extends Trongate {
         $_SESSION['enrollment'] = $control->execute('server-scan', $server) + ['id' => $id, 'host' => $server['host']];
         if ($created) {
             $_SESSION['enrollment'] += ['provider' => $created['provider'], 'provider_id' => $created['provider_id']];
+            $_SESSION['enrollment']['expected_os'] = 'nixos';
         }
         if ($inline) {
             $this->trongate_security->_json($_SESSION['enrollment']);
@@ -148,6 +149,9 @@ class Servers extends Trongate {
         $confirmation = ['id' => $pending['id'] ?? '', 'enrollment' => $pending['enrollment'] ?? '', 'fingerprint' => trim($_POST['fingerprint'] ?? '')];
         if (isset($pending['provider_id'])) {
             $confirmation += ['provider' => $pending['provider'], 'provider_id' => $pending['provider_id']];
+        }
+        if (isset($pending['expected_os'])) {
+            $confirmation['expected_os'] = $pending['expected_os'];
         }
         $result = $control->execute('server-confirm', $confirmation);
         if ($inline) {

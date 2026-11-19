@@ -8,7 +8,7 @@ const serverChoices = {
     images(options, type) {
         return type ? options.images.filter(image => image.architecture === type.architecture &&
             image.status === 'available' && !image.deprecated && Number(image.disk_size || 0) <= Number(type.disk) &&
-            (image.type === 'system' || (image.type === 'snapshot' && image.labels?.['tc-nixos'] === 'true'))) : [];
+            (image.type === 'snapshot' && image.labels?.['tc-nixos'] === 'true')) : [];
     },
     suggestedSize(rows) {
         return rows.find(type => type.name === 'cax11') || rows.find(type => Number(type.memory) >= 4) || rows[0];
@@ -34,14 +34,14 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
         const images = serverChoices.images(options, type);
         const previous = fields.image.value || saved.image;
         select(fields.image, images, 'id', image => `${image.description} · ${image.architecture}${image.type === 'snapshot' ? ' · Prepared runtime' : ''}`,
-            serverChoices.preferred(images, previous, 'id', image => image.id === (images.find(item => item.type === 'snapshot') || images.find(item => item.name === 'debian-12') || images[0])?.id));
+            serverChoices.preferred(images, previous, 'id', image => image.id === (images.find(item => item.type === 'snapshot') || images[0])?.id));
         const price = type?.prices.find(p => p.location === fields.location.value);
         const ip = options.pricing.primary_ips.find(ip => ip.type === 'ipv4')?.prices.find(p => p.location === fields.location.value);
         form.querySelector('[data-size-summary]').textContent = type ? `${type.name.toUpperCase()} · ${type.cores} vCPU · ${type.memory} GB RAM · ${type.disk} GB disk · ${type.architecture}` : 'No sizes available in this region';
         form.querySelector('[data-size-price]').textContent = price && ip ? `${(Number(price.price_monthly.net) + Number(ip.price_monthly.net)).toFixed(2)} ${currency}/month cap · ${(Number(price.price_hourly.net) + Number(ip.price_hourly.net)).toFixed(4)} ${currency}/hour` : 'Pricing unavailable';
         const image = images.find(image => String(image.id) === fields.image.value);
-        form.querySelector('[data-size-note]').textContent = `Includes IPv4, excludes tax. ${image?.type === 'snapshot' ? 'Prepared runtime will be verified after connection.' : 'Standard images require runtime preparation before deploying apps.'}`;
-        form.querySelector('[data-options-empty]').textContent = !type ? 'Choose another region.' : !images.length ? 'No compatible images. Choose another size.' : !options.ssh_keys.length ? 'Add an SSH public key in Hetzner, then reload the options.' : '';
+        form.querySelector('[data-size-note]').textContent = 'NixOS with the Trongate runtime. Includes IPv4, excludes tax. SSH identity and runtime readiness are verified after creation.';
+        form.querySelector('[data-options-empty]').textContent = !type ? 'Choose another region.' : !images.length ? 'No compatible NixOS snapshot. Prepare a snapshot for this architecture or choose a size matching an existing snapshot.' : !options.ssh_keys.length ? 'Add an SSH public key in Hetzner, then reload the options.' : '';
         form.querySelector('[data-review]').disabled = !type || !images.length || !options.ssh_keys.length || !price || !ip;
     };
     const updateSizes = () => {

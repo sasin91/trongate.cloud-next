@@ -4,16 +4,17 @@ final class ProviderFixture extends Http {
     public array $writes=[];
     public bool $available=true;
     public string $imageArchitecture='arm';
+    public string $imageType='snapshot';
     function request(string $method,string $path,string $token,?array $body=null): array {
         $price=['location'=>'nbg1','price_monthly'=>['net'=>'5.99'],'price_hourly'=>['net'=>'0.0096']];
         $type=['id'=>45,'name'=>'cax11','cores'=>2,'memory'=>4,'disk'=>40,'architecture'=>'arm','deprecated'=>false,'locations'=>[['name'=>'nbg1','available'=>$this->available]],'prices'=>[$price]];
-        $image=['id'=>11,'type'=>'system','name'=>'debian-12','description'=>'Debian 12','architecture'=>$this->imageArchitecture,'status'=>'available','disk_size'=>5];
+        $image=['id'=>11,'type'=>$this->imageType,'labels'=>['tc-nixos'=>'true'],'name'=>'nixos','description'=>'NixOS runtime','architecture'=>$this->imageArchitecture,'status'=>'available','disk_size'=>5];
         if ($method==='POST') { $this->writes[]=$body; return ['server'=>['id'=>99],'action'=>['id'=>100]]; }
         if (str_starts_with($path,'/server_types/')) return ['server_type'=>$type];
         if (str_starts_with($path,'/server_types?')) return ['server_types'=>[$type]];
         if (str_starts_with($path,'/locations?')) return ['locations'=>[['name'=>'nbg1','description'=>'Nuremberg']]];
         if (str_starts_with($path,'/images/')) return ['image'=>$image];
-        if (str_starts_with($path,'/images?')) return ['images'=>str_contains($path,'type=system')?[$image]:[]];
+        if (str_starts_with($path,'/images?')) return ['images'=>[$image]];
         if (str_starts_with($path,'/ssh_keys?')) return ['ssh_keys'=>[['id'=>7,'name'=>'my-key','fingerprint'=>'fixture']]];
         if ($path==='/pricing') return ['pricing'=>['currency'=>'EUR','primary_ips'=>[['type'=>'ipv4','prices'=>[['location'=>'nbg1','price_monthly'=>['net'=>'0.50'],'price_hourly'=>['net'=>'0.0008']]]]]]];
         if (str_starts_with($path,'/servers?')) return ['servers'=>[]];
@@ -52,7 +53,7 @@ try {
     verify($s->secret($ref)==='replacement-token','Rejected token overwrote working credential');
     $input=['provider'=>'project','name'=>'web','server_type'=>'cax11','location'=>'nbg1','image'=>11,'ssh_key'=>7];
     $quote=$flow->_quote($input);
-    verify($quote['monthly_net']==='6.49' && $quote['preparation_required'],'Incorrect price or preparation status');
+    verify($quote['monthly_net']==='6.49' && !$quote['preparation_required'] && $quote['os']==='NixOS','Incorrect price or preparation status');
     try { $flow->_create($quote['quote'],false); throw new LogicException('Missing consent accepted'); } catch (RuntimeException) {}
     verify((int)$s->run('SELECT COUNT(*) FROM jobs')->fetchColumn()===0,'Unconfirmed creation queued');
     $queued=$flow->_create($quote['quote'],true);
@@ -69,8 +70,13 @@ try {
     $http->imageArchitecture='x86';
     try { $flow->_quote($input); throw new LogicException('Architecture mismatch accepted'); } catch (RuntimeException) {}
     $http->imageArchitecture='arm';
-    try { (new Hetzner('fixture-token',$http))->create('fixture',$input); throw new LogicException('Implicit stock image accepted'); } catch (RuntimeException) {}
+    $http->imageType='system';
+    try { $flow->_quote($input); throw new LogicException('Stock OS quote accepted'); } catch (RuntimeException) {}
+    try { (new Hetzner('fixture-token',$http))->create('fixture',$input+['image_kind'=>'system']); throw new LogicException('Implicit stock image accepted'); } catch (RuntimeException) {}
+    $http->imageType='snapshot';
     try { $flow->_quote(array_replace($input,['ssh_key'=>8])); throw new LogicException('Unknown SSH key accepted'); } catch (RuntimeException) {}
+    $legacy=$flow->_quote($input); $legacyRecord=$s->get('server-quote',$legacy['quote']); $legacyRecord['plan']['image_kind']='system'; $s->put('server-quote',$legacy['quote'],$legacyRecord);
+    try { $flow->_create($legacy['quote'],true); throw new LogicException('Legacy stock OS review accepted'); } catch (RuntimeException) {}
     $expired=$flow->_quote($input); $record=$s->get('server-quote',$expired['quote']); $record['expires']=0; $s->put('server-quote',$expired['quote'],$record);
     try { $flow->_create($expired['quote'],true); throw new LogicException('Expired review accepted'); } catch (RuntimeException) {}
     verify(count($http->writes)===1,'Invalid request mutated provider');

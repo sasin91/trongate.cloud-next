@@ -15,7 +15,7 @@ assert.equal(choices.preferred(sizes,undefined,'name',t=>t.name==='cax11').name,
 assert.equal(choices.preferred(sizes,'large','name',t=>t.name==='cax11').name,'large');
 assert.equal(choices.preferred(sizes.filter(t=>t.name!=='cax11'),undefined,'name',t=>t.name==='cax11').name,'cheap');
 assert.deepEqual(choices.sizes(options,'unavailable'),[]);
-assert.deepEqual(choices.images(options,sizes[0]).map(i=>i.id),[1,4]);
+assert.deepEqual(choices.images(options,sizes[0]).map(i=>i.id),[4]);
 assert.deepEqual(choices.images(options,undefined),[]);
 console.log('PASS: availability, defaults, saved choices, price ordering and image compatibility');
 

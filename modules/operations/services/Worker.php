@@ -110,6 +110,7 @@ final class Worker {
                 return ['status' => 'uncertain', 'reason' => 'Create may have been accepted. No resource visible; no second create issued.'];
             }
             $s->put('external', $id, ['submitted' => time(), 'kind' => $kind]);
+            $p['bootstrap'] = $kind === 'bootstrap-create';
             $response = $provider->create($id, $p);
             $s->put('external', $id, ['provider_id' => $response['server']['id'], 'action' => $response['action']['id']]);
             return ['status' => 'pending', 'provider_id' => $response['server']['id']];

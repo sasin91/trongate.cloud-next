@@ -48,6 +48,9 @@ final class Control {
                     $server += ['provider' => $p['provider'], 'provider_id' => (int)$p['provider_id']];
                 }
                 $inspection = (new Ssh($s))->inspect($server);
+                if (($p['expected_os'] ?? '') === 'nixos' && ($inspection['facts']['os'] ?? '') !== 'nixos') {
+                    throw new RuntimeException('The created server is not running NixOS. Check the prepared snapshot before enrolling it.');
+                }
                 $s->put('server', $id, $server + $inspection);
                 return ['id' => $id] + $inspection;
             case 'server-inspect':

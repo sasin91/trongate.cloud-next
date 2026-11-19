@@ -29,7 +29,7 @@ final class Hetzner {
     function create(string $operation, array $p): array {
         $image = $this->call('GET', '/images/' . Validate::number($p['image'], 1, PHP_INT_MAX))['image'];
         $bootstrap = ($p['bootstrap'] ?? false) === true;
-        if ($bootstrap || ($p['image_kind'] ?? '') === 'system') {
+        if ($bootstrap) {
             if (($image['type'] ?? '') !== 'system' || ($image['status'] ?? 'available') !== 'available') {
                 throw new RuntimeException('Select an available stock system image');
             }

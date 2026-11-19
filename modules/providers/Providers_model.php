@@ -48,7 +48,10 @@ class Providers_model extends Model {
     function _options(string $id, Http $http = new Http): array {
         $provider = $this->_client($id, $http);
         $options = $provider->options();
-        $options['images'] = array_merge($options['images'], $provider->list('images', '&type=system'));
+        $options['images'] = array_values(array_filter($options['images'], static fn($image) =>
+            ($image['type'] ?? '') === 'snapshot' && ($image['labels']['tc-nixos'] ?? '') === 'true' &&
+            ($image['status'] ?? '') === 'available' && empty($image['deprecated'])
+        ));
         $options['ssh_keys'] = array_map(fn($key) => ['id' => $key['id'], 'name' => $key['name'], 'fingerprint' => $key['fingerprint']], $provider->list('ssh_keys'));
         $options['pricing'] = $provider->call('GET', '/pricing')['pricing'];
         return $options;
@@ -76,8 +79,8 @@ class Providers_model extends Model {
         if ($image['architecture'] !== $type['architecture'] || ($image['status'] ?? '') !== 'available' || !empty($image['deprecated'])) {
             throw new RuntimeException('Select an available image matching the server architecture.');
         }
-        if ($image['type'] !== 'system' && ($image['type'] !== 'snapshot' || ($image['labels']['tc-nixos'] ?? '') !== 'true')) {
-            throw new RuntimeException('Choose a system image or a prepared Trongate snapshot.');
+        if ($image['type'] !== 'snapshot' || ($image['labels']['tc-nixos'] ?? '') !== 'true') {
+            throw new RuntimeException('Choose a prepared NixOS snapshot.');
         }
         if ((int)($image['disk_size'] ?? 0) > (int)$type['disk']) {
             throw new RuntimeException('This image needs a larger disk.');
@@ -89,7 +92,7 @@ class Providers_model extends Model {
         $summary = ['name' => $name, 'provider' => $id, 'type' => $type['name'], 'location' => $location['description'] ?? $location['name'], 'image' => $image['description'], 'ssh_key' => $key['name'],
             'currency' => $options['pricing']['currency'], 'monthly_net' => number_format((float)$price['price_monthly']['net'] + (float)$ipPrice['price_monthly']['net'], 2, '.', ''),
             'hourly_net' => number_format((float)$price['price_hourly']['net'] + (float)$ipPrice['price_hourly']['net'], 4, '.', ''),
-            'preparation_required' => $image['type'] === 'system'];
+            'preparation_required' => false, 'os' => 'NixOS'];
         $quote = bin2hex(random_bytes(16));
         $this->put('server-quote', $quote, ['plan' => $plan, 'summary' => $summary, 'expires' => time() + 600]);
         return ['quote' => $quote] + $summary;
@@ -106,6 +109,9 @@ class Providers_model extends Model {
         $record = $s->get('server-quote', $quote);
         if ($record['expires'] < time()) {
             throw new RuntimeException('The review has expired. Review the current options again.');
+        }
+        if (($record['plan']['image_kind'] ?? '') !== 'snapshot') {
+            throw new RuntimeException('This review used a stock OS. Review a NixOS snapshot instead.');
         }
         $s->connection()->beginTransaction();
         try {
