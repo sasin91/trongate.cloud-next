@@ -37,5 +37,24 @@ try {
     check((int)$s->run('SELECT COUNT(*) FROM jobs')->fetchColumn()===2,'Build handoff not idempotent');
     check(Apps_model::_repository('https://github.com/owner/repo.git')==='owner/repo','Repository URL conversion');
     try { Apps_model::_repository('https://evil.example/repo'); throw new LogicException('Foreign URL accepted'); } catch (RuntimeException) {}
+    $s->put('server','web',['application_ready'=>true,'host'=>'192.0.2.10','facts'=>['arch'=>'aarch64']]);
+    try { $flow->_build_target('web','demo','request'); throw new LogicException('Missing builder accepted'); } catch (RuntimeException) {}
+    foreach (['builder-a','builder-b'] as $builder) {
+        $s->put('server',$builder,['host'=>$builder.'.example.com','builder_ready'=>true,'facts'=>['arch'=>'aarch64']]);
+    }
+    $s->put('server','wrong-arch',['host'=>'x86.example.com','builder_ready'=>true,'facts'=>['arch'=>'x86_64']]);
+    $s->put('server','same-host',['host'=>'192.0.2.10','builder_ready'=>true,'facts'=>['arch'=>'aarch64']]);
+    putenv('TC_BUILD_REGISTRY');
+    try { $flow->_build_target('web','demo','request'); throw new LogicException('Missing registry accepted'); } catch (RuntimeException) {}
+    putenv('TC_BUILD_REGISTRY=registry.example.com/apps');
+    $s->enqueue('build','builder:builder-a',[]);
+    $automatic=$flow->_build_target('web','demo','request');
+    check($automatic['builder']==='builder-b','Did not prefer compatible builder with shorter queue');
+    check(str_starts_with($automatic['tag'],'registry.example.com/apps/demo:build-'),'Automatic tag missing');
+    check($automatic===$flow->_build_target('web','demo','request'),'Automatic target not stable');
+    check($automatic['tag']!==$flow->_build_target('web','demo','another-request')['tag'],'Distinct launches reuse tag');
+    $s->put('app','other',['server'=>'builder-b']);
+    check($flow->_build_target('web','demo','request')['builder']==='builder-a','Selected a builder hosting an app');
+    putenv('TC_BUILD_REGISTRY');
     echo "PASS: launch, encrypted environment, invalid inputs, duplicate submission, build handoff\n";
 } finally { unset($flow,$s); foreach (glob($dir.'/*') as $file) { unlink($file); } rmdir($dir); }

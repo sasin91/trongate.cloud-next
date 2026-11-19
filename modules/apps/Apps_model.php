@@ -31,6 +31,36 @@ class Apps_model extends Model {
         return json_decode($body,true,512,JSON_THROW_ON_ERROR);
     }
 
+    function _build_target(string $target, string $app, string $request): array {
+        $application = $this->get('server', $target);
+        $architecture = $application['facts']['arch'] ?? '';
+        $applicationServers = array_column($this->all('app'), 'server');
+        $candidates = [];
+        foreach ($this->all('server') as $server) {
+            if ($server['id'] === $target || ($server['host'] ?? '') === ($application['host'] ?? '') ||
+                empty($server['builder_ready']) || $architecture === '' || ($server['facts']['arch'] ?? '') !== $architecture ||
+                in_array($server['id'], $applicationServers, true)) {
+                continue;
+            }
+            $server['build_queue'] = (int) $this->run(
+                "SELECT COUNT(*) FROM jobs WHERE resource=? AND status IN ('pending','running','uncertain')",
+                ['builder:' . $server['id']]
+            )->fetchColumn();
+            $candidates[] = $server;
+        }
+        usort($candidates, static fn($a, $b) => [$a['build_queue'], $a['id']] <=> [$b['build_queue'], $b['id']]);
+        if (!$candidates) {
+            throw new RuntimeException('Git builds are not configured yet: no compatible dedicated builder is available. Your app setup is saved.');
+        }
+        $registry = rtrim(trim(getenv('TC_BUILD_REGISTRY') ?: ''), '/');
+        if ($registry === '') {
+            throw new RuntimeException('Git builds are not configured yet: the output registry needs to be set up. Your app setup is saved.');
+        }
+        Validate::match($registry, '~^[a-z0-9][a-z0-9.-]*(?::[0-9]+)?(?:/[a-z0-9][a-z0-9._-]*)*$~D', 'configured build registry');
+        $tag = $registry . '/' . Validate::id($app) . ':build-' . substr(hash('sha256', $request), 0, 24);
+        return ['builder' => $candidates[0]['id'], 'tag' => $tag];
+    }
+
     function _plan_launch(array $p, string $request): string {
         try { return $this->get('launch',$request)['operation']; } catch (RuntimeException) {}
         $id=Validate::id(trim($p['label'] ?? ''));
@@ -55,13 +85,13 @@ class Apps_model extends Model {
         $spec=Validate::release($spec);
         $build=null;
         if ($source==='git') {
-            $builder=Validate::id($p['builder'] ?? ''); $this->get('server',$builder);
-            if ($builder===$server) { throw new RuntimeException('Choose a separate builder to keep application builds isolated.'); }
+            $target = $this->_build_target($server, $id, $request);
+            $builder = $target['builder'];
             $repository=self::_repository($p['repository'] ?? '');
             $branch=trim($p['branch'] ?? 'main');
             if ($branch==='' || strlen($branch)>200) { throw new RuntimeException('Choose a branch or commit.'); }
             $commit=self::_github($repository.'/commits/'.rawurlencode($branch))['sha'];
-            $build=['builder'=>$builder,'plan'=>Build::plan(['repository'=>$repository,'commit'=>$commit,'base'=>trim($p['base'] ?? ''),'container_port'=>$spec['container_port'],'tag'=>trim($p['tag'] ?? ''),
+            $build=['builder'=>$builder,'plan'=>Build::plan(['repository'=>$repository,'commit'=>$commit,'base'=>trim($p['base'] ?? ''),'container_port'=>$spec['container_port'],'tag'=>$target['tag'],
                 'commands'=>$p['build_commands'] ?? '', 'extensions'=>preg_split('/[\s,]+/',trim($p['php_extensions'] ?? ''),-1,PREG_SPLIT_NO_EMPTY)])];
             $spec['commit']=$commit;
         }

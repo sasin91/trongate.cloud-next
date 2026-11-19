@@ -25,7 +25,15 @@ installation state or host credentials into customer build containers.
 
 Enroll the builder using the same two-phase SSH identity flow. Its application
 readiness may be false; that is expected for an unprivileged build-only machine.
-The builder is selected explicitly, not automatically from application servers.
+The web wizard automatically selects an inspected, unprivileged builder with
+`tc-build`, working Podman and a systemd user manager. It matches the application's
+CPU architecture, excludes the application host and hosts already assigned apps,
+and prefers the shortest build queue. Reinspect existing builders to record these
+capabilities. Configure `services.trongate-cloud.buildRegistry` (or
+`TC_BUILD_REGISTRY`) with a registry/namespace such as `registry.example.com/apps`.
+The wizard generates a distinct image tag per launch; registry authentication
+stays on the builder. Image pulls must also be accessible to application hosts.
+No extra VMs or registry accounts are created by automatic selection.
 
 ```json
 {

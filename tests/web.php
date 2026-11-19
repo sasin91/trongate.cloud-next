@@ -41,6 +41,7 @@ try {
     $store->put('server','web',['application_ready'=>true,'host'=>'192.0.2.10','managed_eligible'=>false,'missing'=>[]]);
     [$code,$page]=request(null,'/apps/create');
     if ($code!==200 || !str_contains($page,'Which app are we putting online?')) { throw new RuntimeException('Wizard missing'); }
+    if (str_contains($page,'name="builder"') || str_contains($page,'name="tag"') || !str_contains($page,'Build commands') || !str_contains($page,'Extra PHP extensions')) { throw new RuntimeException('Build infrastructure exposed in app wizard'); }
     if (str_contains($page,'id="server-dialog"') || !str_contains($page,'href="/servers"')) { throw new RuntimeException('Wizard must link to server pages'); }
     preg_match('/name="request" value="([a-f0-9]+)"/',$page,$launch);
     if (request(['csrf_token'=>'bad','label'=>'draft'],'/apps/draft')[0]!==403) { throw new RuntimeException('Draft bypassed CSRF'); }
