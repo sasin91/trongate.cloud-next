@@ -88,6 +88,11 @@ try {
     [$code,$page]=request(null,'/servers/provision?operation='.$provision);
     if ($code!==200 || !str_contains($page,'192.0.2.25')) { throw new RuntimeException('Provision progress could not resume'); }
     if (str_contains($page,'Verified fingerprint') || str_contains($page,'independent console')) { throw new RuntimeException('Manual fingerprint step remains'); }
+    [$code,$page]=request(null,'/servers/delete?operation='.$provision);
+    if ($code!==200 || !str_contains($page,'Permanently delete server') || !str_contains($page,'created-web')) { throw new RuntimeException('Deletion review missing'); }
+    if (request(['operation'=>$provision,'name'=>'created-web','csrf_token'=>'bad'],'/servers/delete')[0]!==403) { throw new RuntimeException('Deletion bypassed CSRF'); }
+    request(['operation'=>$provision,'name'=>'wrong','csrf_token'=>$csrf],'/servers/delete');
+    if ((int)$store->run("SELECT COUNT(*) FROM jobs WHERE kind='provider-delete'")->fetchColumn()!==0) { throw new RuntimeException('Wrong name triggered deletion'); }
     $store->put('server','created-web',['application_ready'=>true,'provider'=>'test-provider','provider_id'=>12345,'host'=>'192.0.2.25']);
     $serversModel=new Servers_model('servers',$store->connection());
     if ($serversModel->_pending_connections()!==[]) { throw new RuntimeException('Connected provider server listed twice'); }

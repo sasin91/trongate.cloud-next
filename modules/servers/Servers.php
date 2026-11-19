@@ -85,6 +85,24 @@ class Servers extends Trongate {
         $this->templates->_render('servers', 'provision', 'server-progress', ['message' => $message]);
     }
 
+    function delete(): void {
+        $this->trongate_security->make_sure_allowed();
+        $message = null;
+        $operation = (string) ($_POST['operation'] ?? $_GET['operation'] ?? '');
+        try {
+            $status = $this->providers->model->_status($operation);
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                $this->providers->model->_delete_created_server($operation, (string) ($_POST['name'] ?? ''));
+                unset($_SESSION['created_server'], $_SESSION['enrollment'], $_SESSION['server_review'], $_SESSION['server_config'], $_SESSION['server_options'], $_SESSION['server_operation'], $_SESSION['server_status']);
+                header('Location: /servers/delete?operation=' . rawurlencode($operation), true, 303);
+                return;
+            }
+        } catch (RuntimeException $error) {
+            $message = $error->getMessage();
+        }
+        $this->templates->_render('servers', 'delete', 'delete-server', ['message' => $message, 'deleting_server' => $status ?? null]);
+    }
+
     function confirm(): void {
         $this->trongate_security->make_sure_allowed();
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -154,6 +172,10 @@ class Servers extends Trongate {
         }
         $confirmation = ['id' => $pending['id'] ?? '', 'enrollment' => $pending['enrollment'] ?? '', 'fingerprint' => $pending['fingerprint'] ?? ''];
         if (isset($pending['provider_id'])) {
+            $created = $store->get('provider-server', (string) $pending['provider_id']);
+            if (isset($created['operation']) && $this->providers->model->_status($created['operation'])['status'] !== 'succeeded') {
+                throw new RuntimeException('This server is being deleted or has been deleted. Create a replacement from Servers.');
+            }
             $confirmation += ['provider' => $pending['provider'], 'provider_id' => $pending['provider_id']];
         }
         if (isset($pending['expected_os'])) {

@@ -2,10 +2,13 @@
 require dirname(__DIR__).'/modules/operations/bootstrap.php';
 final class ProviderFixture extends Http {
     public array $writes=[];
+    public array $deletes=[];
     public bool $available=true;
     public string $imageArchitecture='arm';
     public string $imageType='snapshot';
     function request(string $method,string $path,string $token,?array $body=null): array {
+        if ($method==='DELETE') { $this->deletes[]=$path; return ['action'=>['id'=>101]]; }
+        if ($path==='/actions/101') return ['action'=>['status'=>'success']];
         $price=['location'=>'nbg1','price_monthly'=>['net'=>'5.99'],'price_hourly'=>['net'=>'0.0096']];
         $type=['id'=>45,'name'=>'cax11','cores'=>2,'memory'=>4,'disk'=>40,'architecture'=>'arm','deprecated'=>false,'locations'=>[['name'=>'nbg1','available'=>$this->available]],'prices'=>[$price]];
         $image=['id'=>11,'type'=>$this->imageType,'labels'=>['tc-nixos'=>'true'],'name'=>'nixos','description'=>'NixOS runtime','architecture'=>$this->imageArchitecture,'status'=>'available','disk_size'=>5];
@@ -80,5 +83,17 @@ try {
     $expired=$flow->_quote($input); $record=$s->get('server-quote',$expired['quote']); $record['expires']=0; $s->put('server-quote',$expired['quote'],$record);
     try { $flow->_create($expired['quote'],true); throw new LogicException('Expired review accepted'); } catch (RuntimeException) {}
     verify(count($http->writes)===1,'Invalid request mutated provider');
+    try { $flow->_delete_created_server($queued['operation'],'wrong'); throw new LogicException('Wrong deletion confirmation accepted'); } catch (RuntimeException) {}
+    verify(count($http->deletes)===0,'Unconfirmed deletion reached provider');
+    $deleted=$flow->_delete_created_server($queued['operation'],'web');
+    verify($flow->_delete_created_server($queued['operation'],'web')===$deleted,'Duplicate deletion queued');
+    verify($flow->_status($queued['operation'])['status']==='deleting','Deletion pending state missing');
+    $worker->once();
+    verify($flow->_status($queued['operation'])['status']==='deleting','Server hidden before provider confirmed deletion');
+    $worker->once();
+    verify($http->deletes===['/servers/99'],'Wrong or repeated server deletion');
+    verify($flow->_status($queued['operation'])['status']==='deleted','Deletion success missing');
+    $servers=new Servers_model('servers',$s->connection());
+    verify($servers->_pending_connections()===[],'Deleted server remains in list');
     echo "PASS: provider options, price review, confirmation, idempotent creation, worker polling, enrollment handoff\n";
 } finally { unlink($dir.'/key'); rmdir($dir); }

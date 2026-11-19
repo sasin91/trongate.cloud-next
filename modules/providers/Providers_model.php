@@ -130,6 +130,41 @@ class Providers_model extends Model {
             }
         }
     }
+    function _delete_created_server(string $operation, string $name): string {
+        $status = $this->_status($operation);
+        if (!hash_equals($status['name'], trim($name))) {
+            throw new RuntimeException('Type the server name to confirm deletion.');
+        }
+        if (isset($status['deletion_operation'])) {
+            return $status['deletion_operation'];
+        }
+        if ($status['status'] !== 'succeeded') {
+            throw new RuntimeException('Only a successfully created server can be deleted here.');
+        }
+        foreach ($this->all('server') as $server) {
+            if (($server['provider'] ?? '') === $status['provider'] && (string) ($server['provider_id'] ?? '') === (string) $status['provider_id']) {
+                throw new RuntimeException('This server is already connected. Deletion here is only available before connecting it.');
+            }
+        }
+        $this->connection()->beginTransaction();
+        try {
+            $this->run('INSERT INTO records(kind,id,data) VALUES(?,?,?)', ['server-deletion', $operation, '{}']);
+            $job = (new Control($this))->execute('provider-delete', [
+                'provider' => $status['provider'], 'provider_id' => $status['provider_id'], 'confirm' => true
+            ]);
+            $this->put('server-deletion', $operation, ['operation' => $job]);
+            $this->connection()->commit();
+            return $job;
+        } catch (Throwable $error) {
+            $this->connection()->rollBack();
+            try {
+                return $this->get('server-deletion', $operation)['operation'];
+            } catch (RuntimeException) {
+                throw $error;
+            }
+        }
+    }
+
     function _status(string $operation): array {
         $job = $this->job($operation);
         if ($job['kind'] !== 'provision') {
@@ -141,6 +176,13 @@ class Providers_model extends Model {
         if ($job['status'] === 'succeeded') {
             $server = $this->get('provider-server', (string)$result['provider_id'])['server'];
             $out += ['provider_id' => $server['id'], 'host' => $server['public_net']['ipv4']['ip'], 'preparation_required' => ($payload['image_kind'] ?? '') === 'system'];
+        }
+        $deletion = $this->run('SELECT data FROM records WHERE kind=? AND id=?', ['server-deletion', $operation])->fetchColumn();
+        if ($deletion !== false) {
+            $deleteJob = $this->job(json_decode($deletion, true, 512, JSON_THROW_ON_ERROR)['operation']);
+            $out['deletion_operation'] = $deleteJob['id'];
+            $out['deletion_status'] = $deleteJob['status'];
+            $out['status'] = $deleteJob['status'] === 'succeeded' ? 'deleted' : 'deleting';
         }
         if (in_array($job['status'],['failed', 'uncertain'])) {
             $out['message'] = 'Inspect this operation and the provider console before creating another server; a resource may already exist.';

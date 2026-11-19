@@ -13,6 +13,9 @@ class Servers_model extends Model {
         $jobs = $this->run('SELECT id FROM jobs WHERE kind=? ORDER BY created DESC', ['provision'])->fetchAll();
         foreach ($jobs as $job) {
             $status = $providers->_status($job['id']);
+            if ($status['status'] === 'deleted') {
+                continue;
+            }
             $matched = false;
             foreach ($connected as $server) {
                 if (isset($status['provider_id']) && ($server['provider'] ?? '') === $status['provider'] && (string) ($server['provider_id'] ?? '') === (string) $status['provider_id']) {
