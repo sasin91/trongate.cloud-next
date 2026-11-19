@@ -5,6 +5,19 @@ require_once dirname(__DIR__).'/operations/traits/Encrypted_credentials.php';
 require_once dirname(__DIR__).'/operations/traits/Operation_queue.php';
 class Apps_model extends Model {
     use Database_access, Inventory_records, Encrypted_credentials, Operation_queue;
+    function _load_draft(int $user): ?array {
+        $row = $this->run('SELECT data FROM records WHERE kind=? AND id=?', ['app-draft', (string) $user])->fetchColumn();
+        return $row === false ? null : json_decode($row, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    function _save_draft(int $user, string $encrypted, string $request): void {
+        $this->put('app-draft', (string) $user, ['encrypted' => $encrypted, 'request' => $request]);
+    }
+
+    function _delete_draft(int $user): void {
+        $this->run('DELETE FROM records WHERE kind=? AND id=?', ['app-draft', (string) $user]);
+    }
+
     static function _repository(string $value): string {
         $value=preg_replace('~^https://github\.com/~i','',trim($value));
         return Validate::match(preg_replace('~\.git$~','',rtrim($value,'/')),'~^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$~D','public GitHub repository');

@@ -7,6 +7,7 @@ class Apps extends Trongate {
     }
     function create(): void {
         $this->trongate_security->make_sure_allowed();
+        $this->_restore_draft();
         if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_SESSION['app_draft']) && isset($_SESSION['launch_complete'])) {
             unset($_SESSION['launch_request'], $_SESSION['launch_complete']);
         }
@@ -38,7 +39,28 @@ class Apps extends Trongate {
             return;
         }
         $_SESSION['app_draft'] = Encryptor::encrypt(tc_json($draft), installation_key());
+        $_SESSION['launch_request'] ??= bin2hex(random_bytes(16));
+        $this->model->_save_draft($this->_draft_owner(), $_SESSION['app_draft'], $_SESSION['launch_request']);
         $this->trongate_security->_json(['saved' => true]);
+    }
+
+    function _draft_owner(): int {
+        $user = $this->trongate_tokens->get_user_id();
+        if ($user === false) {
+            throw new RuntimeException('Sign in to save your app setup.');
+        }
+        return $user;
+    }
+
+    function _restore_draft(): void {
+        if (isset($_SESSION['app_draft'])) {
+            return;
+        }
+        $draft = $this->model->_load_draft($this->_draft_owner());
+        if ($draft !== null) {
+            $_SESSION['app_draft'] = $draft['encrypted'];
+            $_SESSION['launch_request'] = $draft['request'];
+        }
     }
 
     // Internal HMVC entry points: Core blocks underscore methods from URL dispatch.
@@ -47,6 +69,7 @@ class Apps extends Trongate {
             throw new RuntimeException('This launch form has expired. Reload and try again.');
         }
         $operation = $this->model->_plan_launch($_POST, $_SESSION['launch_request']);
+        $this->model->_delete_draft($this->_draft_owner());
         unset($_SESSION['app_draft']);
         $_SESSION['launch_complete'] = true;
         header('Location: /deployments?operation=' . rawurlencode($operation), true, 303);

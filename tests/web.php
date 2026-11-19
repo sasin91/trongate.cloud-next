@@ -50,6 +50,20 @@ try {
     if (!str_contains($page,'Create at a provider') || !str_contains($page,'Connect an existing server')) { throw new RuntimeException('Server pages missing'); }
     [$code,$page]=request(null,'/apps/create');
     if (!str_contains($page,'saved-app') || !str_contains($page,'PASSWORD=draft-secret') || !str_contains($page,'data-step="3"') || !str_contains($page,$launch[1])) { throw new RuntimeException('App draft or launch identity lost'); }
+    $savedRecord=$store->run("SELECT data FROM records WHERE kind='app-draft'")->fetchColumn();
+    if (str_contains($savedRecord,'draft-secret')) { throw new RuntimeException('Draft secret stored unencrypted'); }
+    request(['csrf_token'=>$csrf],'/login/logout');
+    // Start a fresh browser session as well as revoking the token.
+    unlink($cookie);
+    [$code,$page]=request();
+    preg_match('/name="csrf_token" value="([a-f0-9]+)"/',$page,$m); $csrf=$m[1];
+    request(['csrf_token'=>$csrf,'identifier'=>'admin','password'=>'test-only-long-password'],'/login/submit_login/1');
+    [$code,$page]=request(null,'/apps');
+    if (!str_contains($page,'Finish setting up your app.') || !str_contains($page,'Continue app setup')) { throw new RuntimeException('Dashboard resume missing after login'); }
+    [$code,$page]=request(null,'/apps/create');
+    if (!str_contains($page,'PASSWORD=draft-secret') || !str_contains($page,'data-step="3"') || !str_contains($page,$launch[1])) { throw new RuntimeException('Draft lost across fresh login'); }
+    $draftModel=new Apps_model('apps',$store->connection());
+    if ($draftModel->_load_draft(999999)!==null) { throw new RuntimeException('Draft leaked to another account'); }
     $store->put('provider','test-provider',['type'=>'hetzner','label'=>'Test project','credential'=>'test-token']);
     $store->secret('test-token','old-token');
     [$code,$page]=request(null,'/providers');
@@ -65,6 +79,7 @@ try {
     $fields=['command'=>'launch-app','csrf_token'=>$csrf,'request'=>$launch[1],'source'=>'image','label'=>'web-demo','server'=>'web','domain'=>'demo.example.com','image'=>'registry.example.com/demo@sha256:'.str_repeat('a',64),'environment'=>'PASSWORD=web-fixture-secret'];
     if (request($fields,'/apps/create')[0]!==303 || request($fields,'/apps/create')[0]!==303) { throw new RuntimeException('Wizard launch or duplicate failed'); }
     if ((int)$store->run('SELECT COUNT(*) FROM jobs')->fetchColumn()!==1) { throw new RuntimeException('Repeated HTTP submission duplicated deployment'); }
+    if ((int)$store->run("SELECT COUNT(*) FROM records WHERE kind='app-draft'")->fetchColumn()!==0) { throw new RuntimeException('Launched draft retained'); }
     $id=$store->run('SELECT id FROM jobs')->fetchColumn();
     [$code,$page]=request(null,'/deployments?operation='.$id);
     if ($code!==200 || !str_contains($page,'Deploy progress') || str_contains($page,'web-fixture-secret')) { throw new RuntimeException('Deployment view failed or exposed secret'); }
@@ -96,7 +111,8 @@ try {
     if (request(null,'/deployments?poll=1&operation='.$id)[0]!==401) { throw new RuntimeException('Module polling bypassed authentication'); }
     echo "HTTP login, CSRF and authenticated console passed\n";
 } finally {
-    proc_terminate($proc); fclose($pipes[0]); proc_close($proc); unset($store);
+    proc_terminate($proc); fclose($pipes[0]); proc_close($proc); unset($draftModel, $store);
     foreach (glob($dir.'/*') as $f) { unlink($f); } rmdir($dir);
     if ($mysqlAdmin) { $mysqlAdmin->exec('DROP DATABASE '.$testDatabase); }
 }
+

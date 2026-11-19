@@ -1,6 +1,7 @@
 <?php
 class Templates extends Trongate {
     function _render(string $module,string $view,string $page,array $data=[]): void {
+        $this->apps->_restore_draft();
         $_SESSION['csrf_token'] ??= bin2hex(random_bytes(32));
         $control=new Control(new Operations_model('operations'));
         $data+=['page'=>$page,'operation'=>null,'signedIn'=>true,'message'=>null,
