@@ -83,6 +83,11 @@ try {
         [$code,$page]=request(null,$route);
         if ($code!==200 || !str_contains($page,'created-web') || !str_contains($page,'Finish connecting server') || !str_contains($page,'/servers/connect?operation='.$provision)) { throw new RuntimeException('Provisioned server missing from inventory page'); }
     }
+    $store->step($provision,'claimed',['attempt'=>1]);
+    $store->step($provision,'observed',['status'=>'succeeded','secret'=>'must-not-be-in-progress']);
+    [$code,$progress]=request(null,'/servers/provision?poll=1&operation='.$provision);
+    $progressData=json_decode($progress,true);
+    if ($code!==200 || $progressData['stage']!==3 || count($progressData['logs'])!==3 || str_contains($progress,'must-not-be-in-progress')) { throw new RuntimeException('Creation progress invalid or leaked raw data'); }
     [$code,$page]=request(null,'/servers/connect?operation='.$provision);
     if ($code!==200 || !str_contains($page,'value="192.0.2.25"') || !str_contains($page,'value="'.$provision.'"')) { throw new RuntimeException('Persisted server connection could not resume'); }
     [$code,$page]=request(null,'/servers/provision?operation='.$provision);
@@ -123,6 +128,7 @@ try {
     [$code,$error]=request(['command'=>'connect-server','inline'=>'server','csrf_token'=>$csrf],'/servers/action');
     // A destroyed session has a new CSRF token, so the request must fail before mutation.
     if ($code!==401) { throw new RuntimeException('Logged-out inline enrollment accepted'); }
+    if (request(null,'/servers/provision?poll=1&operation='.$provision)[0]!==401) { throw new RuntimeException('Creation polling bypassed login'); }
     if (request(null,'/deployments?poll=1&operation='.$id)[0]!==401) { throw new RuntimeException('Unauthenticated polling allowed'); }
     if (request(null,'/apps/create')[0]!==302) { throw new RuntimeException('Module route bypassed login'); }
     [$code,$login]=request(null,'/login/login/1');
@@ -130,6 +136,7 @@ try {
     preg_match('/name="csrf_token" value="([a-f0-9]+)"/',$login,$m);
     [$code,$error]=request(['command'=>'create-provider-server','inline'=>'server','csrf_token'=>$m[1],'quote'=>'fixture','confirm_cost'=>'1'],'/providers/action');
     if ($code!==401 || !isset(json_decode($error,true)['error'])) { throw new RuntimeException('Provider route bypassed authentication'); }
+    if (request(null,'/servers/provision?poll=1&operation='.$provision)[0]!==401) { throw new RuntimeException('Creation polling bypassed login'); }
     if (request(null,'/deployments?poll=1&operation='.$id)[0]!==401) { throw new RuntimeException('Module polling bypassed authentication'); }
     echo "HTTP login, CSRF and authenticated console passed\n";
 } finally {

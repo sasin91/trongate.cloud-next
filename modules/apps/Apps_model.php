@@ -61,7 +61,7 @@ class Apps_model extends Model {
             $branch=trim($p['branch'] ?? 'main');
             if ($branch==='' || strlen($branch)>200) { throw new RuntimeException('Choose a branch or commit.'); }
             $commit=self::_github($repository.'/commits/'.rawurlencode($branch))['sha'];
-            $build=['builder'=>$builder,'plan'=>Build::plan(['repository'=>$repository,'commit'=>$commit,'base'=>trim($p['base'] ?? ''),'tag'=>trim($p['tag'] ?? ''),
+            $build=['builder'=>$builder,'plan'=>Build::plan(['repository'=>$repository,'commit'=>$commit,'base'=>trim($p['base'] ?? ''),'container_port'=>$spec['container_port'],'tag'=>trim($p['tag'] ?? ''),
                 'commands'=>$p['build_commands'] ?? '', 'extensions'=>preg_split('/[\s,]+/',trim($p['php_extensions'] ?? ''),-1,PREG_SPLIT_NO_EMPTY)])];
             $spec['commit']=$commit;
         }

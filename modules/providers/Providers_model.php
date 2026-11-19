@@ -165,6 +165,46 @@ class Providers_model extends Model {
         }
     }
 
+    function _creation_progress(string $operation): array {
+        $status = $this->_status($operation);
+        $job = $this->job($operation);
+        $started = (int) floor((int) $job['created'] / 1000000);
+        $logs = [['at' => $started, 'message' => 'Server creation queued.']];
+        $stage = 1;
+        foreach ($this->run('SELECT at,step,data FROM steps WHERE operation=? ORDER BY at,id', [$operation])->fetchAll() as $step) {
+            $data = json_decode($step['data'], true, 512, JSON_THROW_ON_ERROR);
+            $message = null;
+            if ($step['step'] === 'claimed') {
+                $stage = 2;
+                $message = 'Worker checking provider progress (attempt ' . (int) ($data['attempt'] ?? 1) . ').';
+            } elseif ($step['step'] === 'observed') {
+                $message = match ($data['status'] ?? '') {
+                    'pending' => isset($data['provider_id']) ? 'Hetzner accepted the server request. Waiting for creation to finish.' : 'Waiting for Hetzner to finish the request.',
+                    'succeeded' => 'Hetzner confirmed server creation.',
+                    'failed' => 'Provider operation failed. Review the operation before retrying.',
+                    'uncertain' => 'The provider outcome needs verification. Do not create a duplicate server.',
+                    default => null
+                };
+            }
+            if ($message !== null) {
+                $logs[] = ['at' => (int) $step['at'], 'message' => $message];
+            }
+        }
+        if ($status['status'] === 'succeeded') {
+            $stage = 3;
+        }
+        $description = match ($status['status']) {
+            'succeeded' => 'Server created. Connect over SSH to check application readiness.',
+            'failed' => 'Server creation failed. Review the operation details before retrying.',
+            'uncertain' => 'Creation could not be verified. Check the provider before creating another server.',
+            'deleted' => 'This server has been deleted.',
+            'deleting' => 'This server is being deleted.',
+            default => $stage === 1 ? 'Queued — waiting for a worker.' : 'Hetzner is creating your server from the NixOS snapshot.'
+        };
+        // Only curated activity messages leave this endpoint; no payloads or provider responses.
+        return $status + ['started' => $started, 'stage' => $stage, 'description' => $description, 'logs' => $logs];
+    }
+
     function _status(string $operation): array {
         $job = $this->job($operation);
         if ($job['kind'] !== 'provision') {

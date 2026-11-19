@@ -47,8 +47,12 @@ tc release release.json
 tc deploy deploy.json
 ```
 
-Use the existing product's app base image or publish the equivalent FrankenPHP
-image to your own registry. No hosted registry is hard-coded. Build source must
+Leave `base` blank to use the pinned FrankenPHP 1.12 / PHP 8.4 Debian image.
+The generated build adds Composer and common Trongate PHP extensions and listens
+on the selected container port (8080 by default). Advanced users can supply their
+own digest-pinned base image. Application output still needs your registry.
+The default upstream image and Composer digests were resolved on 2026-11-19.
+See https://frankenphp.dev/docs/docker/ for the upstream image conventions. Build source must
 contain `public/index.php` and `config/config.php`. Escaping source symlinks are
 rejected. Composer install and custom commands run inside rootless build containers
 limited to 2 GiB, two CPU cores and 512 PIDs; subprocesses have a 30-minute limit.

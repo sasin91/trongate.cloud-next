@@ -127,3 +127,9 @@
 .deploy-failure-reason code {
     word-break: break-all;
 }
+
+.provision-stages { display: flex; gap: 1rem; list-style: none; padding: 0; margin: 2rem 0; }
+.provision-stages li { flex: 1; border-top: 4px solid #dce0ef; padding-top: .75rem; color: #64748b; }
+.provision-stages li.reached { border-color: #292277; color: #292277; font-weight: 600; }
+#provision-updates { font-size: .8rem; color: #64748b; }
+@media (max-width: 600px) { .provision-stages { flex-direction: column; } }

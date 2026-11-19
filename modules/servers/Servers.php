@@ -73,14 +73,22 @@ class Servers extends Trongate {
         $message = null;
         try {
             unset($_SESSION['server_status']);
-            $status = $this->providers->model->_status((string) ($_GET['operation'] ?? $_SESSION['server_operation'] ?? ''));
+            $status = $this->providers->model->_creation_progress((string) ($_GET['operation'] ?? $_SESSION['server_operation'] ?? ''));
             $_SESSION['server_operation'] = $status['operation'];
             $_SESSION['server_status'] = $status;
             if ($status['status'] === 'succeeded') {
                 $_SESSION['created_server'] = $status;
             }
         } catch (RuntimeException $error) {
+            if (($_GET['poll'] ?? '') === '1') {
+                $this->trongate_security->_json(['error' => 'Server creation not found.'], 404);
+                return;
+            }
             $message = $error->getMessage();
+        }
+        if (($_GET['poll'] ?? '') === '1') {
+            $this->trongate_security->_json($status);
+            return;
         }
         $this->templates->_render('servers', 'provision', 'server-progress', ['message' => $message]);
     }

@@ -110,6 +110,12 @@ test('SSH prerequisites are explicit and pinned identities are required',functio
 });
 test('build plan keeps source pinned and uses inherited command encoding',function() {
     $p=Build::plan(['repository'=>'owner/repo','commit'=>str_repeat('b',40),'base'=>'repo/base@sha256:'.str_repeat('a',64),'tag'=>'registry.test/app:build','commands'=>'echo hello']);
+    $default=Build::plan(['repository'=>'owner/repo','commit'=>str_repeat('b',40),'base'=>'','tag'=>'registry.test/app:build','container_port'=>9090]);
+    assert_contains('FROM '.Build::DEFAULT_BASE,$default['dockerfile']);
+    assert_contains('SERVER_NAME=:9090',$default['dockerfile']);
+    assert_contains('WORKDIR /app',$default['dockerfile']);
+    assert_contains('pdo_mysql redis gd intl zip bcmath exif',$default['dockerfile']);
+    assert_contains('COPY --from='.Build::COMPOSER_IMAGE,$default['dockerfile']);
     assert_contains(base64_encode("set -e\necho hello\n"),$p['dockerfile']); assert_same(str_repeat('b',40),$p['commit']);
 });
 class BackendProcess extends Process {
