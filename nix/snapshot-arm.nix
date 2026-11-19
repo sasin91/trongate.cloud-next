@@ -5,6 +5,7 @@
   boot.loader.efi.canTouchEfiVariables = false;
   boot.initrd.availableKernelModules = [ "virtio_pci" "virtio_scsi" "virtio_blk" ];
   networking.useDHCP = lib.mkDefault true;
+  networking.useNetworkd = true;
   services.cloud-init = {
     enable = true;
     network.enable = true;
