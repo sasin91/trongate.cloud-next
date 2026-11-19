@@ -36,7 +36,11 @@ final class Hetzner {
         } elseif (($image['type'] ?? '') !== 'snapshot' || ($image['status'] ?? '') !== 'available' || ($image['labels']['tc-nixos'] ?? '') !== 'true') {
             throw new RuntimeException('Select an available tc-nixos=true snapshot');
         }
-        $type = $this->call('GET', '/server_types/' . rawurlencode($p['server_type']))['server_type'];
+        $types = $this->list('server_types', '&name=' . rawurlencode(Validate::id($p['server_type'])));
+        if (count($types) !== 1 || $types[0]['name'] !== $p['server_type']) {
+            throw new RuntimeException('Selected server type is no longer available');
+        }
+        $type = $types[0];
         if (($type['architecture'] ?? '') !== ($image['architecture'] ?? '')) {
             throw new RuntimeException('Snapshot architecture mismatch');
         }

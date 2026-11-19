@@ -68,7 +68,7 @@ test('worker persists ambiguous create intent and never reissues POST after reco
     $http=new FixtureHttp([
         ['servers'=>[]],
         ['image'=>['type'=>'snapshot','status'=>'available','labels'=>['tc-nixos'=>'true'],'architecture'=>'x86']],
-        ['server_type'=>['architecture'=>'x86']],
+        ['server_types'=>[['name'=>'cx23','architecture'=>'x86']]],
         new RuntimeException('transport timeout provider-secret'),
         ['servers'=>[]],
     ]);
@@ -77,6 +77,7 @@ test('worker persists ambiguous create intent and never reissues POST after reco
     (new Control($s))->execute('reconcile',['operation'=>$id]); $worker->once();
     assert_same('uncertain',$s->job($id)['status']);
     assert_same(1,count(array_filter($http->calls,fn($c)=>$c[0]==='POST')));
+    assert_contains('&name=cx23',$http->calls[2][1]);
     assert_same($id,$http->calls[3][2]['labels']['tc-operation']);
     unlink($dir.'/key'); rmdir($dir); putenv('TC_STATE');
 });
