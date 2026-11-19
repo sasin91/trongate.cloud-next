@@ -35,6 +35,7 @@ jobs:
           TC_DB_PASSWORD: test-only
       - run: php tests/flows.php
       - run: php tests/server_flow.php
+      - run: node tests/server_choices.test.cjs
       - run: python3 -m unittest discover -s tests -p '*_test.py' -v
       - run: php tests/mariadb.php
         env:

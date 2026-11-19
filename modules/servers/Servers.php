@@ -47,7 +47,7 @@ class Servers extends Trongate {
                     $_SESSION['server_config'] = ['provider' => $_POST['provider'] ?? ''];
                     unset($_SESSION['server_review']);
                 }
-            } elseif (isset($_GET['provider'])) {
+            } elseif (isset($_GET['provider']) && ($_SESSION['server_config']['provider'] ?? '') !== $_GET['provider']) {
                 $_SESSION['server_config'] = ['provider' => $_GET['provider']];
                 unset($_SESSION['server_review']);
             }
