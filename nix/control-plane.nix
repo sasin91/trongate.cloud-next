@@ -2,13 +2,14 @@
 let cfg = config.services.trongate-cloud;
     root = "${cfg.package}/share/tc";
     commandPackages = [ pkgs.openssh pkgs.nix pkgs.git cfg.deployPackage ];
-    environment = { TC_STATE = "/var/lib/tc-control"; TC_KEY_FILE = "/var/lib/tc-control/key"; TC_BASE_URL = "https://${cfg.domain}"; TC_DSN = cfg.databaseDsn; TC_DB_USER = "tc"; TC_BUILD_REGISTRY = cfg.buildRegistry; };
+    environment = { TC_STATE = "/var/lib/tc-control"; TC_KEY_FILE = "/var/lib/tc-control/key"; TC_BASE_URL = "https://${cfg.domain}"; TC_DSN = cfg.databaseDsn; TC_DB_USER = "tc"; TC_BUILD_REGISTRY = cfg.buildRegistry; TC_BUILD_REGISTRY_SECRET = cfg.buildRegistrySecret; };
 in {
   options.services.trongate-cloud = {
     enable = lib.mkEnableOption "Trongate Cloud control plane";
     domain = lib.mkOption { type = lib.types.str; };
     package = lib.mkOption { type = lib.types.package; };
     deployPackage = lib.mkOption { type = lib.types.package; };
+    buildRegistrySecret = lib.mkOption { type = lib.types.str; default = ""; description = "Encrypted credential reference containing application registry pull auth JSON"; };
     buildRegistry = lib.mkOption { type = lib.types.str; default = ""; description = "OCI registry and namespace for automatically named app builds; credentials stay on the builder"; };
     worker = lib.mkOption { type = lib.types.bool; default = true; };
     panel = lib.mkOption { type = lib.types.bool; default = true; };

@@ -64,7 +64,9 @@ def build(p):
                  '--security-opt=no-new-privileges', '--tag', p['tag'],
                  '--file', str(work/'Dockerfile'), str(source)])
             digest_file = work/'digest'
-            run(['podman', 'push', '--digestfile', str(digest_file), p['tag']])
+            auth = Path.home()/'.config/containers/auth.json'
+            auth_args = ['--authfile', str(auth)] if auth.exists() else []
+            run(['podman', 'push'] + auth_args + ['--digestfile', str(digest_file), p['tag']])
             digest = digest_file.read_text().strip()
             if not re.fullmatch(r'sha256:[a-f0-9]{64}', digest):
                 raise RuntimeError('registry did not return a digest')

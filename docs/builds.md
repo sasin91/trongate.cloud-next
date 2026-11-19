@@ -93,3 +93,26 @@ Operation steps, exit outcomes and digests are retained; inspect builder-local
 tools privately for deeper diagnostics. A builder interruption is uncertain until
 its locked, per-operation result is observed. Container resource limits do not
 bound Git repository size; impose disk quotas and network policy on the builder VM.
+
+## Dedicated NixOS builder
+
+Import `nixosModules.builder`, enable `services.trongate-builder`, and set its
+`authorizedKeys` to a dedicated enrollment public key. The `tc-builder` user has
+rootless Podman, a persistent systemd user manager, and no administrative groups.
+The build account is limited to 3 GiB; individual build scopes remain limited to
+2 GiB, two CPU cores, and 512 tasks.
+
+Optionally set `registryDomain` to host a private OCI registry on the same machine.
+Point DNS at the builder before requesting HTTPS. Install a bcrypt htpasswd file
+at `registryPasswordFile`, owned by root and readable by the docker-registry group.
+Registry storage and authentication files are not writable by the build user.
+Place the builder's registry auth JSON at
+`/home/tc-builder/.config/containers/auth.json` with mode 0600. Keep all credentials
+out of Nix expressions and Git. The registry listens only on loopback behind Caddy.
+
+Store application pull authentication as an encrypted credential in the control
+plane and set `services.trongate-cloud.buildRegistrySecret` to that credential ID.
+Only this registry credential is passed to application deployments, never the
+builder's SSH key or provider credentials. Set `buildRegistry` to the registry
+hostname and image namespace, then enroll the host as `tc-builder` and inspect it.
+No application containers run on this host.

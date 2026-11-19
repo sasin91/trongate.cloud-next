@@ -93,6 +93,11 @@ class Apps_model extends Model {
             $commit=self::_github($repository.'/commits/'.rawurlencode($branch))['sha'];
             $build=['builder'=>$builder,'plan'=>Build::plan(['repository'=>$repository,'commit'=>$commit,'base'=>trim($p['base'] ?? ''),'container_port'=>$spec['container_port'],'tag'=>$target['tag'],
                 'commands'=>$p['build_commands'] ?? '', 'extensions'=>preg_split('/[\s,]+/',trim($p['php_extensions'] ?? ''),-1,PREG_SPLIT_NO_EMPTY)])];
+            $registrySecret = trim(getenv('TC_BUILD_REGISTRY_SECRET') ?: '');
+            if ($registrySecret !== '') {
+                $spec['registry_secret'] = Validate::id($registrySecret);
+                $this->secret($registrySecret);
+            }
             $spec['commit']=$commit;
         }
         $s=$this; $s->connection()->beginTransaction();

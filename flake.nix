@@ -40,6 +40,10 @@
       imports = [ ./nix/runtime.nix ];
       services.trongate-runtime.package = self.packages.${pkgs.stdenv.hostPlatform.system}.runtime;
     };
+    nixosModules.builder = { pkgs, ... }: {
+      imports = [ ./nix/builder.nix ];
+      services.trongate-builder.package = self.packages.${pkgs.stdenv.hostPlatform.system}.builder;
+    };
     nixosModules.control-plane = { pkgs, ... }: {
       imports = [ ./nix/control-plane.nix ];
       services.trongate-cloud.package = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
