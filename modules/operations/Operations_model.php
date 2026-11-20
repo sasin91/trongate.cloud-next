@@ -42,7 +42,7 @@ class Operations_model extends Model {
         try {
             $n = $this->run("UPDATE jobs SET status=?,result=?,lease=0 WHERE id=? AND owner=? AND status='running'", [$status,tc_json($result),$id,$owner])->rowCount();
             if (!$n) { throw new RuntimeException('Worker lease lost'); }
-            if (in_array($status,['succeeded','failed'])) { $this->run('DELETE FROM resource_locks WHERE operation=?', [$id]); }
+            if (in_array($status,['succeeded','failed','waiting'])) { $this->run('DELETE FROM resource_locks WHERE operation=?', [$id]); }
             $this->connection()->commit();
         } catch (Throwable $e) { $this->connection()->rollBack(); throw $e; }
     }

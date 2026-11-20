@@ -31,8 +31,17 @@ class Apps_model extends Model {
         return json_decode($body,true,512,JSON_THROW_ON_ERROR);
     }
 
-    function _build_target(string $target, string $app, string $request): array {
+    function _build_target(string $target, string $app, string $request, string $mode = 'local'): array {
         $application = $this->get('server', $target);
+        if ($mode === 'local') {
+            if (empty($application['local_builder_ready'])) {
+                throw new RuntimeException('Enable local builds on this server from Servers before continuing. Your setup is saved.');
+            }
+            return ['builder' => $target, 'mode' => 'local', 'tag' => 'localhost/tc/' . Validate::id($app) . ':build-' . substr(hash('sha256', $request), 0, 24)];
+        }
+        if ($mode !== 'dedicated') {
+            throw new RuntimeException('Choose application server or dedicated builder.');
+        }
         $architecture = $application['facts']['arch'] ?? '';
         $applicationServers = array_column($this->all('app'), 'server');
         $candidates = [];
@@ -58,7 +67,7 @@ class Apps_model extends Model {
         }
         Validate::match($registry, '~^[a-z0-9][a-z0-9.-]*(?::[0-9]+)?(?:/[a-z0-9][a-z0-9._-]*)*$~D', 'configured build registry');
         $tag = $registry . '/' . Validate::id($app) . ':build-' . substr(hash('sha256', $request), 0, 24);
-        return ['builder' => $candidates[0]['id'], 'tag' => $tag];
+        return ['builder' => $candidates[0]['id'], 'mode' => 'dedicated', 'tag' => $tag];
     }
 
     function _plan_launch(array $p, string $request): string {
@@ -85,16 +94,16 @@ class Apps_model extends Model {
         $spec=Validate::release($spec);
         $build=null;
         if ($source==='git') {
-            $target = $this->_build_target($server, $id, $request);
+            $target = $this->_build_target($server, $id, $request, $p['build_mode'] ?? 'local');
             $builder = $target['builder'];
             $repository=self::_repository($p['repository'] ?? '');
             $branch=trim($p['branch'] ?? 'main');
             if ($branch==='' || strlen($branch)>200) { throw new RuntimeException('Choose a branch or commit.'); }
             $commit=self::_github($repository.'/commits/'.rawurlencode($branch))['sha'];
-            $build=['builder'=>$builder,'plan'=>Build::plan(['repository'=>$repository,'commit'=>$commit,'base'=>trim($p['base'] ?? ''),'container_port'=>$spec['container_port'],'tag'=>$target['tag'],
+            $build=['builder'=>$builder,'mode'=>$target['mode'],'plan'=>Build::plan(['repository'=>$repository,'commit'=>$commit,'base'=>'','container_port'=>$spec['container_port'],'tag'=>$target['tag'],
                 'commands'=>$p['build_commands'] ?? '', 'extensions'=>preg_split('/[\s,]+/',trim($p['php_extensions'] ?? ''),-1,PREG_SPLIT_NO_EMPTY)])];
             $registrySecret = trim(getenv('TC_BUILD_REGISTRY_SECRET') ?: '');
-            if ($registrySecret !== '') {
+            if ($target['mode'] === 'dedicated' && $registrySecret !== '') {
                 $spec['registry_secret'] = Validate::id($registrySecret);
                 $this->secret($registrySecret);
             }

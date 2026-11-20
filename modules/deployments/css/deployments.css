@@ -133,3 +133,19 @@
 .provision-stages li.reached { border-color: #292277; color: #292277; font-weight: 600; }
 #provision-updates { font-size: .8rem; color: #64748b; }
 @media (max-width: 600px) { .provision-stages { flex-direction: column; } }
+
+.deployment-timeline { list-style: none; padding: 0; margin: 2rem 0; }
+.deployment-timeline li { display: flex; gap: 1rem; position: relative; padding: 0 0 2rem; }
+.deployment-timeline li:not(:last-child)::before { content: ''; position: absolute; left: 11px; top: 24px; bottom: 0; width: 2px; background: #d8dced; }
+.timeline-dot { flex: 0 0 24px; height: 24px; border: 2px solid #c6cbe0; border-radius: 50%; background: #f5f6fa; }
+.deployment-timeline [data-status=succeeded] .timeline-dot { background: #23845f; border-color: #23845f; }
+.deployment-timeline [data-status=running] .timeline-dot { background: #6d5fee; border-color: #6d5fee; }
+.deployment-timeline [data-status=failed] .timeline-dot, .deployment-timeline [data-status=uncertain] .timeline-dot { background: #c74242; border-color: #c74242; }
+.deployment-timeline [data-status=waiting] .timeline-dot { background: #e9b848; border-color: #e9b848; }
+.deployment-timeline h2 { margin: 0; font-size: 1.15rem; }
+.deployment-timeline small { font-size: .75rem; font-weight: normal; margin-left: .7rem; }
+.deployment-timeline p { margin: .5rem 0 0; }
+.deployment-activity { list-style: none; padding: 0; }
+.deployment-activity li { padding: .5rem 0; border-bottom: 1px solid #e5e7f0; }
+.deployment-activity time { color: #666; font-variant-numeric: tabular-nums; margin-right: 1rem; }
+#timeline-diagnostics { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }

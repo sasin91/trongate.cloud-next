@@ -9,6 +9,11 @@ class Servers extends Trongate {
         }
         $this->templates->_render('servers', 'index', 'servers');
     }
+    function builds(): void {
+        $this->trongate_security->make_sure_allowed();
+        $this->templates->_render('servers', 'builds', 'build-servers');
+    }
+
     function connect(): void {
         $this->trongate_security->make_sure_allowed();
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {

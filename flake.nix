@@ -11,12 +11,12 @@
       runtime = pkgs.writeShellApplication {
         name = "tc-runtime";
         runtimeInputs = with pkgs; [ python3 podman systemd curl caddy nix util-linux which ];
-        text = ''exec python3 ${./runtime/tc-runtime.py} "$@"'';
+        text = ''exec python3 ${./runtime}/tc-runtime.py "$@"'';
       };
       builder = pkgs.writeShellApplication {
         name = "tc-build";
         runtimeInputs = with pkgs; [ python3 podman git systemd ];
-        text = ''exec python3 ${./runtime/tc-build.py} "$@"'';
+        text = ''exec python3 ${./runtime}/tc-build.py "$@"'';
       };
       default = pkgs.stdenvNoCC.mkDerivation {
         pname = "trongate-cloud-next"; version = "0.1.0"; src = self;
@@ -38,6 +38,7 @@
     });
     nixosModules.runtime = { pkgs, ... }: {
       imports = [ ./nix/runtime.nix ];
+      services.trongate-runtime.builderPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.builder;
       services.trongate-runtime.package = self.packages.${pkgs.stdenv.hostPlatform.system}.runtime;
     };
     nixosModules.builder = { pkgs, ... }: {

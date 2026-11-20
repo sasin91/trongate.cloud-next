@@ -780,3 +780,7 @@ textarea.wz-sql {
 .wz-tip {
     margin-top: 18px;
 }
+
+.draft-save { display: inline-block; margin-left: 1rem; cursor: help; font-size: .9rem; }
+
+.draft-toolbar { display: flex; align-items: center; gap: 1rem; }

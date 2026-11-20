@@ -52,6 +52,7 @@ if podman info >/dev/null 2>&1; then echo podman-ready=yes; fi
 if test -f /sys/fs/cgroup/cgroup.controllers && grep -qw memory /sys/fs/cgroup/cgroup.controllers && grep -qw cpu /sys/fs/cgroup/cgroup.controllers; then echo cgroups=yes; fi
 if test "$(tc-runtime --version 2>/dev/null)" = 1; then echo protocol=yes; fi
 if test "$(id -u)" != 0 && command -v tc-build >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && podman info >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then echo builder=yes; fi
+if test "$(id -u)" = 0 && command -v tc-build >/dev/null 2>&1 && id tc-builder >/dev/null 2>&1 && runuser -u tc-builder -- env XDG_RUNTIME_DIR=/run/user/1100 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1100/bus systemctl --user show-environment >/dev/null 2>&1; then echo local-builder=yes; fi
 SH;
         $r = $this->command($s, 'sh -s', $script);
         if ($r['exit'] !== 0) {
@@ -79,7 +80,7 @@ SH;
                 $missing[] = $tool;
             }
         }
-        return ['builder_ready' => ($facts['builder'] ?? '') === 'yes', 'facts' => $facts, 'missing' => $missing, 'application_ready' => $missing === [], 'managed_eligible' => ($facts['os'] ?? '') === 'nixos' && ($facts['nix'] ?? '') === 'yes' && ($facts['privileged'] ?? '') === 'yes', 'inspected_at' => time(), 'connected_at' => time()];
+        return ['local_builder_ready' => ($facts['local-builder'] ?? '') === 'yes', 'builder_ready' => ($facts['builder'] ?? '') === 'yes', 'facts' => $facts, 'missing' => $missing, 'application_ready' => $missing === [], 'managed_eligible' => ($facts['os'] ?? '') === 'nixos' && ($facts['nix'] ?? '') === 'yes' && ($facts['privileged'] ?? '') === 'yes', 'inspected_at' => time(), 'connected_at' => time()];
     }
     function runtime(array $server, array $request, ?callable $heartbeat = null): array {
         $r = $this->command($server, 'tc-runtime', tc_json($request), 1800, $heartbeat);

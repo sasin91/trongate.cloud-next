@@ -46,6 +46,22 @@ in {
       '';
     };
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.panel [ 80 443 ];
+    systemd.timers.tc-monitor = lib.mkIf cfg.worker {
+      wantedBy = [ "timers.target" ];
+      timerConfig = { OnBootSec = "2m"; OnUnitActiveSec = "5m"; };
+    };
+    systemd.services.tc-monitor = lib.mkIf cfg.worker {
+      description = "Collect application server capacity hints";
+      after = [ "network-online.target" "mysql.service" ];
+      wants = [ "network-online.target" ];
+      inherit environment;
+      path = commandPackages;
+      serviceConfig = {
+        Type = "oneshot"; User = "tc"; Group = "tc"; UMask = "0077";
+        ExecStart = "${cfg.package}/bin/tc monitor";
+        EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
+      };
+    };
     systemd.services.tc-worker = lib.mkIf cfg.worker {
       description = "Trongate durable operation worker";
       wantedBy = [ "multi-user.target" ]; after = [ "network-online.target" "mysql.service" ];

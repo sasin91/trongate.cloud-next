@@ -5,9 +5,26 @@ class Deployments extends Trongate {
         $this->trongate_security->make_sure_allowed();
         try { $operation=(new Control($this->model))->execute('operation',['operation'=>$_GET['operation'] ?? '']); }
         catch (Throwable) { $this->trongate_security->_json(['error'=>'Deployment not found'],404); return; }
+        $timeline = $this->model->_timeline($operation['job']['id']);
+        if (($_GET['timeline'] ?? '') === '1') {
+            $this->trongate_security->_json($timeline ?? ['error' => 'Not an app deployment']);
+            return;
+        }
         if (($_GET['poll'] ?? '')==='1') { $this->trongate_security->_json($operation); return; }
-        $this->templates->_render('deployments','progress','deployment',['operation'=>$operation]);
+        $this->templates->_render('deployments', $timeline ? 'timeline' : 'progress', 'deployment', ['operation' => $operation, 'timeline' => $timeline]);
     }
+    function live(): void {
+        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->_csrf();
+        $id = (string) ($_POST['operation'] ?? '');
+        try {
+            $this->model->_go_live($id);
+            header('Location: /deployments?operation=' . rawurlencode($id), true, 303);
+        } catch (RuntimeException $error) {
+            $this->templates->_render('deployments', 'timeline', 'deployment', ['timeline' => $this->model->_timeline($id), 'message' => $error->getMessage()]);
+        }
+    }
+
     function change(): void {
         $this->trongate_security->make_sure_allowed(); $this->trongate_security->_csrf();
         $store=$this->model; $command=(string)($_POST['command'] ?? '');

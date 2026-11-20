@@ -110,14 +110,17 @@ try {
     if ((int)$store->run("SELECT COUNT(*) FROM records WHERE kind='app-draft'")->fetchColumn()!==0) { throw new RuntimeException('Launched draft retained'); }
     $id=$store->run('SELECT id FROM jobs')->fetchColumn();
     [$code,$page]=request(null,'/deployments?operation='.$id);
-    if ($code!==200 || !str_contains($page,'Deploy progress') || str_contains($page,'web-fixture-secret')) { throw new RuntimeException('Deployment view failed or exposed secret'); }
+    if ($code!==200 || !str_contains($page,'deployment-timeline') || str_contains($page,'web-fixture-secret')) { throw new RuntimeException('Deployment view failed or exposed secret'); }
     [$code,$page]=request(null,'/deployments?poll=1&operation='.$id);
     if ($code!==200 || json_decode($page,true)['job']['status']!=='pending' || str_contains($page,'web-fixture-secret')) { throw new RuntimeException('Deployment polling failed'); }
+    [$code, $timelineJson] = request(null, '/deployments?poll=1&timeline=1&operation=' . $id);
+    if ($code !== 200 || count(json_decode($timelineJson, true)['stages']) !== 4 || str_contains($timelineJson, 'web-fixture-secret')) { throw new RuntimeException('Timeline API failed'); }
+    if (request(['operation' => $id, 'csrf_token' => 'bad'], '/deployments/live')[0] !== 403) { throw new RuntimeException('Go live bypassed CSRF'); }
     foreach (['/apps_module/js/flows.js','/templates_module/css/wizard.css','/templates_module/css/panel.css','/deployments_module/js/progress.js','/deployments_module/css/deployments.css'] as $asset) {
         [$code,$body]=request(null,$asset);
         if ($code!==200 || strlen($body)<100 || str_contains($body,'Control plane unavailable')) { throw new RuntimeException('Module asset not served: '.$asset); }
     }
-    foreach (['/apps/create','/apps','/servers','/servers/connect','/servers/create','/servers/confirm','/providers','/operations','/'] as $route) {
+    foreach (['/servers/builds','/apps/create','/apps','/servers','/servers/connect','/servers/create','/servers/confirm','/providers','/operations','/'] as $route) {
         [$code,$body]=request(null,$route);
         if ($code!==200 || str_contains($body,'Warning:') || str_contains($body,'Control plane unavailable')) { throw new RuntimeException('Module view failed: '.$route); }
     }

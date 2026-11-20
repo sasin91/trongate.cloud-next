@@ -24,6 +24,7 @@ try {
     // Local CLI authorization is OS access to installation key and database.
     Encryptor::validate_key(installation_key());
     if ($command==='migrate') { (new Setup_model('setup',$s->connection()))->migrate(); echo "Migrations applied\n"; exit; }
+    if ($command === 'monitor') { (new Monitoring_model('monitoring', $s->connection()))->_collect(); echo "Monitoring collected\n"; exit; }
     if ($command==='worker') {
         $worker=new Worker($s);
         do { $worker->once(); if (($argv[2] ?? '')==='--once') { break; } sleep(3); } while (true);

@@ -32,7 +32,7 @@ class Apps extends Trongate {
     function draft(): void {
         $this->trongate_security->make_sure_allowed();
         $this->trongate_security->_csrf();
-        $fields = ['source', 'repository', 'image', 'branch', 'environment', 'label', 'domain', 'server', 'base', 'build_commands', 'php_extensions', 'health', 'container_port', 'memory_mb', 'cpus', 'persistent_paths', 'wizard_step'];
+        $fields = ['source', 'repository', 'image', 'branch', 'environment', 'label', 'domain', 'server', 'base', 'build_mode', 'build_commands', 'php_extensions', 'health', 'container_port', 'memory_mb', 'cpus', 'persistent_paths', 'wizard_step'];
         $draft = array_intersect_key($_POST, array_flip($fields));
         if (strlen(tc_json($draft)) > 131072) {
             $this->trongate_security->_json(['error' => 'Draft is too large.'], 422);

@@ -50,6 +50,28 @@ class RuntimeTests(unittest.TestCase):
         return {'action': 'deploy', 'operation': f'{n:032x}', 'app': 'demo',
                 'release': {'domain': 'demo.test', 'health': '/', 'migration': []}}
 
+    def test_first_deployment_waits_for_go_live_without_rebuild(self):
+        request = dict(self.request(1), defer_public=True)
+        r = self.runtime
+        self.assertEqual('waiting', r.dispatch(request)['status'])
+        self.assertIsNone(r.current)
+        self.assertEqual('waiting', r.dispatch(request)['status'])
+        self.assertEqual(1, r.starts)
+        r.public_bad = True
+        self.assertEqual('waiting', r.dispatch(dict(request, go_live=True))['status'])
+        self.assertEqual(1, r.starts)
+        self.assertEqual('succeeded', r.dispatch(dict(request, go_live=True))['status'])
+        self.assertEqual(1, r.starts)
+        self.assertFalse((r.root/'apps/demo/staged.json').exists())
+
+    def test_waiting_deployment_does_not_block_another_app(self):
+        r = self.runtime
+        r.dispatch(dict(self.request(1), defer_public=True))
+        other = dict(self.request(2), app='other', release={'domain': 'other.test', 'health': '/', 'migration': []})
+        self.assertEqual('succeeded', r.dispatch(other)['status'])
+        with self.assertRaises(RuntimeError):
+            r.dispatch(self.request(3))
+
     def test_deploy_rollback_and_idempotent_retry(self):
         r = self.runtime
         self.assertEqual('succeeded', r.dispatch(self.request(1))['status'])

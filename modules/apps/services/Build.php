@@ -19,8 +19,8 @@ final class Build {
             $extensions[] = Validate::match($extension, '/^[a-z][a-z0-9_]{0,39}$/D', 'PHP extension');
         }
         // Source is never evaluated on the control plane. Composer and customer commands
-        // execute only inside the dedicated builder's bounded Podman build containers.
-        $setup = ['COPY . ./', 'RUN if [ -f composer.json ]; then composer install --no-dev --optimize-autoloader --no-scripts --no-interaction; fi'];
+        // execute only inside the build user's bounded Podman build containers.
+        $setup = ['COPY . ./'];
         $preparation = [];
         if ($defaultBase) {
             $extensions = array_unique(array_merge(['pdo_mysql', 'redis', 'gd', 'intl', 'zip', 'bcmath', 'exif'], $extensions));

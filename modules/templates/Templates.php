@@ -4,7 +4,7 @@ class Templates extends Trongate {
         $this->apps->_restore_draft();
         $_SESSION['csrf_token'] ??= bin2hex(random_bytes(32));
         $control=new Control(new Operations_model('operations'));
-        $data+=['page'=>$page,'operation'=>null,'signedIn'=>true,'message'=>null,'deleting_server'=>null,
+        $data+=['page'=>$page,'operation'=>null,'signedIn'=>true,'message'=>null,'deleting_server'=>null,'timeline'=>null,
             'inventory'=>$control->execute('inventory',[]),'operations'=>$control->execute('operations',[])];
         $data['pending_servers'] = $this->servers->model->_pending_connections();
         $data['view_module']=$module; $data['view_file']=$view;

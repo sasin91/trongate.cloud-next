@@ -2,13 +2,26 @@
 let cfg = config.services.trongate-runtime; in {
   options.services.trongate-runtime = {
     enable = lib.mkEnableOption "Trongate Podman runtime";
+    builderPackage = lib.mkOption { type = lib.types.package; };
+    localBuilds = lib.mkOption { type = lib.types.bool; default = true; };
     package = lib.mkOption { type = lib.types.package; };
   };
   config = lib.mkIf cfg.enable {
     virtualisation.podman.enable = true;
+    users.users.tc-builder = lib.mkIf cfg.localBuilds {
+      isNormalUser = true;
+      uid = 1100;
+      home = "/home/tc-builder";
+      linger = true;
+      subUidRanges = [{ startUid = 200000; count = 65536; }];
+      subGidRanges = [{ startGid = 200000; count = 65536; }];
+    };
+    systemd.slices."user-1100" = lib.mkIf cfg.localBuilds {
+      sliceConfig = { MemoryMax = "1536M"; CPUQuota = "100%"; TasksMax = 1024; };
+    };
     services.openssh.enable = true;
     networking.firewall.allowedTCPPorts = [ 22 80 443 ];
-    environment.systemPackages = [ cfg.package pkgs.caddy pkgs.curl pkgs.python3 pkgs.util-linux ];
+    environment.systemPackages = [ cfg.package pkgs.caddy pkgs.curl pkgs.python3 pkgs.util-linux ] ++ lib.optionals cfg.localBuilds [ cfg.builderPackage pkgs.git pkgs.slirp4netns pkgs.fuse-overlayfs ];
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
     # Retained profile generations + explicit runtime roots protect rollback inputs.
     nix.gc.automatic = lib.mkDefault false;
@@ -17,6 +30,15 @@ let cfg = config.services.trongate-runtime; in {
       export PATH=${lib.makeBinPath [ pkgs.coreutils ]}
       ${builtins.readFile ../runtime/tc-systemd-generator.sh}
     '';
+    systemd.timers.tc-cleanup = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = { OnBootSec = "15m"; OnUnitActiveSec = "1h"; };
+    };
+    systemd.services.tc-cleanup = {
+      description = "Retire old application releases, preserving rollback";
+      serviceConfig.Type = "oneshot";
+      script = ''printf '%s' '{"action":"cleanup"}' | ${cfg.package}/bin/tc-runtime'';
+    };
     systemd.services.tc-proxy = {
       description = "Trongate application routing";
       wantedBy = [ "multi-user.target" ]; after = [ "network-online.target" ];

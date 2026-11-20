@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -122,7 +123,14 @@ class Runtime:
             auth_args = ['--authfile', str(auth_file)]
         try:
             self.checkpoint('pulling-image')
-            self.run(['podman', 'pull']+auth_args+[image], 600)
+            if image.startswith('localhost/tc/'):
+                image_id = image.rsplit('@', 1)[1]
+                observed = self.run(['podman', 'image', 'inspect', '--format', '{{.Id}}', image_id]).removeprefix('sha256:')
+                if observed != image_id.removeprefix('sha256:'):
+                    raise RuntimeError('local build image is missing; rebuild on this server')
+                image = image_id
+            else:
+                self.run(['podman', 'pull']+auth_args+[image], 600)
         finally:
             auth_file.unlink(missing_ok=True)
         # Allocate a free port through Podman, never a racy application-side scan.
@@ -180,12 +188,31 @@ class Runtime:
         state_path = self.root/'apps'/app/'state.json'
         state = self.read(state_path, {'active': None, 'previous': None})
         journal = self.read(journal_path)
+        def progress(phase):
+            if journal:
+                journal['phase'] = phase
+                journal.setdefault('events', []).append({'step': phase, 'at': int(time.time())})
+                self.write(journal_path, journal)
+        self.progress = progress
+        if journal and journal['status'] == 'waiting':
+            if not request.get('go_live'):
+                return journal
+            if state != journal['before']:
+                raise RuntimeError('The active release changed while waiting to go live')
+            try:
+                return self.complete_candidate(app, state_path, journal_path, journal, request)
+            except Exception as error:
+                journal['error'] = str(error) if isinstance(error, RuntimeError) else type(error).__name__
+                return self.recover(app, journal_path, state_path, journal)
         if journal:
             if journal['status'] in ('succeeded', 'failed'):
                 return journal
             # Never repeat a mutation after a broken session. Restore recorded route,
             # or report uncertainty if a migration/host event needs operator review.
             return self.recover(app, journal_path, state_path, journal)
+        staged = self.read(self.root/'apps'/app/'staged.json')
+        if staged and staged['operation'] != operation:
+            raise RuntimeError('Finish the staged deployment before starting another one')
         previous = state['active']
         journal = {'operation': operation, 'status': 'running', 'phase': 'intent', 'before': state,
                    'public_check': request.get('public_check', True), 'events': []}
@@ -204,9 +231,13 @@ class Runtime:
             else:
                 spec = request['release']
                 # A domain belongs to exactly one application on a host.
-                for other in (self.root/'apps').glob('*/state.json'):
-                    active = self.read(other, {}).get('active')
-                    if other.parent.name != app and active and active['domain'] == spec['domain']:
+                for other in (self.root/'apps').iterdir():
+                    if other.name == app:
+                        continue
+                    active = self.read(other/'state.json', {}).get('active')
+                    staged_other = self.read(other/'staged.json', {})
+                    pending = self.read(self.root/'operations'/(staged_other.get('operation', '')+'.json'), {}).get('candidate')
+                    if any(item and item['domain'] == spec['domain'] for item in [active, pending]):
                         raise RuntimeError('domain is already assigned')
                 candidate = self.stage(app, operation, spec, request.get('secret_values', {}), request.get('file_values', {}), request.get('registry_auth'))
             journal.update({'candidate': candidate, 'phase': 'candidate'})
@@ -220,33 +251,52 @@ class Runtime:
                 journal['phase'] = 'migration-completed'
                 journal['migration'] = 'completed; application rollback does not undo data changes'
                 self.write(journal_path, journal)
-            if not self.healthy(candidate):
-                raise RuntimeError('candidate health check failed')
-            journal['phase'] = 'switching'
-            self.write(journal_path, journal)
-            self.route(app, candidate)
-            if not self.healthy(candidate):
-                raise RuntimeError('health check failed after traffic switch')
-            if request.get('public_check', True) and not self.health('https://'+candidate['domain']+candidate['health'], 3):
-                raise RuntimeError('public health check failed')
-            self.write(state_path, {'active': candidate, 'previous': previous})
-            journal.update({'status': 'succeeded', 'phase': 'accepted', 'active': candidate['operation']})
-            self.write(journal_path, journal)
-            # Accepted release is durable before retirement. A retirement error must
-            # not misreport the healthy active route as failed.
-            try:
-                if previous and previous['operation'] != candidate['operation']:
-                    self.stop(previous)
-            except Exception:
-                journal['retirement'] = 'previous process still running; safe to retire later'
-                self.write(journal_path, journal)
-            return journal
+            return self.complete_candidate(app, state_path, journal_path, journal, request)
         except Exception as e:
             journal['error'] = str(e) if isinstance(e, (RuntimeError, ValueError)) else type(e).__name__
             if isinstance(e, OSError):
                 journal['errno'] = e.errno
             self.write(journal_path, journal)
             return self.recover(app, journal_path, state_path, journal)
+
+    def complete_candidate(self, app, state_path, journal_path, journal, request):
+        candidate = journal['candidate']
+        previous = journal['before']['active']
+        self.checkpoint('checking-local')
+        if not self.healthy(candidate):
+            raise RuntimeError('candidate health check failed')
+        if request.get('defer_public') and request.get('public_check', True) and not previous and not request.get('go_live'):
+            journal.update(status='waiting', phase='awaiting-go-live')
+            self.write(self.root/'apps'/app/'staged.json', {'operation': journal['operation']})
+            self.write(journal_path, journal)
+            return journal
+        journal['phase'] = 'switching'
+        self.write(journal_path, journal)
+        self.route(app, candidate)
+        if not self.healthy(candidate):
+            raise RuntimeError('health check failed after traffic switch')
+        self.checkpoint('checking-public')
+        if request.get('public_check', True) and not self.health('https://'+candidate['domain']+candidate['health'], 3):
+            if request.get('defer_public'):
+                self.route(app, previous)
+                journal.update(status='waiting', phase='awaiting-go-live', message='Public HTTPS is not ready yet. Check DNS and try again.')
+                self.write(self.root/'apps'/app/'staged.json', {'operation': journal['operation']})
+                self.write(journal_path, journal)
+                return journal
+            raise RuntimeError('public health check failed')
+        (self.root/'apps'/app/'staged.json').unlink(missing_ok=True)
+        self.write(state_path, {'active': candidate, 'previous': previous})
+        journal.update({'status': 'succeeded', 'phase': 'accepted', 'active': candidate['operation']})
+        self.write(journal_path, journal)
+        # Accepted release is durable before retirement. A retirement error must
+        # not misreport the healthy active route as failed.
+        try:
+            if previous and previous['operation'] != candidate['operation']:
+                self.stop(previous)
+        except Exception:
+            journal['retirement'] = 'previous process still running; safe to retire later'
+            self.write(journal_path, journal)
+        return journal
 
     def recover(self, app, journal_path, state_path, journal):
         previous = journal['before']['active']
@@ -273,6 +323,8 @@ class Runtime:
                 self.run(['podman', 'rm', '--force', '--ignore', name])
             journal['status'] = 'uncertain' if journal['phase'] == 'migration-started' else 'failed'
             journal['restored'] = previous['operation'] if previous else None
+            if journal['status'] == 'failed':
+                (self.root/'apps'/app/'staged.json').unlink(missing_ok=True)
         except Exception:
             journal['status'] = 'uncertain'
             journal['recovery'] = 'cannot verify restored route; operator reconciliation required'
@@ -362,7 +414,83 @@ class Runtime:
             return result
         return {'status': 'uncertain', **observed}
 
+    def local_build(self, request):
+        operation = self.match(request['operation'], r'[a-f0-9]{32}')
+        self.match(request['tag'], r'localhost/tc/[a-z][a-z0-9-]{0,39}:build-[a-f0-9]{24}')
+        journal_path = self.root/'operations'/(operation+'.json')
+        with open(self.root/'build.lock', 'a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return {'status': 'pending', 'reason': 'Another local build is running.'}
+            recorded = self.read(journal_path)
+            if recorded and recorded.get('status') == 'succeeded':
+                return recorded
+            if shutil.disk_usage(self.root).free < 5 * 1024**3:
+                return {'status': 'failed', 'reason': 'Free at least 5 GB on this server or use a dedicated builder.'}
+            memory = {line.split(':')[0]: int(line.split()[1]) for line in Path('/proc/meminfo').read_text().splitlines()}
+            if memory.get('MemAvailable', 0) < 1536 * 1024:
+                return {'status': 'failed', 'reason': 'Local builds need 1.5 GB available memory. Use a dedicated builder or a larger server.'}
+            plan = {key: request[key] for key in ['operation', 'repository', 'commit', 'tag', 'dockerfile']}
+            plan['output'] = 'archive'
+            # Build code executes in rootless containers with no runtime or app mounts.
+            process = subprocess.run(['runuser', '-u', 'tc-builder', '--', 'env', '-i', 'HOME=/home/tc-builder',
+                                      'USER=tc-builder', 'LOGNAME=tc-builder', 'PATH=/run/current-system/sw/bin',
+                                      'XDG_RUNTIME_DIR=/run/user/1100', 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1100/bus', 'tc-build'],
+                                     input=json.dumps(plan), text=True, capture_output=True, timeout=3500, cwd='/home/tc-builder')
+            if process.returncode:
+                raise RuntimeError('Local builder interrupted')
+            result = json.loads(process.stdout)
+            if result.get('status') != 'succeeded':
+                return result
+            image = self.match(result['image'], r'localhost/tc/[a-z][a-z0-9-]{0,39}@sha256:[a-f0-9]{64}')
+            archive = Path('/home/tc-builder/.local/state/tc-build')/(operation+'.oci')
+            if not archive.is_file() or archive.is_symlink():
+                raise RuntimeError('Local build archive is missing')
+            self.run(['podman', 'load', '--input', str(archive)], 600)
+            image_id = image.rsplit('@', 1)[1]
+            actual = self.run(['podman', 'image', 'inspect', '--format', '{{.Id}}', image_id]).removeprefix('sha256:')
+            if actual != image_id.removeprefix('sha256:'):
+                raise RuntimeError('Imported image does not match build output')
+            self.write(journal_path, result)
+            archive.unlink()
+            return result
+
+    def cleanup(self):
+        removed = 0
+        for app_dir in (self.root/'apps').iterdir():
+            state = self.read(app_dir/'state.json', {})
+            keep = {release['operation'] for release in state.values() if isinstance(release, dict) and 'operation' in release}
+            staged = self.read(app_dir/'staged.json', {})
+            if staged:
+                keep.add(staged['operation'])
+            for path in (app_dir/'releases').glob('*/release.json'):
+                release = self.read(path)
+                operation = release['operation']
+                journal = self.read(self.root/'operations'/(operation+'.json'), {})
+                if operation in keep or journal.get('status') not in ('succeeded', 'failed') or path.stat().st_mtime > time.time() - 86400:
+                    continue
+                self.stop(release)
+                self.run(['podman', 'rm', '--ignore', release['container']])
+                (self.root/'units'/release['unit']).unlink(missing_ok=True)
+                # No --force: Podman refuses removal while another retained container uses it.
+                if release['image'].startswith('localhost/tc/'):
+                    with contextlib.suppress(RuntimeError):
+                        self.run(['podman', 'rmi', release['image'].rsplit('@', 1)[1]])
+                shutil.rmtree(path.parent)
+                removed += 1
+        return {'status': 'succeeded', 'removed_releases': removed}
+
     def dispatch(self, request):
+        if request['action'] == 'build':
+            return self.local_build(request)
+        if request['action'] == 'metrics':
+            from tc_metrics import collect
+            return collect(self.root)
+        if request['action'] == 'status':
+            operation = self.match(request['operation'], r'[a-f0-9]{32}')
+            journal = self.read(self.root/'operations'/(operation+'.json'), {})
+            return {key: journal[key] for key in ['status', 'phase', 'events'] if key in journal}
         with open(self.root/'operation.lock', 'a') as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -372,6 +500,8 @@ class Runtime:
                 return self.host(request)
             if (self.root/'host-reservation.json').exists():
                 return {'status': 'uncertain', 'reason': 'host activation reserved'}
+            if request['action'] == 'cleanup':
+                return self.cleanup()
             if request['action'] == 'inspect':
                 return {'status': 'succeeded', 'applications': [self.read(p) for p in (self.root/'apps').glob('*/state.json')]}
             if request['action'] not in ('deploy', 'rollback'):

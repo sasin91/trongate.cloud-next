@@ -18,7 +18,7 @@ final class Worker {
             $this->store->step($id, 'claimed', ['attempt' => (int)$job['attempts']]);
             $result = $this->perform($job, $heartbeat);
             $status = $result['status'] ?? 'uncertain';
-            if (!in_array($status, ['pending', 'succeeded', 'failed', 'uncertain'])) {
+            if (!in_array($status, ['pending', 'succeeded', 'failed', 'uncertain', 'waiting'])) {
                 $status = 'uncertain';
             }
             $this->store->step($id, 'observed', $result);
@@ -36,7 +36,12 @@ final class Worker {
         $id = $job['id'];
         $kind = $job['kind'];
         if ($kind === 'build') {
-            $r = (new Ssh($s))->command($s->get('server', $p['builder']), 'tc-build', tc_json($p['plan'] + ['operation' => $id]), 3600, $heartbeat);
+            $local = ($p['mode'] ?? 'dedicated') === 'local';
+            $input = $p['plan'] + ['operation' => $id];
+            if ($local) {
+                $input['action'] = 'build';
+            }
+            $r = (new Ssh($s))->command($s->get('server', $p['builder']), $local ? 'tc-runtime' : 'tc-build', tc_json($input), 3600, $heartbeat);
             $result = json_decode($r['out'], true);
             if ($r['exit'] !== 0 || !is_array($result)) {
                 throw new RuntimeException('Builder interrupted');
@@ -59,7 +64,7 @@ final class Worker {
             if (!$inspection['application_ready']) {
                 return ['status' => 'failed', 'missing' => $inspection['missing']];
             }
-            $request = ['action' => $kind, 'operation' => $id, 'app' => $p['app'], 'public_check' => $p['public_check'] ?? true];
+            $request = ['action' => $kind, 'operation' => $id, 'app' => $p['app'], 'public_check' => $p['public_check'] ?? true, 'defer_public' => true, 'go_live' => $p['go_live'] ?? false];
             if ($kind === 'deploy') {
                 $release = $s->get('release', $p['release'])['spec'];
                 $secrets = [];
@@ -75,7 +80,21 @@ final class Worker {
                     $request['registry_auth'] = $s->secret($release['registry_secret']);
                 }
             }
-            return $ssh->runtime($server, $request, $heartbeat);
+            $lastPhase = '';
+            $progress = function () use ($heartbeat, $ssh, $server, $s, $id, &$lastPhase): void {
+                $heartbeat();
+                try {
+                    $response = $ssh->command($server, 'tc-runtime', tc_json(['action' => 'status', 'operation' => $id]), 8);
+                    $state = json_decode($response['out'], true);
+                    if (!empty($state['phase']) && $state['phase'] !== $lastPhase) {
+                        $lastPhase = $state['phase'];
+                        $s->step($id, 'progress', ['phase' => $lastPhase]);
+                    }
+                } catch (RuntimeException) {
+                    // Progress is best-effort; the durable result remains authoritative.
+                }
+            };
+            return $ssh->runtime($server, $request, $progress);
         }
         $provider = new Hetzner($s->secret($s->get('provider', $p['provider'])['credential']), $this->http);
         try {

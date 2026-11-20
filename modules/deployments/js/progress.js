@@ -27,3 +27,28 @@ document.addEventListener('DOMContentLoaded', () => {
         if (['pending','running'].includes(status.dataset.status)) setTimeout(poll, 1500);
     }
 });
+
+document.addEventListener('DOMContentLoaded', () => {
+    const timeline = document.querySelector('[data-timeline]');
+    if (!timeline) return;
+    const message = timeline.querySelector('[data-timeline-message]');
+    document.querySelector('[data-copy-diagnostics]')?.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(document.getElementById('timeline-diagnostics').textContent);
+            message.textContent = 'Diagnostics copied.';
+        } catch { message.textContent = 'Select the diagnostics text to copy it.'; }
+    });
+    const poll = async () => {
+        try {
+            const response = await fetch(`/deployments?poll=1&timeline=1&operation=${encodeURIComponent(timeline.dataset.timeline)}`, {credentials: 'same-origin'});
+            if (!response.ok) throw new Error(response.status === 401 ? 'Sign in again to continue this deployment.' : 'Could not refresh. Reload to try again.');
+            const data = await response.json();
+            if (JSON.stringify(data.stages) !== JSON.stringify(Array.from(timeline.querySelectorAll('.deployment-timeline li'), li => ({name: li.querySelector('h2').childNodes[0].textContent.trim(), description: li.querySelector('p').textContent, status: li.dataset.status}))) || data.status !== timeline.dataset.status) {
+                location.reload();
+                return;
+            }
+            if (['pending', 'running'].includes(data.status)) setTimeout(poll, 3000);
+        } catch (error) { message.textContent = error.message; }
+    };
+    if (['pending', 'running'].includes(timeline.dataset.status)) setTimeout(poll, 2500);
+});

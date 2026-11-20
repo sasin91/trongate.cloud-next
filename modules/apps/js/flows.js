@@ -12,26 +12,36 @@ document.addEventListener('DOMContentLoaded', () => {
         let steps = all;
         let saveTimer;
         let saveQueue = Promise.resolve();
-        const status = document.createElement('p');
+        const status = document.createElement('span');
+        status.className = 'draft-save';
+        status.tabIndex = 0;
         status.setAttribute('role', 'status');
-        form.prepend(status);
+        const toolbar = document.createElement('div');
+        toolbar.className = 'draft-toolbar';
+        back.before(toolbar);
+        toolbar.append(back, status);
+        const saveStatus = (text, error = false) => {
+            status.textContent = error ? '⚠ ' + text : '💾';
+            status.title = text;
+            status.setAttribute('aria-label', text);
+        };
         const save = () => {
             clearTimeout(saveTimer);
             const data = new FormData(form);
             data.set('wizard_step', String(current));
             saveQueue = saveQueue.catch(() => {}).then(async () => {
-                status.textContent = 'Saving setup…';
+                saveStatus('Saving setup…');
                 const response = await fetch('/apps/draft', {method: 'POST', body: data, credentials: 'same-origin'});
                 if (response.redirected) throw new Error('Your session expired. Sign in again to continue your last saved setup.');
                 const result = await response.json();
                 if (!response.ok || !result.saved) throw new Error(result.error || 'Could not save setup.');
-                status.textContent = 'Setup saved to your account.';
+                saveStatus('Setup saved to your account.');
             });
             return saveQueue;
         };
         const scheduleSave = () => {
             clearTimeout(saveTimer);
-            saveTimer = setTimeout(() => save().catch(error => status.textContent = error.message), 500);
+            saveTimer = setTimeout(() => save().catch(error => saveStatus(error.message, true)), 500);
         };
         form.noValidate = true;
         form.classList.add('wz-js');
@@ -85,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 await save();
                 form.submit();
             } catch (error) {
-                status.textContent = error.message;
+                saveStatus(error.message, true);
                 next.disabled = false; next.textContent = 'Launch your app';
             }
         });
@@ -113,7 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 await save();
                 event.target.submit();
             } catch (error) {
-                status.textContent = error.message;
+                saveStatus(error.message, true);
             }
         });
         applySource(); summary();

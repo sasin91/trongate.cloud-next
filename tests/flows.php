@@ -38,23 +38,39 @@ try {
     check(Apps_model::_repository('https://github.com/owner/repo.git')==='owner/repo','Repository URL conversion');
     try { Apps_model::_repository('https://evil.example/repo'); throw new LogicException('Foreign URL accepted'); } catch (RuntimeException) {}
     $s->put('server','web',['application_ready'=>true,'host'=>'192.0.2.10','facts'=>['arch'=>'aarch64']]);
-    try { $flow->_build_target('web','demo','request'); throw new LogicException('Missing builder accepted'); } catch (RuntimeException) {}
+    try { $flow->_build_target('web','demo','request','dedicated'); throw new LogicException('Missing builder accepted'); } catch (RuntimeException) {}
     foreach (['builder-a','builder-b'] as $builder) {
         $s->put('server',$builder,['host'=>$builder.'.example.com','builder_ready'=>true,'facts'=>['arch'=>'aarch64']]);
     }
     $s->put('server','wrong-arch',['host'=>'x86.example.com','builder_ready'=>true,'facts'=>['arch'=>'x86_64']]);
     $s->put('server','same-host',['host'=>'192.0.2.10','builder_ready'=>true,'facts'=>['arch'=>'aarch64']]);
     putenv('TC_BUILD_REGISTRY');
-    try { $flow->_build_target('web','demo','request'); throw new LogicException('Missing registry accepted'); } catch (RuntimeException) {}
+    try { $flow->_build_target('web','demo','request','dedicated'); throw new LogicException('Missing registry accepted'); } catch (RuntimeException) {}
     putenv('TC_BUILD_REGISTRY=registry.example.com/apps');
     $s->enqueue('build','builder:builder-a',[]);
-    $automatic=$flow->_build_target('web','demo','request');
+    $automatic=$flow->_build_target('web','demo','request','dedicated');
     check($automatic['builder']==='builder-b','Did not prefer compatible builder with shorter queue');
     check(str_starts_with($automatic['tag'],'registry.example.com/apps/demo:build-'),'Automatic tag missing');
-    check($automatic===$flow->_build_target('web','demo','request'),'Automatic target not stable');
-    check($automatic['tag']!==$flow->_build_target('web','demo','another-request')['tag'],'Distinct launches reuse tag');
+    check($automatic===$flow->_build_target('web','demo','request','dedicated'),'Automatic target not stable');
+    check($automatic['tag']!==$flow->_build_target('web','demo','another-request','dedicated')['tag'],'Distinct launches reuse tag');
     $s->put('app','other',['server'=>'builder-b']);
-    check($flow->_build_target('web','demo','request')['builder']==='builder-a','Selected a builder hosting an app');
+    check($flow->_build_target('web','demo','request','dedicated')['builder']==='builder-a','Selected a builder hosting an app');
     putenv('TC_BUILD_REGISTRY');
+    $s->put('server', 'web', ['application_ready' => true, 'local_builder_ready' => true, 'host' => '192.0.2.10']);
+    $local = $flow->_build_target('web', 'demo', 'local-request');
+    check($local['builder'] === 'web' && $local['mode'] === 'local', 'Local builds must be the default');
+    check(str_starts_with($local['tag'], 'localhost/tc/demo:'), 'Local build must not require a registry');
+    $monitor = new Monitoring_model('monitoring', $s->connection());
+    foreach ([600, 300, 0] as $ago) {
+        $monitor->_record('web', ['at' => time() - $ago, 'cpu_percent' => 90, 'memory_used' => 90, 'memory_total' => 100, 'disk_used' => 50, 'disk_total' => 100, 'disk_free' => 10000000000]);
+    }
+    check(count($monitor->_summary('web')['hints']) === 2, 'Sustained pressure should produce CPU and memory hints');
+    check($monitor->_summary('web')['autoscaling'] === false, 'Monitoring must never authorize billed scaling');
+    check($monitor->_summary('unknown')['stale'] === true, 'Missing monitoring must not imply zero usage');
+    $monitor->_record('brief', ['at' => time(), 'cpu_percent' => 99, 'memory_used' => 99, 'memory_total' => 100, 'disk_used' => 50, 'disk_total' => 100, 'disk_free' => 10000000000]);
+    check($monitor->_summary('brief')['hints'] === [], 'A single spike must not suggest scaling');
+    check(Deployments_model::_dns_matches(['192.0.2.10'], ['192.0.2.10']), 'Expected DNS rejected');
+    check(!Deployments_model::_dns_matches(['192.0.2.10', '2001:db8::2'], ['192.0.2.10']), 'Stale AAAA accepted');
+    check(!Deployments_model::_dns_matches([], ['192.0.2.10']), 'Missing DNS accepted');
     echo "PASS: launch, encrypted environment, invalid inputs, duplicate submission, build handoff\n";
-} finally { unset($flow,$s); foreach (glob($dir.'/*') as $file) { unlink($file); } rmdir($dir); }
+} finally { unset($monitor,$flow,$s); foreach (glob($dir.'/*') as $file) { unlink($file); } rmdir($dir); }
