@@ -157,6 +157,11 @@ class RuntimeTests(unittest.TestCase):
         r.dispatch(dict(self.request(3), action='rollback'))
         self.assertEqual('keep me', data.read_text())
 
+    def test_cleanup_preserves_containers_needed_by_resource_recovery(self):
+        r = self.runtime
+        r.write(r.root/'resources-pending.json', {'before': [], 'policies': {}})
+        self.assertEqual('waiting', r.dispatch({'action': 'cleanup'})['status'])
+
     def test_host_recovery_requires_quiescence_and_observed_previous_generation(self):
         r = self.runtime
         before = '/nix/store/'+'a'*32+'-nixos-system-before'

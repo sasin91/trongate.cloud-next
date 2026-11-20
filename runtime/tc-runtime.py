@@ -473,6 +473,8 @@ class Runtime:
             return result
 
     def cleanup(self):
+        if (self.root/'resources-pending.json').exists():
+            return {'status': 'waiting', 'reason': 'Reconcile the interrupted resource update before retiring containers.'}
         removed = 0
         for app_dir in (self.root/'apps').iterdir():
             state = self.read(app_dir/'state.json', {})
