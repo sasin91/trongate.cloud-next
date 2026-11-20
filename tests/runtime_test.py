@@ -17,6 +17,7 @@ class Simulated(module.Runtime):
         self.public_bad = False
         self.current = None
         self.starts = 0
+        self.public_attempts = []
 
     def run(self, args, timeout=120):
         return ''
@@ -32,6 +33,7 @@ class Simulated(module.Runtime):
         return release is not None and release['operation'] != self.bad
 
     def health(self, url, attempts=20):
+        self.public_attempts.append(attempts)
         if self.public_bad:
             self.public_bad = False
             return False
@@ -59,10 +61,25 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(1, r.starts)
         r.public_bad = True
         self.assertEqual('waiting', r.dispatch(dict(request, go_live=True))['status'])
+        self.assertEqual(request['operation'], r.current['operation'], 'Keep the first route so ACME issuance is not cancelled')
+        self.assertEqual(30, r.public_attempts[-1])
         self.assertEqual(1, r.starts)
         self.assertEqual('succeeded', r.dispatch(dict(request, go_live=True))['status'])
         self.assertEqual(1, r.starts)
         self.assertFalse((r.root/'apps/demo/staged.json').exists())
+
+    def test_pending_https_replacement_preserves_previous_app(self):
+        r = self.runtime
+        r.dispatch(self.request(1))
+        r.public_bad = True
+        request = dict(self.request(2), defer_public=True)
+        result = r.dispatch(request)
+        self.assertEqual('waiting', result['status'])
+        self.assertEqual(f'{1:032x}', r.current['operation'])
+        result = r.dispatch(dict(request, go_live=True))
+        self.assertEqual('succeeded', result['status'])
+        self.assertNotIn('message', result)
+        self.assertEqual(2, r.starts)
 
     def test_waiting_deployment_does_not_block_another_app(self):
         r = self.runtime

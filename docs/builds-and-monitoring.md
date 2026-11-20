@@ -71,3 +71,8 @@ live. The app candidate stays on the server. DNS records and a Check DNS and go
 live action appear in the deployment timeline. A failed DNS/HTTPS attempt keeps
 the deployment staged for another attempt. New deployments of the same app are
 blocked until the staged deployment is completed; other apps can deploy.
+
+After the user chooses Go live, the first app route remains configured while
+HTTPS is pending so Caddy can finish issuing its certificate. Public verification
+allows 30 attempts (up to five seconds per HTTP attempt, with one-second pauses).
+A replacement deployment restores the previous app if public verification fails.

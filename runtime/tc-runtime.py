@@ -276,16 +276,21 @@ class Runtime:
         if not self.healthy(candidate):
             raise RuntimeError('health check failed after traffic switch')
         self.checkpoint('checking-public')
-        if request.get('public_check', True) and not self.health('https://'+candidate['domain']+candidate['health'], 3):
+        if request.get('public_check', True) and not self.health('https://'+candidate['domain']+candidate['health'], 30):
             if request.get('defer_public'):
-                self.route(app, previous)
-                journal.update(status='waiting', phase='awaiting-go-live', message='Public HTTPS is not ready yet. Check DNS and try again.')
+                # Removing a first route cancels Caddy's in-flight ACME issuance.
+                # Keep it available after explicit Go live; a replacement still
+                # restores the existing app while public verification is pending.
+                if previous:
+                    self.route(app, previous)
+                journal.update(status='waiting', phase='awaiting-go-live', message='Public HTTPS verification is still pending. Certificate issuance may take a little longer; try again shortly.')
                 self.write(self.root/'apps'/app/'staged.json', {'operation': journal['operation']})
                 self.write(journal_path, journal)
                 return journal
             raise RuntimeError('public health check failed')
         (self.root/'apps'/app/'staged.json').unlink(missing_ok=True)
         self.write(state_path, {'active': candidate, 'previous': previous})
+        journal.pop('message', None)
         journal.update({'status': 'succeeded', 'phase': 'accepted', 'active': candidate['operation']})
         self.write(journal_path, journal)
         # Accepted release is durable before retirement. A retirement error must
