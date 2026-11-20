@@ -5,3 +5,11 @@
 #server-dialog{width:min(680px,calc(100% - 24px));max-height:90vh;overflow:auto;border:1px solid var(--wz-line);border-radius:16px;padding:28px;color:var(--wz-ink);background:var(--wz-bg)}#server-dialog::backdrop{background:rgba(20,22,55,.45)}#server-dialog h2{font-size:24px;margin:0}#server-dialog [role=alert]{padding:14px;background:#fff0e8;color:#8d3829;border-radius:8px}
 
 .server-setup>form{margin:24px 0}.server-fields{display:grid;grid-template-columns:1fr 1fr;gap:24px}.server-setup .wz-field{margin-bottom:20px}.server-estimate{padding:22px;border-radius:12px;background:#ecebfa;margin:16px 0 24px}.server-estimate p:last-child{margin-bottom:0}.server-setup select{width:100%;min-width:0}@media(max-width:760px){.server-fields{grid-template-columns:1fr;gap:0}}
+
+.capacity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin: 24px 0; }
+.capacity-grid > div { padding: 18px; border: 1px solid var(--wz-line); border-radius: 10px; background: var(--wz-bg); }
+.capacity-grid dt { color: var(--wz-muted); font-size: 13px; }
+.capacity-grid dd { margin: 8px 0; font-size: 24px; font-weight: 600; }
+.capacity-grid small { font-size: 14px; font-weight: 400; }
+.capacity-grid meter { width: 100%; height: 12px; }
+@media (max-width: 600px) { .capacity-grid { grid-template-columns: 1fr; } }
