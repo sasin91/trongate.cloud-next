@@ -77,7 +77,7 @@ def build(p):
                     raise RuntimeError('invalid local image ID')
                 run(['podman', 'save', '--format', 'oci-archive', '--output', str(root/(p['operation']+'.oci')), p['tag']])
                 image = p['tag'].rsplit(':', 1)[0]+'@sha256:'+image_id
-                run(['podman', 'rmi', p['tag']])
+                run(['podman', 'rmi', '--no-prune', p['tag']])
             else:
                 digest_file = work/'digest'
                 auth = Path.home()/'.config/containers/auth.json'

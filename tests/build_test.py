@@ -38,6 +38,7 @@ class BuilderTests(unittest.TestCase):
                 self.assertEqual('succeeded', result['status'])
                 self.assertEqual('localhost/tc/demo@sha256:'+'b'*64, result['image'])
                 self.assertFalse(any(args[:2] == ['podman', 'push'] for args in calls))
+                self.assertIn(['podman', 'rmi', '--no-prune', request['tag']], calls)
                 self.assertTrue(any('--property=MemoryMax=1G' in args for args in calls))
                 self.assertTrue(any('--property=CPUQuota=100%' in args for args in calls))
                 count = len(calls)
