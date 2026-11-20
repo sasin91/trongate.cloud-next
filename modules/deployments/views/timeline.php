@@ -1,4 +1,5 @@
-<main class="panel" data-timeline="<?= $e($timeline['id']) ?>" data-status="<?= $e($timeline['status']) ?>">
+<main id="deployment-content" class="panel" data-timeline="<?= $e($timeline['id']) ?>" data-status="<?= $e($timeline['status']) ?>">
+    <?php if ($message): ?><p role="alert" class="wz-errors"><?= $e($message) ?></p><?php endif ?>
     <p><a href="/">← Back to your apps</a></p>
     <h1><?= $e($timeline['app']) ?> · Deployment</h1>
     <p role="status"><?= $timeline['status'] === 'waiting' ? 'Ready — waiting to go live' : $e(ucfirst($timeline['status'])) ?></p>
@@ -11,7 +12,7 @@
     <section class="card"><h2>Connect your domain</h2><p><?= $e($live['message']) ?></p>
         <p>Set these records for <strong><?= $e($live['domain']) ?></strong> at your DNS provider. Remove old A and AAAA records for this hostname. There is no deadline.</p>
         <table><thead><tr><th>Type</th><th>Value</th></tr></thead><tbody><?php foreach ($live['records'] as $record): ?><tr><td><?= $e($record['type']) ?></td><td><code><?= $e($record['value']) ?></code></td></tr><?php endforeach ?></tbody></table>
-        <form method="post" action="/deployments/live"><?= $csrf() ?><input type="hidden" name="operation" value="<?= $e($live['operation']) ?>"><button class="wz-ok">Check DNS and go live</button></form>
+        <form method="post" action="/deployments/live" mx-post="/deployments/live" mx-target="#deployment-content" mx-select="#deployment-content" mx-swap="outerHTML" mx-after-swap="timelineRefresh" mx-on-error="#mx-error-trigger" mx-on-timeout="panelMxTimeout"><?= $csrf() ?><input type="hidden" name="operation" value="<?= $e($live['operation']) ?>"><button class="wz-ok">Check DNS and go live</button></form>
         <p class="wz-hint">We’ll verify DNS and HTTPS before marking your app live. You can leave this page and return later.</p>
     </section>
     <?php endif ?>
@@ -22,3 +23,5 @@
     <details class="card"><summary>Diagnostics</summary><p>Technical details for troubleshooting.</p><button type="button" class="link-button" data-copy-diagnostics>Copy diagnostics</button><pre id="timeline-diagnostics"><?= $e(json_encode($timeline['diagnostics'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) ?></pre></details>
     <p data-timeline-message role="status"></p>
 </main>
+
+<span hidden id="timeline-poll" mx-get="/deployments?operation=<?= $e(rawurlencode($timeline['id'])) ?>" mx-trigger="<?= in_array($timeline['status'], ['pending', 'running'], true) ? 'every 3s' : 'none' ?>" mx-target="#deployment-content" mx-select="#deployment-content" mx-swap="outerHTML" mx-after-swap="timelineRefresh" mx-on-error="#mx-error-trigger"></span>

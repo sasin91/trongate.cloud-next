@@ -8,7 +8,7 @@ class Trongate_security extends Trongate {
     function make_sure_allowed(string $scenario='admin panel',array $params=[]): string {
         $token=$this->trongate_tokens->attempt_get_valid_token(1);
         if ($token===false) {
-            if (($_POST['inline'] ?? '')==='server' || ($_GET['poll'] ?? '')==='1') {
+            if (from_trongate_mx() || ($_POST['inline'] ?? '')==='server' || ($_GET['poll'] ?? '')==='1') {
                 $this->_json(['error'=>'Your session expired. Sign in again.'],401); exit;
             }
             redirect('login/login/1'); exit;

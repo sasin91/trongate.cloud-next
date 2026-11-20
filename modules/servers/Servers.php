@@ -16,7 +16,7 @@ class Servers extends Trongate {
                 $details = $this->model->_resources($id);
             }
         } catch (RuntimeException $error) {
-            http_response_code(422);
+            http_response_code(from_trongate_mx() ? 200 : 422);
             $message = $error->getMessage();
             if (isset($id)) {
                 try {

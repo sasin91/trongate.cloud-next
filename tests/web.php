@@ -17,9 +17,9 @@ if ($store->run('SELECT password FROM trongate_administrators WHERE username=?',
 file_put_contents($dir.'/key',Encryptor::generate_key());
 $proc=proc_open([PHP_BINARY,'-S','127.0.0.1:18781','-t',dirname(__DIR__).'/public',dirname(__DIR__).'/public/index.php'],[0=>['pipe','r'],1=>['file',$dir.'/server.log','w'],2=>['file',$dir.'/server.log','a']],$pipes);
 $cookie=$dir.'/cookies';
-function request(?array $body=null,string $path='/login/login/1'): array {
+function request(?array $body=null,string $path='/login/login/1',bool $mx=false): array {
     global $cookie;
-    $c=curl_init('http://127.0.0.1:18781'.$path); curl_setopt_array($c,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_COOKIEJAR=>$cookie,CURLOPT_COOKIEFILE=>$cookie,CURLOPT_TIMEOUT=>5,CURLOPT_HTTPHEADER=>['X-Requested-With: XMLHttpRequest']]);
+    $c=curl_init('http://127.0.0.1:18781'.$path); curl_setopt_array($c,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_COOKIEJAR=>$cookie,CURLOPT_COOKIEFILE=>$cookie,CURLOPT_TIMEOUT=>5,CURLOPT_HTTPHEADER=>array_merge(['X-Requested-With: XMLHttpRequest'], $mx ? ['Trongate-MX-Request: true'] : [])]);
     if ($body!==null) { curl_setopt($c,CURLOPT_POSTFIELDS,http_build_query($body)); }
     $html=curl_exec($c); $code=curl_getinfo($c,CURLINFO_RESPONSE_CODE); curl_close($c); return [$code,$html];
 }
@@ -55,6 +55,7 @@ try {
     $savedRecord=$store->run("SELECT data FROM records WHERE kind='app-draft'")->fetchColumn();
     if (str_contains($savedRecord,'draft-secret')) { throw new RuntimeException('Draft secret stored unencrypted'); }
     request(['csrf_token'=>$csrf],'/login/logout');
+    if (request(null, '/servers/details?server=web', true)[0] !== 401) { throw new RuntimeException('MX must reject expired sessions without embedding login'); }
     // Start a fresh browser session as well as revoking the token.
     unlink($cookie);
     [$code,$page]=request();
@@ -116,8 +117,13 @@ try {
     if ($code!==200 || json_decode($page,true)['job']['status']!=='pending' || str_contains($page,'web-fixture-secret')) { throw new RuntimeException('Deployment polling failed'); }
     [$code, $timelineJson] = request(null, '/deployments?poll=1&timeline=1&operation=' . $id);
     if ($code !== 200 || count(json_decode($timelineJson, true)['stages']) !== 4 || str_contains($timelineJson, 'web-fixture-secret')) { throw new RuntimeException('Timeline API failed'); }
+    [$mxCode, $fragment] = request(null, '/deployments?operation=' . $id, true);
+    if ($mxCode !== 200 || str_contains($fragment, '<html') || !str_contains($fragment, 'id="deployment-content"') || !str_contains($fragment, 'every 3s')) { throw new RuntimeException('MX timeline must return a polling fragment'); }
+    [$mxCode, $fragment] = request(null, '/servers/details?server=missing', true);
+    if ($mxCode !== 200 || str_contains($fragment, '<html') || !str_contains($fragment, 'id="resource-workspace"') || !str_contains($fragment, 'role="alert"')) { throw new RuntimeException('MX resource errors must remain inline'); }
+    if (request(['csrf_token' => 'bad'], '/servers/details?server=web', true)[0] !== 403) { throw new RuntimeException('MX resource edit bypassed CSRF'); }
     if (request(['operation' => $id, 'csrf_token' => 'bad'], '/deployments/live')[0] !== 403) { throw new RuntimeException('Go live bypassed CSRF'); }
-    foreach (['/apps_module/js/flows.js','/templates_module/css/wizard.css','/templates_module/css/panel.css','/deployments_module/js/progress.js','/deployments_module/css/deployments.css'] as $asset) {
+    foreach (['/apps_module/js/flows.js','/templates_module/css/wizard.css','/templates_module/css/panel.css','/templates_module/js/mx.js','/servers_module/js/resources.js','/deployments_module/css/deployments.css'] as $asset) {
         [$code,$body]=request(null,$asset);
         if ($code!==200 || strlen($body)<100 || str_contains($body,'Control plane unavailable')) { throw new RuntimeException('Module asset not served: '.$asset); }
     }
@@ -129,6 +135,7 @@ try {
         if (!in_array(request(null,$route)[0],[400,403,404],true)) { throw new RuntimeException('Internal module path exposed: '.$route); }
     }
     request(['csrf_token'=>$csrf],'/login/logout');
+    if (request(null, '/servers/details?server=web', true)[0] !== 401) { throw new RuntimeException('MX must reject expired sessions without embedding login'); }
     if ((int)$store->run('SELECT COUNT(*) FROM trongate_tokens')->fetchColumn()!==0) { throw new RuntimeException('Logout did not revoke native token'); }
     [$code,$error]=request(['command'=>'connect-server','inline'=>'server','csrf_token'=>$csrf],'/servers/action');
     // A destroyed session has a new CSRF token, so the request must fail before mutation.
