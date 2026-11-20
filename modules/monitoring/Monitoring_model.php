@@ -25,7 +25,7 @@ class Monitoring_model extends Model {
     }
 
     function _record(string $server, array $sample): void {
-        $allowed = ['at', 'cpu_percent', 'cpus', 'load_1m', 'memory_total', 'memory_used', 'disk_total', 'disk_used', 'disk_free', 'app_memory_limit', 'app_cpu_limit', 'apps'];
+        $allowed = ['at', 'cpu_percent', 'cpus', 'load_1m', 'memory_total', 'memory_used', 'disk_total', 'disk_used', 'disk_free', 'app_memory_limit', 'app_cpu_limit', 'apps', 'app_versions'];
         $sample = array_intersect_key($sample, array_flip($allowed));
         foreach ($sample as $value) {
             if ($value !== null && (!is_numeric($value) || $value < 0)) {

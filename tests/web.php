@@ -36,6 +36,7 @@ try {
     if (!str_contains($page,'Your apps.')) { throw new RuntimeException('Login failed'); }
     if ((int)$store->run('SELECT COUNT(*) FROM trongate_tokens')->fetchColumn()!==1) { throw new RuntimeException('Native login token missing'); }
     if (request(['command'=>'inventory','csrf_token'=>'bad'],'/operations')[0]!==403) { throw new RuntimeException('Authenticated mutation bypassed CSRF'); }
+    if (request(['app'=>'demo','mode'=>'automatic','csrf_token'=>'bad'],'/servers/details?server=web')[0]!==403) { throw new RuntimeException('Resource edit bypassed CSRF'); }
     [$code,$page]=request(['command'=>'inventory','csrf_token'=>$csrf,'payload'=>'{}'],'/operations');
     if ($code!==200 || !str_contains($page,'Servers')) { throw new RuntimeException('Authenticated operation failed'); }
     $store->put('server','web',['application_ready'=>true,'host'=>'192.0.2.10','managed_eligible'=>false,'missing'=>[]]);

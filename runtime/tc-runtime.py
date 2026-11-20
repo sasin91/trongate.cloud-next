@@ -136,7 +136,9 @@ class Runtime:
         # Allocate a free port through Podman, never a racy application-side scan.
         args = ['podman', 'create', '--name', name, '--label', 'tc.operation='+operation,
                 '--publish', '127.0.0.1::'+str(int(spec['container_port'])),
-                '--memory', str(int(spec['memory_mb']))+'m', '--cpus', str(int(spec['cpus'])),
+                '--memory', str(int(spec['memory_mb']))+'m',
+                '--memory-swap', str(int(spec['memory_mb']) * 2)+'m',
+                '--cpu-shares', str(max(2, round(spec['cpus'] * 1024))),
                 # The inherited FrankenPHP binary carries cap_net_bind_service.
                 # Retain just that capability so existing OCI images can execute it.
                 '--pids-limit', '256', '--cap-drop', 'ALL', '--cap-add', 'NET_BIND_SERVICE', '--security-opt', 'no-new-privileges',
@@ -180,6 +182,10 @@ class Runtime:
         release.update({'operation': operation, 'unit': unit, 'container': name, 'port': port})
         self.write(directory/'release.json', release)
         return release
+
+    def allocate(self, app):
+        from tc_resources import Resources
+        return Resources(self).apply(incoming=app, starting=True)
 
     def app_operation(self, request):
         operation = self.match(request['operation'], r'[a-f0-9]{32}')
@@ -227,9 +233,11 @@ class Runtime:
                 candidate = state['previous']
                 if not candidate:
                     raise RuntimeError('no retained previous release')
+                self.checkpoint('allocating-resources')
+                self.allocate(app)
                 self.start(candidate)
             else:
-                spec = request['release']
+                spec = dict(request['release'])
                 # A domain belongs to exactly one application on a host.
                 for other in (self.root/'apps').iterdir():
                     if other.name == app:
@@ -239,6 +247,9 @@ class Runtime:
                     pending = self.read(self.root/'operations'/(staged_other.get('operation', '')+'.json'), {}).get('candidate')
                     if any(item and item['domain'] == spec['domain'] for item in [active, pending]):
                         raise RuntimeError('domain is already assigned')
+                self.checkpoint('allocating-resources')
+                allocation = self.allocate(app)
+                spec.update(memory_mb=allocation['memory_mb'], cpus=allocation['cpus'])
                 candidate = self.stage(app, operation, spec, request.get('secret_values', {}), request.get('file_values', {}), request.get('registry_auth'))
             journal.update({'candidate': candidate, 'phase': 'candidate'})
             self.write(journal_path, journal)
@@ -491,7 +502,7 @@ class Runtime:
             return self.local_build(request)
         if request['action'] == 'metrics':
             from tc_metrics import collect
-            return collect(self.root)
+            return collect(self.root, self)
         if request['action'] == 'status':
             operation = self.match(request['operation'], r'[a-f0-9]{32}')
             journal = self.read(self.root/'operations'/(operation+'.json'), {})
@@ -505,6 +516,15 @@ class Runtime:
                 return self.host(request)
             if (self.root/'host-reservation.json').exists():
                 return {'status': 'uncertain', 'reason': 'host activation reserved'}
+            if request['action'] in ('resources', 'resources-update'):
+                from tc_resources import Resources
+                resources = Resources(self)
+                if request['action'] == 'resources-update':
+                    try:
+                        resources.apply(change=request)
+                    except RuntimeError as error:
+                        return {'status': 'failed', 'error': str(error)}
+                return resources.snapshot()
             if request['action'] == 'cleanup':
                 return self.cleanup()
             if request['action'] == 'inspect':

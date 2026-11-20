@@ -5,8 +5,18 @@ let cfg = config.services.trongate-runtime; in {
     builderPackage = lib.mkOption { type = lib.types.package; };
     localBuilds = lib.mkOption { type = lib.types.bool; default = true; };
     package = lib.mkOption { type = lib.types.package; };
+    systemMemoryReserve = lib.mkOption { type = lib.types.ints.positive; default = 512; description = "Memory in MiB kept for the OS and proxy."; };
+    databaseMemoryReserve = lib.mkOption { type = lib.types.ints.unsigned; default = 512; description = "Memory in MiB kept for application databases; adjust to their total budget."; };
   };
   config = lib.mkIf cfg.enable {
+    environment.etc."tc-resources.json".text = builtins.toJSON {
+      system_memory_mb = cfg.systemMemoryReserve;
+      database_memory_mb = cfg.databaseMemoryReserve;
+      build_memory_mb = if cfg.localBuilds then 1536 else 0;
+      system_cpus = 0.25;
+      database_cpus = 0.25;
+      build_cpus = if cfg.localBuilds then 1 else 0;
+    };
     virtualisation.podman.enable = true;
     users.users.tc-builder = lib.mkIf cfg.localBuilds {
       isNormalUser = true;

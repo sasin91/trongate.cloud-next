@@ -79,7 +79,7 @@ class Apps_model extends Model {
         if (!in_array($source,['image','git'],true)) { throw new RuntimeException('Choose an image or public GitHub repository.'); }
         $spec=['image'=>$source==='image'?trim($p['image'] ?? ''):'registry.invalid/pending@sha256:'.str_repeat('0',64),
             'domain'=>trim($p['domain'] ?? ''),'health'=>$p['health'] ?? '/',
-            'container_port'=>$p['container_port'] ?? 8080,'memory_mb'=>$p['memory_mb'] ?? 256,'cpus'=>$p['cpus'] ?? 1];
+            'container_port'=>$p['container_port'] ?? 8080];
         foreach (preg_split('/\r?\n/',trim($p['persistent_paths'] ?? '')) as $i=>$path) {
             if (trim($path)!=='') { $spec['mounts']['data-'.$i]='/app/'.ltrim(trim($path),'/'); }
         }

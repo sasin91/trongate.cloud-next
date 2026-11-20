@@ -22,6 +22,9 @@ class Simulated(module.Runtime):
     def run(self, args, timeout=120):
         return ''
 
+    def allocate(self, app):
+        return {'memory_mb': 512, 'cpus': 0.25}
+
     def stage(self, app, operation, spec, secrets, files=None, registry_auth=None):
         self.starts += 1
         return dict(spec, operation=operation, port=1234, unit=operation+'.service', container=operation)

@@ -13,3 +13,10 @@
 .capacity-grid small { font-size: 14px; font-weight: 400; }
 .capacity-grid meter { width: 100%; height: 12px; }
 @media (max-width: 600px) { .capacity-grid { grid-template-columns: 1fr; } }
+.app-resource-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 24px; align-items: start; }
+.app-resource-grid .card { margin: 0; min-width: 0; }
+.resource-readings { display: grid; gap: 12px; }
+.resource-readings div { display: flex; justify-content: space-between; gap: 16px; }
+.resource-readings dd { margin: 0; font-weight: 600; text-align: right; }
+.resource-form { margin-top: 24px; }
+.resource-form input:disabled { opacity: .65; }

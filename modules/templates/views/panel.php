@@ -6,7 +6,7 @@ $field=function($name,$label,$default='',$type='text',$required=true) use($value
 <label class="wz-field"><span class="wz-label"><?= $e($label) ?></span><input class="wz-in" type="<?= $e($type) ?>" name="<?= $e($name) ?>" value="<?= $type==='password'?'':$value($name,$default) ?>" <?= $required?'required':'' ?>></label>
 <?php };
 $ready=array_filter($inventory['servers'] ?? [],fn($s)=>$s['application_ready']);
-$viewData=compact('e','value','csrf','field','ready','page','operation','signedIn','message','inventory','operations','pending_servers','deleting_server','timeline');
+$viewData=compact('e','value','csrf','field','ready','page','operation','signedIn','message','inventory','operations','pending_servers','deleting_server','timeline','resource_details','resources_saved');
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trongate Cloud · <?= $e(ucwords(str_replace('-',' ',$page))) ?></title><link rel="stylesheet" href="/templates_module/css/wizard.css"><link rel="stylesheet" href="/deployments_module/css/deployments.css"><link rel="stylesheet" href="/templates_module/css/panel.css"><script src="/apps_module/js/flows.js" defer></script><script src="/deployments_module/js/progress.js" defer></script><script src="/servers_module/js/create.js" defer></script></head>
 <body class="wz-body"><header class="wz-top"><div class="wz-top-row"><a class="wz-brand" href="/"><?php require __DIR__.'/_mark.php'; ?><span>trongate<b>.cloud</b></span></a>

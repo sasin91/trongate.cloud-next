@@ -11,7 +11,7 @@ def cpu_ticks():
     return sum(values), values[3] + values[4]
 
 
-def collect(root):
+def collect(root, runtime=None):
     before = cpu_ticks()
     time.sleep(1)
     after = cpu_ticks()
@@ -29,8 +29,16 @@ def collect(root):
             reserved_memory += active.get('memory_mb', 0) * 1024**2
             reserved_cpus += active.get('cpus', 0)
             apps.append(path.parent.name)
+    versions = len(apps)
+    if runtime is not None:
+        from tc_resources import Resources
+        running = [item for item in Resources(runtime).containers() if item['running']]
+        apps = {item['app'] for item in running}
+        versions = len(running)
+        reserved_memory = sum(item['memory_mb'] for item in running) * 1024**2
+        reserved_cpus = sum((item['shares'] or 1024) / 1024 for item in running)
     return {'at': int(time.time()), 'cpu_percent': cpu, 'cpus': os.cpu_count(),
             'load_1m': os.getloadavg()[0], 'memory_total': memory['MemTotal'],
             'memory_used': memory['MemTotal'] - memory.get('MemAvailable', memory['MemFree']),
             'disk_total': disk.total, 'disk_used': disk.used, 'disk_free': disk.free,
-            'app_memory_limit': reserved_memory, 'app_cpu_limit': reserved_cpus, 'apps': len(apps)}
+            'app_memory_limit': reserved_memory, 'app_cpu_limit': reserved_cpus, 'apps': len(apps), 'app_versions': versions}

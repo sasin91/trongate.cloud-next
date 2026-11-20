@@ -1,6 +1,36 @@
 <?php
 declare(strict_types=1);
 class Servers extends Trongate {
+    function details(): void {
+        $this->trongate_security->make_sure_allowed();
+        $message = null;
+        $details = null;
+        $saved = false;
+        try {
+            $id = Validate::id((string) ($_GET['server'] ?? ''));
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                $this->trongate_security->_csrf();
+                $details = $this->model->_resources($id, $_POST);
+                $saved = true;
+            } else {
+                $details = $this->model->_resources($id);
+            }
+        } catch (RuntimeException $error) {
+            http_response_code(422);
+            $message = $error->getMessage();
+            if (isset($id)) {
+                try {
+                    $details = $this->model->_resources($id);
+                } catch (Throwable) {
+                    // An unreachable server must not display stale editable limits.
+                }
+            }
+        }
+        $this->templates->_render('servers', 'details', 'server-details', [
+            'message' => $message, 'resource_details' => $details, 'resources_saved' => $saved
+        ]);
+    }
+
     function index(): void {
         $this->trongate_security->make_sure_allowed();
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {

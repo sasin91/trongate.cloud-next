@@ -7,7 +7,8 @@
     <?php $monitor = new Monitoring_model('monitoring'); ?>
     <?php foreach ($inventory['servers'] as $server): ?>
     <section class="card">
-        <h2><?= $e($server['id']) ?></h2>
+        <h2><?php if ($server['application_ready']): ?><a href="/servers/details?server=<?= $e(rawurlencode($server['id'])) ?>"><?= $e($server['id']) ?></a><?php else: ?><?= $e($server['id']) ?><?php endif ?></h2>
+        <?php if ($server['application_ready']): ?><p><a href="/servers/details?server=<?= $e(rawurlencode($server['id'])) ?>">Apps and resource allocations →</a></p><?php endif ?>
         <p><?= $e($server['host']) ?> · <?= !empty($server['builder_ready']) ? 'Ready for builds' : ($server['application_ready'] ? 'Ready for apps' : 'Runtime preparation required') ?></p>
         <?php if (!empty($server['local_builder_ready'])): ?><p>Local builds enabled</p><?php endif ?>
         <?php $capacity = $monitor->_summary($server['id']); $sample = $capacity['latest']; ?>

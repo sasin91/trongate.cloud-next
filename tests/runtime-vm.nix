@@ -22,7 +22,8 @@ in pkgs.testers.runNixOSTest {
     services.dockerRegistry = { enable = true; listenAddress = "127.0.0.1"; port = 5000; };
     virtualisation.containers.registries.insecure = [ "localhost:5000" ];
     environment.systemPackages = [ pkgs.php84 pkgs.openssh pkgs.jq ];
-    virtualisation.memorySize = 3072;
+    virtualisation.memorySize = 4096;
+    virtualisation.cores = 2;
     virtualisation.diskSize = 8192;
     services.openssh.settings.PermitRootLogin = "prohibit-password";
   };
@@ -67,6 +68,16 @@ in pkgs.testers.runNixOSTest {
         return cli("operation", {"operation": op})
     first = deploy(good_digest)
     assert first["job"]["status"] == "succeeded", first
+    def resources(payload):
+        import shlex
+        return json.loads(machine.succeed("printf %s " + shlex.quote(json.dumps(payload)) + " | tc-runtime"))
+    allocation = resources({"action": "resources"})
+    assert allocation["apps"][0]["versions"] == 1, allocation
+    edited = resources({"action": "resources-update", "app": "demo", "mode": "manual", "memory_mb": 256, "cpus": 0.1})
+    assert edited["status"] == "succeeded", edited
+    assert edited["apps"][0]["limits_mb"] == [256], edited
+    rejected = resources({"action": "resources-update", "app": "demo", "mode": "manual", "memory_mb": 999999, "cpus": 0.1})
+    assert rejected["status"] == "failed", rejected
     machine.succeed("echo retained > /var/lib/tc/runtime/apps/demo/data/uploads/keep")
     second = deploy(good_digest)
     assert second["job"]["status"] == "succeeded", second
@@ -75,6 +86,7 @@ in pkgs.testers.runNixOSTest {
     rollback = cli("rollback", {"app": "demo", "public_check": False})
     machine.succeed("TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc worker --once")
     assert cli("operation", {"operation": rollback})["job"]["status"] == "succeeded"
+    assert resources({"action": "resources"})["apps"][0]["limits_mb"] == [256]
     machine.succeed("test $(cat /var/lib/tc/runtime/apps/demo/data/uploads/keep) = retained")
     machine.wait_until_succeeds("curl -ksfL --resolve demo.localhost:443:127.0.0.1 https://demo.localhost | grep 'immutable release'")
     # Real host-key rotation must fail closed on the next normal CLI inspection.
