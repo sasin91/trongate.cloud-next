@@ -28,3 +28,17 @@
 .resource-feedback:empty,#mx-feedback:empty{display:none}.text-success{color:#146442}
 .wz-top nav form{width:auto}.wz-top nav button{text-transform:none;box-shadow:none;min-width:0}
 @media(max-width:550px){.resource-inputs{grid-template-columns:1fr}}
+
+.release-picker {border:0;padding:0;margin:1.25rem 0;min-width:0}
+.release-picker legend {font-weight:600;margin-bottom:.65rem}
+.release-choice {border:1px solid var(--line,#dce0ee);border-radius:12px;margin:.65rem 0;overflow:hidden}
+.release-choice:has(input:checked) {border-color:#252078;background:#f1f0ff}
+.release-label {display:flex;align-items:flex-start;gap:.75rem;padding:1rem;cursor:pointer;margin:0}
+.release-label input {flex:0 0 auto;width:1rem;margin:.25rem 0 0;accent-color:#252078}
+.release-label span {min-width:0;display:grid;gap:.3rem}
+.release-label strong {overflow-wrap:anywhere;line-height:1.45}
+.release-label small {color:#596381;font-size:.8rem}
+.release-details {padding:0 1rem 1rem;font-size:.85rem}
+.release-details summary {cursor:pointer;color:#596381}
+.release-details code,.release-details p {overflow-wrap:anywhere}
+.release-message {white-space:pre-wrap}

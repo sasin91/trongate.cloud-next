@@ -31,10 +31,25 @@ try {
     check((int)$s->run('SELECT COUNT(*) FROM jobs WHERE id=?',[$rolledBack])->fetchColumn()===0,'Delegated queue escaped model transaction');
     check((int)$s->run("SELECT COUNT(*) FROM records WHERE id='rollback-fixture'")->fetchColumn()===0,'Inventory escaped model transaction');
     check((int)$s->run("SELECT COUNT(*) FROM credentials WHERE id='rollback-fixture'")->fetchColumn()===0,'Credential escaped model transaction');
-    $launch=['app'=>'demo','server'=>'web','release'=>$release];
+    $launch=['app'=>'demo','server'=>'web','release'=>$release,'metadata'=>['message'=>'Ship the dashboard','branch'=>'main','commit'=>str_repeat('c',40)]];
     $deployment=$flow->_deploy_built('build-one',$launch,['image'=>'registry.example.com/demo@sha256:'.str_repeat('b',64)]);
     check($deployment===$flow->_deploy_built('build-one',$launch,['image'=>'registry.example.com/demo@sha256:'.str_repeat('b',64)]),'Build retry created duplicate deployment');
     check((int)$s->run('SELECT COUNT(*) FROM jobs')->fetchColumn()===2,'Build handoff not idempotent');
+    $builtPayload = json_decode($s->job($deployment)['payload'], true);
+    $builtRelease = $s->get('release', $builtPayload['release']);
+    check($builtRelease['metadata']['message'] === 'Ship the dashboard', 'Release lost source metadata');
+    check($builtRelease['created'] > 0, 'Release timestamp missing');
+    $releases = [['id'=>$builtPayload['release']] + $builtRelease];
+    $releases[0]['metadata']['message'] = '<script>alert(1)</script>';
+    $e = static fn($value) => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+    ob_start();
+    require dirname(__DIR__) . '/modules/apps/views/releases.php';
+    $releaseHtml = ob_get_clean();
+    check(str_contains($releaseHtml, '&lt;script&gt;') && !str_contains($releaseHtml, '<script>'), 'Commit message was not escaped');
+    check(str_contains($releaseHtml, 'ccccccc') && str_contains($releaseHtml, 'main') && str_contains($releaseHtml, '<time'), 'Release context missing');
+
+    (new Control($s))->execute('release', ['app'=>'demo', 'release'=>$builtRelease['spec']]);
+    check($s->get('release', $builtPayload['release'])['metadata'] === $builtRelease['metadata'], 'Repeated release erased metadata');
     check(Apps_model::_repository('https://github.com/owner/repo.git')==='owner/repo','Repository URL conversion');
     try { Apps_model::_repository('https://evil.example/repo'); throw new LogicException('Foreign URL accepted'); } catch (RuntimeException) {}
     $s->put('server','web',['application_ready'=>true,'host'=>'192.0.2.10','facts'=>['arch'=>'aarch64']]);

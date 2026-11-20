@@ -74,7 +74,16 @@ final class Control {
                 $s->get('app', $app);
                 $release = Validate::release($p['release']);
                 $id = hash('sha256', tc_json($release));
-                $s->put('release', $id, ['app' => $app, 'spec' => $release]);
+                try {
+                    $existing = $s->get('release', $id);
+                } catch (RuntimeException $e) {
+                    $existing = [];
+                }
+                $s->put('release', $id, [
+                    'app' => $app, 'spec' => $release,
+                    'created' => $existing['created'] ?? time(),
+                    'metadata' => $existing['metadata'] ?? ($p['metadata'] ?? [])
+                ]);
                 return $id;
             case 'deploy':
             case 'rollback':

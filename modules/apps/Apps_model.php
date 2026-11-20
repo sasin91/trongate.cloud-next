@@ -31,6 +31,35 @@ class Apps_model extends Model {
         return json_decode($body,true,512,JSON_THROW_ON_ERROR);
     }
 
+    static function _release_metadata(string $repository, array $commit, string $branch = ''): array {
+        $repository = self::_repository($repository);
+        $sha = Validate::match($commit['sha'], '/^[a-f0-9]{40}$/D', 'source commit');
+        $metadata = [
+            'repository' => $repository,
+            'commit' => $sha,
+            'branch' => $branch,
+            'message' => substr((string) ($commit['commit']['message'] ?? ''), 0, 8000),
+            'author' => substr((string) ($commit['commit']['author']['name'] ?? ''), 0, 200),
+            'committed_at' => (string) ($commit['commit']['committer']['date'] ?? '')
+        ];
+        // PR enrichment is optional: rate limits must never block a build.
+        try {
+            $pulls = self::_github($repository . '/commits/' . $sha . '/pulls');
+            foreach ($pulls as $pull) {
+                if (!empty($pull['merged_at']) && ($pull['merge_commit_sha'] ?? '') === $sha) {
+                    $metadata['pull_request'] = [
+                        'number' => (int) $pull['number'],
+                        'title' => substr((string) $pull['title'], 0, 500)
+                    ];
+                    break;
+                }
+            }
+        } catch (RuntimeException $e) {
+            // The immutable commit message remains available without PR metadata.
+        }
+        return $metadata;
+    }
+
     function _build_target(string $target, string $app, string $request, string $mode = 'local'): array {
         $application = $this->get('server', $target);
         if ($mode === 'local') {
@@ -99,7 +128,9 @@ class Apps_model extends Model {
             $repository=self::_repository($p['repository'] ?? '');
             $branch=trim($p['branch'] ?? 'main');
             if ($branch==='' || strlen($branch)>200) { throw new RuntimeException('Choose a branch or commit.'); }
-            $commit=self::_github($repository.'/commits/'.rawurlencode($branch))['sha'];
+            $commitData = self::_github($repository . '/commits/' . rawurlencode($branch));
+            $commit = $commitData['sha'];
+            $metadata = self::_release_metadata($repository, $commitData, $branch);
             $build=['builder'=>$builder,'mode'=>$target['mode'],'plan'=>Build::plan(['repository'=>$repository,'commit'=>$commit,'base'=>'','container_port'=>$spec['container_port'],'tag'=>$target['tag'],
                 'commands'=>$p['build_commands'] ?? '', 'extensions'=>preg_split('/[\s,]+/',trim($p['php_extensions'] ?? ''),-1,PREG_SPLIT_NO_EMPTY)])];
             $registrySecret = trim(getenv('TC_BUILD_REGISTRY_SECRET') ?: '');
@@ -118,7 +149,7 @@ class Apps_model extends Model {
                 $s->secret($ref,$value); $spec['secrets'][$name]=$ref;
             }
             if ($build!==null) {
-                $operation=$s->enqueue('build','builder:'.$build['builder'],$build+['launch'=>['app'=>$id,'server'=>$server,'release'=>$spec]]);
+                $operation=$s->enqueue('build','builder:'.$build['builder'],$build+['launch'=>['app'=>$id,'server'=>$server,'release'=>$spec,'metadata'=>$metadata]]);
             } else {
                 $release=(new Control($s))->execute('release',['app'=>$id,'release'=>$spec]);
                 $operation=(new Control($s))->execute('deploy',['app'=>$id,'release'=>$release]);
@@ -140,7 +171,7 @@ class Apps_model extends Model {
         $s->connection()->beginTransaction();
         try {
             $s->run('INSERT INTO records(kind,id,data) VALUES(?,?,?)',['build-deployment',$build,'{}']);
-            $release=(new Control($s))->execute('release',['app'=>$launch['app'],'release'=>$spec]);
+            $release=(new Control($s))->execute('release',['app'=>$launch['app'],'release'=>$spec,'metadata'=>$launch['metadata'] ?? []]);
             $operation=(new Control($s))->execute('deploy',['app'=>$launch['app'],'release'=>$release]);
             $s->put('build-deployment',$build,['operation'=>$operation]);
             $s->connection()->commit(); return $operation;
