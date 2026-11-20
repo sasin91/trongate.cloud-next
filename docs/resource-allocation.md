@@ -42,6 +42,11 @@ opening the page; Apply or the next deployment adopts the current policy.
 Active, staged and otherwise still-running managed releases count toward admission.
 An app cannot start a third simultaneous version. Retained stopped rollback
 containers also receive new limits so rollback cannot revive obsolete allocations.
+Podman reports a stopped container's last runtime spec until it starts again;
+updates are persisted for the next start. The real-container regression test
+checks those settings after stop/update/start, including kernel-enforced limits.
+An interrupted creation is counted even if its release metadata was not written
+yet. A removed historical container does not make resource inspection fail.
 Pending apps with no running container receive their share when deployment starts.
 Failed first deployments leave no durable app reservation once their containers
 are stopped; the next allocation recalculates the remaining apps' shares.

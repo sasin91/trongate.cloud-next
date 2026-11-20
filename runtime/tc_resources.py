@@ -29,10 +29,15 @@ class Resources:
         """Inspect only managed releases; never return environment or customer output."""
         import json
         result = []
-        for path in sorted((self.runtime.root / 'apps').glob('*/releases/*/release.json')):
-            release = self.runtime.read(path)
-            name = release['container']
+        present = set(self.runtime.run(['podman', 'ps', '--all', '--format', '{{.Names}}']).splitlines())
+        for directory in sorted((self.runtime.root / 'apps').glob('*/releases/*')):
+            app = directory.parents[1].name
+            release = self.runtime.read(directory / 'release.json', {})
+            # Creation can be interrupted after Podman starts but before release.json.
+            name = release.get('container', 'tc-' + app + '-' + directory.name)
             self.runtime.match(name, r'tc-[a-z][a-z0-9-]{0,39}-[a-f0-9]{32}')
+            if name not in present:
+                continue
             info = json.loads(self.runtime.run(['podman', 'inspect', name]))[0]
             running = info['State']['Running']
             used = 0
@@ -50,7 +55,7 @@ class Resources:
                 quota, period = (group / 'cpu.max').read_text().split()
                 effective_quota = int(quota) / int(period) if quota != 'max' else 0
             limits = info['HostConfig']
-            result.append({'app': path.parents[2].name, 'container': name, 'running': running,
+            result.append({'app': app, 'container': name, 'running': running,
                            'used_mb': used, 'memory_mb': limits['Memory'] // MIB,
                            'cpu_usec': cpu_usec, 'sample_ns': time.monotonic_ns(),
                            'effective_memory_mb': effective_memory, 'effective_quota': effective_quota,
@@ -150,6 +155,11 @@ class Resources:
                           '--cpus', str(quota or os.cpu_count()),
                           '--cpu-shares', str(max(2, shares or 1024)), container])
         observed = next(item for item in self.containers() if item['container'] == container)
+        # Podman inspect exposes the last runtime spec for stopped containers.
+        # Updates are persisted for their next start; integration tests verify
+        # the limits after restart. Never start a retained release just to inspect it.
+        if not observed['running']:
+            return
         if observed['memory_mb'] != memory or observed['shares'] != max(2, shares or 1024) or observed['quota'] != (quota or os.cpu_count()):
             raise RuntimeError('The container runtime did not apply the requested limits. Resource recovery is required.')
         if observed['running'] and (observed['effective_memory_mb'] != memory or observed['effective_quota'] != (quota or os.cpu_count())):

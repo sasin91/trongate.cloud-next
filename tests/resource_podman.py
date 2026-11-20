@@ -58,12 +58,25 @@ with tempfile.TemporaryDirectory(prefix='tc-resource-integration-') as directory
         except RuntimeError:
             pass
         assert [item['memory_mb'] for item in resources.containers()] == [item['memory_mb'] for item in before]
+        runtime.run(['podman', 'stop', '--time', '0', names[0]])
+        resources.apply(change={'app': 'resourcechecka', 'mode': 'manual', 'memory_mb': 400, 'cpus': 0.2})
+        runtime.run(['podman', 'start', names[0]])
+        restarted = next(item for item in resources.containers() if item['container'] == names[0])
+        assert restarted['effective_memory_mb'] == 400, restarted
+        assert restarted['effective_quota'] >= os.cpu_count(), restarted
+        assert restarted['shares'] == round(0.2 * 1024), restarted
+        before = resources.containers()
         resources.runtime.write(resources.pending, {'before': before, 'policies': resources.runtime.read(resources.path)})
         resources.recover()
         assert not resources.pending.exists()
         snapshot = resources.snapshot()
         assert len(snapshot['apps']) == 2
         assert all(row['versions'] == 1 and row['used_mb'] > 0 and row['cpu_percent'] is not None for row in snapshot['apps'])
+        release_path = next((runtime.root / 'apps/resourcechecka/releases').glob('*/release.json'))
+        release_path.unlink()
+        assert len(resources.containers()) == 2, 'Interrupted creation must still count'
+        runtime.run(['podman', 'rm', '--force', '--time', '0', names[0]])
+        assert len(resources.containers()) == 1, 'Removed containers must not break resource inspection'
         print('Real Podman limits, full-host CPU bursting, boundaries, usage and recovery passed')
     finally:
         for name in names:
