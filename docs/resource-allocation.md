@@ -72,9 +72,9 @@ preflight and cache cleanup; persistent storage quotas are a separate feature.
 
 ## Verification
 
-`tests/resources_test.py` covers two-slot arithmetic, manual/automatic mixing,
+`tests/resources_test.php` covers two-slot arithmetic, manual/automatic mixing,
 boundary rejection, live-use guards, retained rollback containers, partial failures
-and interrupted-update recovery. `tests/resource_podman.py LOCAL_IMAGE_ID` explicitly
+and interrupted-update recovery. `php tests/resource_podman.php LOCAL_IMAGE_ID` explicitly
 tests disposable real containers, including the effective kernel memory and CPU
 limits. It never uses the live runtime directory. The NixOS VM test also exercises
 resources through the runtime alongside deploy/rollback.

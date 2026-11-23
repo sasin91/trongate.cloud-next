@@ -1,9 +1,10 @@
 <?php
-require dirname(__DIR__).'/modules/operations/bootstrap.php';
+require_once __DIR__ . '/model_fixture.php';
+require_once dirname(__DIR__).'/bootstrap.php';
 $dir=sys_get_temp_dir().'/tc-flow-'.bin2hex(random_bytes(6)); mkdir($dir);
 putenv('TC_STATE='.$dir); putenv('TC_DSN=sqlite:'.$dir.'/db');
 file_put_contents($dir.'/key',Encryptor::generate_key());
-$s=new Operations_model('operations'); (new Setup_model('setup',$s->connection()))->migrate(); $flow=new Apps_model('apps',$s->connection());
+$s=new Test_model('jobs'); (new Setup_model('setup',$s->db->connection()))->migrate(); $flow=new Apps_model('apps',$s->db->connection());
 function check(bool $ok,string $message): void { if (!$ok) { throw new RuntimeException($message); } }
 try {
     $s->put('server','web',['application_ready'=>true]);
@@ -11,30 +12,30 @@ try {
     $p=['source'=>'image','label'=>'demo','server'=>'web','domain'=>'demo.example.com','image'=>'registry.example.com/demo@sha256:'.str_repeat('a',64),'environment'=>"DB_PASSWORD=fixture-private-value\nAPP_ENV=production",'persistent_paths'=>'public/uploads'];
     $job=$flow->_plan_launch($p,'request-one');
     check($job===$flow->_plan_launch($p,'request-one'),'Repeat submission must reuse job');
-    check((int)$s->run('SELECT COUNT(*) FROM jobs')->fetchColumn()===1,'Duplicate job queued');
+    check((int)$s->db->query_bind('SELECT COUNT(*) FROM jobs', [], 'statement')->fetchColumn()===1,'Duplicate job queued');
     $payload=json_decode($s->job($job)['payload'],true);
     $release=$s->get('release',$payload['release'])['spec'];
     check($release['mounts']['data-0']==='/app/public/uploads','Mount was not mapped');
     check($s->secret($release['secrets']['DB_PASSWORD'])==='fixture-private-value','Encrypted environment missing');
-    check(!str_contains(tc_json($s->all('release')),'fixture-private-value'),'Secret leaked to release metadata');
+    check(!str_contains(json_encode($s->all('release'), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),'fixture-private-value'),'Secret leaked to release metadata');
     foreach ([array_replace($p,['label'=>'bad','server'=>'unready']),array_replace($p,['label'=>'bad','environment'=>'INVALID']),array_replace($p,['label'=>'demo'])] as $invalid) {
         try { $flow->_plan_launch($invalid,bin2hex(random_bytes(4))); throw new LogicException('Invalid launch accepted'); }
         catch (RuntimeException) {}
     }
-    check((int)$s->run('SELECT COUNT(*) FROM jobs')->fetchColumn()===1,'Invalid launch caused side effects');
+    check((int)$s->db->query_bind('SELECT COUNT(*) FROM jobs', [], 'statement')->fetchColumn()===1,'Invalid launch caused side effects');
     check(count($s->all('app'))===1,'Invalid launch created app');
-    $flow->connection()->beginTransaction();
+    $flow->db->connection()->beginTransaction();
     $rolledBack=$flow->enqueue('deploy','server:web',['app'=>'rollback-fixture']);
-    $flow->put('app','rollback-fixture',['server'=>'web']);
+    $flow->records->_put(['kind' => 'app', 'id' => 'rollback-fixture', 'data' => ['server' => 'web']]);
     $flow->secret('rollback-fixture','test-only');
-    $flow->connection()->rollBack();
-    check((int)$s->run('SELECT COUNT(*) FROM jobs WHERE id=?',[$rolledBack])->fetchColumn()===0,'Delegated queue escaped model transaction');
-    check((int)$s->run("SELECT COUNT(*) FROM records WHERE id='rollback-fixture'")->fetchColumn()===0,'Inventory escaped model transaction');
-    check((int)$s->run("SELECT COUNT(*) FROM credentials WHERE id='rollback-fixture'")->fetchColumn()===0,'Credential escaped model transaction');
+    $flow->db->connection()->rollBack();
+    check((int)$s->db->query_bind('SELECT COUNT(*) FROM jobs WHERE id=?',[$rolledBack], 'statement')->fetchColumn()===0,'Delegated queue escaped model transaction');
+    check((int)$s->db->query_bind("SELECT COUNT(*) FROM records WHERE id='rollback-fixture'", [], 'statement')->fetchColumn()===0,'Inventory escaped model transaction');
+    check((int)$s->db->query_bind("SELECT COUNT(*) FROM credentials WHERE id='rollback-fixture'", [], 'statement')->fetchColumn()===0,'Credential escaped model transaction');
     $launch=['app'=>'demo','server'=>'web','release'=>$release,'metadata'=>['message'=>'Ship the dashboard','branch'=>'main','commit'=>str_repeat('c',40)]];
     $deployment=$flow->_deploy_built('build-one',$launch,['image'=>'registry.example.com/demo@sha256:'.str_repeat('b',64)]);
     check($deployment===$flow->_deploy_built('build-one',$launch,['image'=>'registry.example.com/demo@sha256:'.str_repeat('b',64)]),'Build retry created duplicate deployment');
-    check((int)$s->run('SELECT COUNT(*) FROM jobs')->fetchColumn()===2,'Build handoff not idempotent');
+    check((int)$s->db->query_bind('SELECT COUNT(*) FROM jobs', [], 'statement')->fetchColumn()===2,'Build handoff not idempotent');
     $builtPayload = json_decode($s->job($deployment)['payload'], true);
     $builtRelease = $s->get('release', $builtPayload['release']);
     check($builtRelease['metadata']['message'] === 'Ship the dashboard', 'Release lost source metadata');
@@ -48,10 +49,11 @@ try {
     check(str_contains($releaseHtml, '&lt;script&gt;') && !str_contains($releaseHtml, '<script>'), 'Commit message was not escaped');
     check(str_contains($releaseHtml, 'ccccccc') && str_contains($releaseHtml, 'main') && str_contains($releaseHtml, '<time'), 'Release context missing');
 
-    (new Control($s))->execute('release', ['app'=>'demo', 'release'=>$builtRelease['spec']]);
+    $s->module('apps');
+    $s->apps->model->_release(['app'=>'demo', 'release'=>$builtRelease['spec']]);
     check($s->get('release', $builtPayload['release'])['metadata'] === $builtRelease['metadata'], 'Repeated release erased metadata');
-    check(Apps_model::_repository('https://github.com/owner/repo.git')==='owner/repo','Repository URL conversion');
-    try { Apps_model::_repository('https://evil.example/repo'); throw new LogicException('Foreign URL accepted'); } catch (RuntimeException) {}
+    check(Apps::_repository('https://github.com/owner/repo.git')==='owner/repo','Repository URL conversion');
+    try { Apps::_repository('https://evil.example/repo'); throw new LogicException('Foreign URL accepted'); } catch (RuntimeException) {}
     $s->put('server','web',['application_ready'=>true,'host'=>'192.0.2.10','facts'=>['arch'=>'aarch64']]);
     try { $flow->_build_target('web','demo','request','dedicated'); throw new LogicException('Missing builder accepted'); } catch (RuntimeException) {}
     foreach (['builder-a','builder-b'] as $builder) {
@@ -75,7 +77,7 @@ try {
     $local = $flow->_build_target('web', 'demo', 'local-request');
     check($local['builder'] === 'web' && $local['mode'] === 'local', 'Local builds must be the default');
     check(str_starts_with($local['tag'], 'localhost/tc/demo:'), 'Local build must not require a registry');
-    $monitor = new Monitoring_model('monitoring', $s->connection());
+    $monitor = new Monitoring_model('monitoring', $s->db->connection());
     foreach ([600, 300, 0] as $ago) {
         $monitor->_record('web', ['at' => time() - $ago, 'cpu_percent' => 90, 'memory_used' => 90, 'memory_total' => 100, 'disk_used' => 50, 'disk_total' => 100, 'disk_free' => 10000000000]);
     }

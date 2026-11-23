@@ -10,30 +10,31 @@
     packages = forAll (system: let pkgs = import nixpkgs { inherit system; }; in {
       runtime = pkgs.writeShellApplication {
         name = "tc-runtime";
-        runtimeInputs = with pkgs; [ python3 podman systemd curl caddy nix util-linux which ];
-        text = ''exec python3 ${./runtime}/tc-runtime.py "$@"'';
+        runtimeInputs = with pkgs; [ php84 podman systemd curl caddy nix util-linux which ];
+        text = ''exec php ${./runtime}/tc-runtime.php "$@"'';
       };
       builder = pkgs.writeShellApplication {
         name = "tc-build";
-        runtimeInputs = with pkgs; [ python3 podman git systemd ];
-        text = ''exec python3 ${./runtime}/tc-build.py "$@"'';
+        runtimeInputs = with pkgs; [ php84 podman git systemd ];
+        text = ''exec php ${./runtime}/tc-build.php "$@"'';
       };
       default = pkgs.stdenvNoCC.mkDerivation {
         pname = "trongate-cloud-next"; version = "0.1.0"; src = self;
-        nativeBuildInputs = [ pkgs.makeWrapper ];
         installPhase = ''
-          mkdir -p $out/share/tc $out/bin
-          cp -r engine modules public bin nix runtime setup.sql flake.nix flake.lock $out/share/tc/
-          makeWrapper ${pkgs.php84}/bin/php $out/bin/tc --add-flags "$out/share/tc/bin/tc" \
-            --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.openssh pkgs.nix deploy-rs.packages.${system}.default pkgs.git ]}
+          mkdir -p $out/share/tc
+          cp -r bootstrap.php engine modules public nix runtime setup.sql flake.nix flake.lock $out/share/tc/
         '';
       };
     } // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-      snapshot = import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
+      proxmox-template = import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
         inherit pkgs; inherit (pkgs) lib;
-        config = self.nixosConfigurations.snapshot.config;
-        format = "raw"; partitionTableType = "legacy"; diskSize = 8192;
-        name = "trongate-nixos-hetzner-x86";
+        config = self.nixosConfigurations.proxmox-template.config;
+        format = "qcow2";
+        partitionTableType = "legacy";
+        diskSize = 16384;
+        name = "trongate-nixos-proxmox-x86";
+        baseName = "trongate-proxmox";
+        copyChannel = false;
       };
     });
     nixosModules.runtime = { pkgs, ... }: {
@@ -59,9 +60,9 @@
         system.stateVersion = "26.05";
       }) ];
     };
-    nixosConfigurations.snapshot = nixpkgs.lib.nixosSystem {
+    nixosConfigurations.proxmox-template = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
-      modules = [ self.nixosModules.runtime ./nix/snapshot.nix ];
+      modules = [ self.nixosModules.runtime ./nix/proxmox-template.nix ];
     };
     checks.x86_64-linux.installation = self.nixosConfigurations.check.config.system.build.toplevel;
     checks.x86_64-linux.runtime-vm = import ./tests/runtime-vm.nix {

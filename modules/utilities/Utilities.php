@@ -37,18 +37,28 @@ class Utilities extends Trongate {
 
         // Split into module and optional method
         $bits = explode('/', $block_path);
-        $target_module = $bits[0];
-        $target_method = $bits[1] ?? '';
+        $target_module = strtolower($bits[0]);
+        $target_method = strtolower($bits[1] ?? '');
+
+        // Match Core's routing normalization so alternate spellings cannot bypass the guard.
+        $current_module = preg_replace('/[^a-z0-9-_]/', '', strtolower((string) segment(1)));
+        $current_method = strtolower((string) segment(2));
+        if ($current_module === '' && defined('DEFAULT_MODULE')) {
+            $current_module = strtolower(DEFAULT_MODULE);
+        }
+        if ($current_method === '' && defined('DEFAULT_METHOD')) {
+            $current_method = strtolower(DEFAULT_METHOD);
+        }
 
         if ($target_method === '') {
             // Block entire module
-            if (segment(1) === $target_module) {
+            if ($current_module === $target_module) {
                 http_response_code(403);
                 die('403 Forbidden - Direct URL access not permitted');
             }
         } else {
             // Block specific method
-            if (segment(1) === $target_module && segment(2) === $target_method) {
+            if ($current_module === $target_module && $current_method === $target_method) {
                 http_response_code(403);
                 die('403 Forbidden - Direct URL access not permitted');
             }

@@ -6,8 +6,8 @@ let
   '';
   good = pkgs.dockerTools.buildLayeredImage {
     name = "tc-fixture"; tag = "good";
-    contents = [ pkgs.python3 web ];
-    config.Cmd = [ "${pkgs.python3}/bin/python3" "-m" "http.server" "8080" "--directory" "/app/public" ];
+    contents = [ pkgs.php84 web ];
+    config.Cmd = [ "${pkgs.php84}/bin/php" "-S" "0.0.0.0:8080" "-t" "/app/public" ];
   };
   bad = pkgs.dockerTools.buildLayeredImage {
     name = "tc-fixture"; tag = "bad";
@@ -30,7 +30,7 @@ in pkgs.testers.runNixOSTest {
   nodes.control = { pkgs, ... }: {
     imports = [ self.nixosModules.control-plane ];
     services.trongate-cloud = { enable = true; domain = "control.localhost"; };
-    environment.systemPackages = [ pkgs.curl pkgs.python3 ];
+    environment.systemPackages = [ pkgs.curl pkgs.php84 ];
     services.openssh.enable = true;
     networking.extraHosts = "127.0.0.1 control.localhost";
     virtualisation.memorySize = 1024;
@@ -48,13 +48,13 @@ in pkgs.testers.runNixOSTest {
     bad_digest = machine.succeed("cat /tmp/bad.digest").strip()
     machine.succeed("mkdir -p /root/.ssh; ssh-keygen -t ed25519 -N \"\" -f /root/.ssh/id_ed25519; cp /root/.ssh/id_ed25519.pub /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys")
     machine.succeed("mkdir -p /var/lib/tc-control; cp -r ${self} /tmp/product; chmod -R u+w /tmp/product")
-    machine.succeed("TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc init <<'EOF'\n{\"name\":\"admin\",\"password\":\"disposable-test-password\"}\nEOF")
+    machine.succeed("TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/modules/setup/init.php <<'EOF'\n{\"name\":\"admin\",\"password\":\"disposable-test-password\"}\nEOF")
     def cli(command, payload):
         import shlex
-        result = machine.succeed("printf %s " + shlex.quote(json.dumps(payload)) + " | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc " + command)
+        result = machine.succeed("printf %s " + shlex.quote(json.dumps(payload)) + " | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/tests/control_driver.php " + command)
         return json.loads(result)
     # Keep the private key inside the VM: the test driver logs command arguments.
-    machine.succeed("php -r 'echo json_encode([\"id\"=>\"test-key\",\"value\"=>file_get_contents(\"/root/.ssh/id_ed25519\")]);' | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc credential")
+    machine.succeed("php -r 'echo json_encode([\"id\"=>\"test-key\",\"value\"=>file_get_contents(\"/root/.ssh/id_ed25519\")]);' | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/tests/control_driver.php credential")
     scanned = cli("server-scan", {"host": "127.0.0.1", "port": 22, "user": "root", "credential": "test-key"})
     fingerprint = machine.succeed("ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | cut -d' ' -f2").strip()
     assert scanned["fingerprint"] == fingerprint
@@ -64,7 +64,7 @@ in pkgs.testers.runNixOSTest {
     def deploy(digest):
         release = cli("release", {"app": "demo", "release": {"image": "localhost:5000/demo@"+digest, "domain": "demo.localhost", "health": "/", "mounts": {"uploads": "/app/uploads"}}})
         op = cli("deploy", {"app": "demo", "release": release, "public_check": False})
-        machine.succeed("TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc worker --once")
+        machine.succeed("TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/modules/jobs/worker.php --once")
         return cli("operation", {"operation": op})
     first = deploy(good_digest)
     assert first["job"]["status"] == "succeeded", first
@@ -84,25 +84,25 @@ in pkgs.testers.runNixOSTest {
     failed = deploy(bad_digest)
     assert failed["job"]["status"] == "failed", failed
     rollback = cli("rollback", {"app": "demo", "public_check": False})
-    machine.succeed("TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc worker --once")
+    machine.succeed("TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/modules/jobs/worker.php --once")
     assert cli("operation", {"operation": rollback})["job"]["status"] == "succeeded"
     assert resources({"action": "resources"})["apps"][0]["limits_mb"] == [256]
     machine.succeed("test $(cat /var/lib/tc/runtime/apps/demo/data/uploads/keep) = retained")
     machine.wait_until_succeeds("curl -ksfL --resolve demo.localhost:443:127.0.0.1 https://demo.localhost | grep 'immutable release'")
     # Real host-key rotation must fail closed on the next normal CLI inspection.
     machine.succeed("rm /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub; ssh-keygen -t ed25519 -N \"\" -f /etc/ssh/ssh_host_ed25519_key; systemctl restart sshd")
-    machine.fail("echo '{\"server\":\"web\"}' | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/bin/tc server-inspect")
+    machine.fail("echo '{\"server\":\"web\"}' | TC_STATE=/var/lib/tc-control TC_DSN=sqlite:/var/lib/tc-control/test.db php /tmp/product/tests/control_driver.php server-inspect")
     # Boot the supported installation module with its real MariaDB/socket auth,
     # PHP-FPM, Caddy and worker rather than only evaluating its options.
     control.start()
     control.wait_for_unit("mysql.service")
-    control.succeed("printf '%s' '{\"name\":\"admin\",\"password\":\"disposable-test-password\"}' | sudo -u tc env TC_STATE=/var/lib/tc-control tc init")
+    control.succeed("printf '%s' '{\"name\":\"admin\",\"password\":\"disposable-test-password\"}' | sudo -u tc env TC_STATE=/var/lib/tc-control php /run/current-system/sw/share/tc/modules/setup/init.php")
     control.wait_for_unit("phpfpm-tc.service")
     control.wait_for_unit("caddy.service")
     control.wait_until_succeeds("curl -ksfL --resolve control.localhost:443:127.0.0.1 https://control.localhost/ | grep 'Sign in'")
-    control.succeed("sudo -u tc env TC_STATE=/var/lib/tc-control tc inventory </dev/null")
+    control.succeed("sudo -u tc env TC_STATE=/var/lib/tc-control php /run/current-system/sw/share/tc/modules/setup/migrate.php")
     control.succeed("printf '%s' '{\"name\":\"admin\",\"password\":\"disposable-test-password\"}' > /run/scan-admin.json")
-    control.succeed("python3 ${./fpm_scan.py} --url https://control.localhost --credentials /run/scan-admin.json --insecure")
+    control.succeed("php ${./fpm_scan.php} --url https://control.localhost --credentials /run/scan-admin.json --insecure")
 
     control.wait_for_unit("tc-worker.service")
   '';

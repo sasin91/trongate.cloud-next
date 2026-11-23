@@ -6,9 +6,7 @@
  * and password resets against configurable user tables.
  * Supports multiple user levels with independent configurations.
  */
-require_once dirname(__DIR__).'/db/traits/Database_access.php';
 class Login_model extends Model {
-    use Database_access;
 
     private array $full_config = [];
 
@@ -32,7 +30,7 @@ class Login_model extends Model {
         $config = [];
 
         // Try app-level config first
-        $app_config = APPPATH . '/config/login.php';
+        $app_config = APPPATH . 'config/login.php';
         if (file_exists($app_config)) {
             require $app_config;
         } else {
@@ -769,16 +767,16 @@ class Login_model extends Model {
 
     function _import_legacy_admins(): void {
         // Preserve existing hashes; repeated migrations never overwrite native login accounts.
-        foreach ($this->run('SELECT name,password FROM admins')->fetchAll() as $admin) {
-            $this->connection()->beginTransaction();
+        foreach ($this->db->query_bind('SELECT name,password FROM admins', [], 'statement')->fetchAll() as $admin) {
+            $this->db->connection()->beginTransaction();
             try {
-                if (!$this->run('SELECT id FROM trongate_administrators WHERE username=?',[$admin['name']])->fetchColumn()) {
-                    $this->run('INSERT INTO trongate_users(code,user_level_id) VALUES(?,1)',[bin2hex(random_bytes(16))]);
-                    $user=(int)$this->connection()->lastInsertId();
-                    $this->run('INSERT INTO trongate_administrators(username,password,trongate_user_id) VALUES(?,?,?)',[$admin['name'],$admin['password'],$user]);
+                if (!$this->db->query_bind('SELECT id FROM trongate_administrators WHERE username=?',[$admin['name']], 'statement')->fetchColumn()) {
+                    $this->db->query_bind('INSERT INTO trongate_users(code,user_level_id) VALUES(?,1)',[bin2hex(random_bytes(16))], 'statement');
+                    $user=(int)$this->db->connection()->lastInsertId();
+                    $this->db->query_bind('INSERT INTO trongate_administrators(username,password,trongate_user_id) VALUES(?,?,?)',[$admin['name'],$admin['password'],$user], 'statement');
                 }
-                $this->connection()->commit();
-            } catch (Throwable $e) { $this->connection()->rollBack(); throw $e; }
+                $this->db->connection()->commit();
+            } catch (Throwable $e) { $this->db->connection()->rollBack(); throw $e; }
         }
     }
 }

@@ -2,11 +2,11 @@
 
 ## Trongate modules and routing
 
-Core routes directly to `apps`, `servers`, `providers`, `deployments`, and
-`operations`. Each public feature entry point calls
+Core routes directly to `apps`, `servers`, `deployments`, and
+`jobs`. Each public feature entry point calls
 `$this->trongate_security->make_sure_allowed()` before handling its own request.
 There is no console command dispatcher or custom authentication module.
-`templates` composes the shared layout and module-owned views. Providers and servers have dedicated management pages. Server creation keeps
+`templates` composes the shared layout and module-owned views. Apps, servers, deployments and jobs have dedicated pages. Server creation keeps
 its configuration, review and operation ID in the session. App setup saves an
 encrypted session draft before navigation and restores the current question
 when returning. Tokens and SSH private keys are never stored in localStorage.
@@ -20,27 +20,28 @@ validation CSRF check. Logout requires POST and CSRF. Remember-me and password
 reset are disabled for this installation. Sessions rotate on login and tokens
 retain the previous one-hour lifetime.
 
-`tc migrate` creates the native login tables and copies legacy administrator
+`php /run/current-system/sw/share/tc/modules/setup/migrate.php` creates the native login tables and copies legacy administrator
 password hashes once per username. Repeated migrations do not overwrite native
-accounts; `tc init` remains the explicit local administrator password setup path.
+accounts; `php /run/current-system/sw/share/tc/modules/setup/init.php` remains the explicit local administrator password setup path.
 Old custom sessions no longer authorize requests. Migration is additive, so the
 legacy tables remain available for rollback. Back up the database before upgrading.
 
 The native `Db` module uses the control plane's configured PDO connection; its
 table-existence check also supports SQLite test fixtures. Other framework code
-is kept in the bundled engine/modules. The local JSON serialization helper is
-named `tc_json` to avoid shadowing Trongate's `json()` response helper.
+is kept in the bundled engine/modules. JSON encoding helpers are private to their
+owning classes. They return strings and preserve throwing on invalid JSON and
+unescaped slashes; Trongate's `json()` helper is for displaying data.
 
 Internal methods use the underscore convention enforced by Core. Feature assets
 use normal `_module` URLs and Core's asset checks. Shared styles live in
-`templates/css`. Launch and provider flow logic lives in `Apps_model` and `Providers_model`,
-accessed through Trongate’s `$this->model`. Shared inventory, credential encryption
-and queue access use traits. `Operations_model` owns atomic queue transitions;
-queue delegation shares the calling model’s PDO connection so launch writes and
+`templates/css`. Launch and Proxmox persistence lives in `Apps_model` and `Proxmox_model`,
+accessed through Trongate's `$this->model`. Records owns shared JSON record storage;
+credential encryption and queue access use traits. `Jobs_model` owns atomic queue transitions;
+module loading shares the calling model's PDO connection so launch writes and
 job creation commit or roll back together. CLI and workers load the same models.
 Supporting classes live under their owning modules in `services/`: app builds,
-provider HTTP, server SSH, deployment backends, security and operations. Shared
-web/CLI initialization lives in `modules/operations/bootstrap.php`. Service files
+provider HTTP, server SSH, deployment backends, security and jobs. Shared
+web/CLI initialization lives in `bootstrap.php`. Service files
 are loaded explicitly and are not module controllers.
 
 The canonical MariaDB schema is root `setup.sql`; SQLite tests use
@@ -48,16 +49,32 @@ The canonical MariaDB schema is root `setup.sql`; SQLite tests use
 SQL files and asks `Login_model` to import legacy administrator hashes. There is
 no browser setup controller or schema creation during ordinary requests.
 
-## Services
+## Module ownership
 
-`Control` validates operator intent and writes inventory/queue records.
-Feature models own persistence. `Worker` orchestrates actual
-operations. `Hetzner` owns provider HTTP resources/actions. `Ssh` owns host identity,
-credential materialization and fixed remote entry points. `HostDeployer` is the
-only host-backend interface; `DeployRs` implements it. The small Python host helper
-implements Podman/systemd/Caddy transactions and persistent host fencing. PHP
-remains the control plane and worker; Python is used for Linux file locking and
-argument-array process execution on target hosts.
+Jobs owns enqueueing, claims, leases, resource locks, progress, terminal results
+and explicit reconciliation. Its model has no inventory or credential access.
+Worker handles that lifecycle and calls Modules::run() with a Job_context containing only the job ID, kind, payload and lease-renewal callback. Feature actions use their own model connections. The worker commits its claim before dispatch; feature-local transactions remain within their owning modules.
+The Jobs page is history and recovery, not a generic command console.
+
+Apps owns app/release persistence, build planning and execution, and the
+build-to-deployment handoff. Servers owns SSH scanning, confirmation and inspection.
+Deployments owns application rollout, rollback, NixOS preparation, activation and
+host recovery. Proxmox owns VM provisioning and automatic enrollment.
+Controllers orchestrate work and call their own models for persistence.
+
+The root bootstrap.php supplies application startup and class loading.
+engine/Process.php runs bounded subprocesses. Records owns all access to the
+records table through internal controller actions and its model. Independent
+calls can use Modules::run(); calls that participate in a transaction use the
+native module loader to share the caller's connection. Insert rejects duplicate
+keys; put replaces an existing record. Product decisions remain in feature modules.
+Encrypted_credentials belongs to
+trongate_security/traits. Job_queue is a thin native-module forwarding trait.
+Setup owns initialization and migrations; Monitoring owns collection.
+modules/setup/init.php initializes the installation, modules/setup/migrate.php applies migrations, and modules/monitoring/collect.php collects metrics. modules/jobs/worker.php starts the worker directly, with optional --once.
+
+Existing database tables, job kinds, resource locks and remote operation IDs
+are preserved by the operations-to-Jobs rename; no data migration is required.
 
 The single installation administrator can operate all inventory. Web entry points
 require a local password session and CSRF token; the CLI requires OS access to
@@ -76,7 +93,7 @@ journal and a persistent host-deployment reservation.
 
 `pending` means queued or waiting on a provider action; `running` has a worker
 lease; `succeeded` is verified; `failed` is a terminal failure with safe recovery;
-`uncertain` retains its lock. `tc reconcile` changes uncertain to pending and
+`uncertain` retains its lock. `the Jobs reconciliation action` changes uncertain to pending and
 repeats observation using the same operation ID. It never creates a fresh ID.
 
 Every provider mutation gets a durable intent before HTTP. Creates carry
@@ -111,10 +128,10 @@ events. Do not delete lock rows to make a dashboard turn green.
 
 ## Managed host operations
 
-`php bin/prepare-host.php host.json` runs locally on the worker installation. Input:
+The host-update operation prepares and builds the NixOS configuration inside the deployments module before activation. No separate preparation script is required. Installation administrators supply a nixos object in the server inventory:
 
 ```json
-{"server":"web","hostname":"web","system":"x86_64-linux","hardware_file":"/secure/web-hardware.nix"}
+{"nixos":{"hostname":"web","system":"x86_64-linux","hardware_file":"/secure/web-hardware.nix"}}
 ```
 
 The hardware file is **trusted local administrator code**, including boot/filesystem,
@@ -126,13 +143,12 @@ Do not reuse the control-plane hardware module for application targets. JSON
 inventory settings are imported with `builtins.fromJSON`; web input cannot inject
 Nix expressions. Configuration content determines the revision ID. The revision
 directory preserves the source modules, lock, hardware input, generated flake,
-inventory and built expected store path. Failed preparation can be resumed.
+inventory and built expected store path. The worker saves the prepared revision before activation and reuses it on retries. Existing frozen revisions may still be supplied explicitly. Hardware paths and Nix source come from installation-owned inventory, not request fields.
 
 ```sh
-TC_STATE=/var/lib/tc-control php bin/prepare-host.php host.json
-tc host-update update.json
-# {"server":"web","revision":"SHA256 FROM PREPARATION"}
-tc host-rollback rollback-host.json
+# POST to /deployments/host with a valid session and CSRF token; action=host-update:
+# {"server":"web"}
+# POST to /deployments/host; action=host-rollback:
 # {"server":"web","generation":"/nix/store/RETAINED-nixos-system-..."}
 ```
 
@@ -154,7 +170,7 @@ If the worker was lost before recording a terminal result, stop **all** installa
 workers first, including detached/manual workers, and use:
 
 ```sh
-tc host-reconcile recovery.json
+# Use Recover host update on the Jobs page, or POST /deployments/host with action=host-reconcile:
 # {"operation":"HOST OPERATION ID","confirm_workers_stopped":true}
 ```
 

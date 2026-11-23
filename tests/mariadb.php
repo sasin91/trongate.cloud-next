@@ -1,9 +1,10 @@
 <?php
-require dirname(__DIR__).'/modules/operations/bootstrap.php';
+require_once __DIR__ . '/model_fixture.php';
+require_once dirname(__DIR__).'/bootstrap.php';
 if (($argv[1] ?? '')==='claim-child') {
-    $job=(new Operations_model('operations'))->claim(bin2hex(random_bytes(16))); echo $job ? $job['id'] : 'none'; exit;
+    $job=(new Test_model('jobs'))->claim(bin2hex(random_bytes(16))); echo $job ? $job['id'] : 'none'; exit;
 }
-$s=new Operations_model('operations'); (new Setup_model('setup',$s->connection()))->migrate();
+$s=new Test_model('jobs'); (new Setup_model('setup',$s->db->connection()))->migrate();
 $id=$s->enqueue('deploy','server:test',[]); $job=$s->claim('test');
 if ($job['id']!==$id || $s->claim('other')!==null) { throw new RuntimeException('Claim isolation failed'); }
 $s->heartbeat($id,'test'); $s->finish($id,'test','succeeded',['verified'=>true]);

@@ -1,8 +1,14 @@
-# Trongate Cloud Next · proof of concept
+# Trongate Cloud
 
-A self-hostable PHP/Trongate administrator panel and durable SQL worker. Managed
-NixOS hosts and OCI application deployment are independent operations. Hetzner is
-a provider; SSH is the transport, including for manually enrolled Linux hosts.
+Code deployments and NixOS server provisioning on Proxmox. This continues the
+original Trongate Cloud product in ~/Herd/trongate.cloud: its feature specifications,
+guided workflows, and calm, structured interface remain the reference. Proxmox and
+NixOS replace the old Kubernetes infrastructure; other cloud providers are out of scope.
+
+The current implementation includes application builds, releases, deployment
+progress, rollback, server resources, and Proxmox VM creation with automatic SSH
+enrollment. It is still being developed; this is not a claim of full feature parity
+with the original product.
 
 Application licensing follows the original proprietary
 application; upstream Trongate MIT notices are preserved in `engine/LICENSE.txt`.
@@ -40,55 +46,43 @@ tc.nixosModules.control-plane
 sudo nixos-rebuild switch --flake /etc/nixos#YOUR_MACHINE
 # Create /run/tc-admin.json with mode 0600 using an editor:
 # {"name":"admin","password":"a unique password of at least 14 characters"}
-sudo sh -c 'cat /run/tc-admin.json | sudo -u tc env TC_STATE=/var/lib/tc-control tc init'
+sudo sh -c 'cat /run/tc-admin.json | sudo -u tc env TC_STATE=/var/lib/tc-control php /run/current-system/sw/share/tc/modules/setup/init.php'
 sudo rm /run/tc-admin.json
 sudo systemctl restart tc-worker
 ```
 
-Point the domain at the VM and open HTTPS. `tc init` creates the installation
+Point the domain at the VM and open HTTPS. `php /run/current-system/sw/share/tc/modules/setup/init.php` creates the installation
 encryption key and schema before the panel is usable. It can also reset a local
 administrator password during recovery. Back up the key immediately.
 
-Run administration commands as the installation OS user:
+Each module owns its command-line entry point. From a checkout, run:
 
-```sh
-sudo -u tc env TC_STATE=/var/lib/tc-control tc inventory </dev/null
-```
+    php modules/setup/init.php
+    php modules/setup/migrate.php
+    php modules/jobs/worker.php --once
+    php modules/monitoring/collect.php
 
-The examples below abbreviate that invocation to `tc`. Use `TC_STATE` and the
-same database environment for every command. JSON can be read from a file or
-stdin; never place secrets in shell arguments. See [self-hosting](docs/self-hosting.md)
-for worker separation, database access, updates and restore.
+On an installed NixOS system, these paths are relative to
+`/run/current-system/sw/share/tc/`.
+The worker service and monitoring timer call their respective scripts directly. Run manual commands as
+the installation OS user with the same database and TC_STATE environment.
+Product operations run through the authenticated panel.
 
-## First image deployment
+See [self-hosting](docs/self-hosting.md) for installation and recovery.
 
-1. Prepare a target with `tc.nixosModules.runtime` and
-   `services.trongate-runtime.enable = true`, preserving its existing hardware and
-   dedicated SSH public key configuration. For another Linux distribution use
-   [the preparation instructions](docs/self-hosting.md#prepared-linux-target).
-2. Store the dedicated SSH private key using `tc credential credential.json`:
-   `{"id":"web-key","value":"PRIVATE KEY CONTENT INCLUDING NEWLINES"}`.
-3. Scan the host; this does **not** trust it or modify it:
+## Deploy code and provision servers
 
-```sh
-tc server-scan examples/server.json
-# Independently obtain SHA256:... from the host console with:
-# ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-tc server-confirm confirm.json
-# confirm.json: {"id":"web","enrollment":"ID FROM SCAN","fingerprint":"SHA256:..."}
-tc app-create examples/app.json
-tc release release.json
-# release.json follows examples/release.json, with a real image digest/domain.
-tc deploy deploy.json
-# deploy.json: {"app":"demo","release":"ID FROM RELEASE"}
-tc operations </dev/null
-tc operation operation.json
-# operation.json: {"operation":"ID FROM DEPLOY"}
-tc rollback examples/rollback.json
-```
+1. Open **Servers → Create on Proxmox**. The installation supplies the Proxmox
+   connection and prepared NixOS template. Review capacity and create a VM.
+   Provisioning configures SSH and enrolls the server automatically after verifying
+   its identity and runtime readiness. See [Proxmox setup](docs/proxmox.md).
+2. Open **Apps → Create app**, choose the repository or image and target server,
+   and review build commands, configuration and domain.
+3. Follow deployment progress, connect the domain, and go live. Retained releases
+   support rollback without rebuilding.
 
 The long-running worker executes queued operations. For a one-shot test:
-`tc worker --once`. A missing runtime helper, privilege, tool or proxy service is
+`php /run/current-system/sw/share/tc/modules/jobs/worker.php --once`. A missing runtime helper, privilege, tool or proxy service is
 reported explicitly during inspection. Enrollment never installs or replaces an OS.
 
 Images must contain a service listening on `container_port` (default 8080),
@@ -105,33 +99,16 @@ restarted for rollback. Public HTTPS checks are enabled by default; set
 `"public_check":false` only when DNS/TLS is unavailable in a disposable environment.
 The result records whether that check was requested.
 
-## Other supported operations
-
-- **Build:** `tc build build.json` on a separately enrolled, isolated builder.
-  The result is a digest for the normal `release`/`deploy` flow. See
-  [Git builds](docs/builds.md). This PoC supports public GitHub repositories at a
-  full commit SHA, generated Dockerfiles, PHP extensions and custom build commands.
-- **Managed host update:** prepare a frozen configuration with
-  `php bin/prepare-host.php host.json`, then `tc host-update update.json`.
-  See [host operations](docs/architecture.md#managed-host-operations).
-- **Hetzner:** save a token as a credential, then `provider-connect`,
-  `provider-options` and `provision`. The panel offers inline provider creation
-  with live options, a price review and explicit cost confirmation, or SSH connection
-  to an existing server. Compatible NixOS snapshots labeled `tc-nixos=true` are
-  accepted by default; explicitly selected system images require runtime preparation
-  before enrollment can pass readiness checks. Reboot/deletion require explicit operator
-  confirmation. See [snapshot bootstrap and cleanup](docs/hetzner.md).
-- **Recovery:** `tc reconcile operation.json` resumes observation of an uncertain
-  operation. It does not release its resource lock or blindly repeat a mutation.
+## Deployment workflow
 
 The panel includes guided server onboarding, the app launch wizard adapted from
 the original Trongate Cloud, app release/rollback controls and live operation
 progress. Git launches resolve a public branch to an immutable commit, build on
 a separate builder, then queue deployment of the returned image digest. Image
 launches skip the build. Environment values are encrypted before jobs are queued.
-The Advanced page retains the JSON action console for provider and host operations.
-Local administrators have installation-wide authority. Multi-tenant roles, GitHub login, private Git
-repositories, billing and Kubernetes migration are outside this PoC.
+The Jobs page shows background work and offers explicit reconciliation for uncertain jobs. Each feature owns its actions; there is no generic command console.
+Local administrators have installation-wide authority. Original features still awaiting implementation here include multi-tenant roles, GitHub login, private Git
+repositories and billing. Their absence here does not remove them from the original product scope.
 Application database provisioning/imports, repository configuration suggestions,
 mail capture and background-process configuration from the original platform are
 not yet available; the wizard describes the supported database connection path.
@@ -139,18 +116,22 @@ not yet available; the wizard describes the supported database connection path.
 ## Verification
 
 ```sh
-composer test                      # PHP behavior + inherited build-generator tests
+composer test                      # PHP models, providers, worker and build-generator tests
 php tests/web.php                  # real HTTP login, CSRF, authenticated console
-python3 -m unittest discover -s tests -p '*_test.py' -v  # Linux, simulated remote operations
 TC_DSN='mysql:host=127.0.0.1;dbname=tc' TC_DB_USER=tc php tests/mariadb.php
 nix flake check --no-build          # configurations and derivations evaluate
 nix build .#default .#runtime .#builder
 nix build .#checks.x86_64-linux.runtime-vm -L  # disposable VM, real SSH/Podman/systemd/Caddy
-nix build .#snapshot -L             # x86 Hetzner raw disk image; needs Linux/KVM
+nix build .#proxmox-template -L     # prepared NixOS VM template; needs Linux/KVM
 ```
+
+The panel, provider actions and managed-server helpers are PHP. `composer test`
+includes runtime recovery, isolated builds and resource-allocation tests. The
+NixOS VM test uses the standard NixOS test driver; the deployed product does not
+require a Python interpreter.
 
 See [verification evidence and limits](docs/verification.md). Fixture tests do not
 prove provider provisioning. No live billable resource is created by ordinary CI.
 
 Further reading: [architecture and recovery](docs/architecture.md),
-[adapter extension guide](docs/extensions.md), [source inspection](docs/inspection.md).
+[module boundaries](docs/extensions.md), [source inspection](docs/inspection.md).

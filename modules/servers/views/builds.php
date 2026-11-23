@@ -10,7 +10,7 @@
         <h2>Set up a dedicated builder</h2>
         <p>Choose this when builds compete with your apps for resources. Use a separate NixOS server with the same CPU architecture as your application server.</p>
         <ol>
-            <li><a href="/servers/create">Create a server at a provider</a>, or use a spare server. Review the provider’s price before creating it.</li>
+            <li><a href="/servers/create">Create a NixOS server on Proxmox</a>, or use a spare server. Review available capacity before creating it.</li>
             <li>Apply the repository’s <code>nixosModules.builder</code> module. Enable <code>services.trongate-builder</code> and supply your SSH public key in <code>authorizedKeys</code>.</li>
             <li>Configure a private registry and its push credentials for the build user. Set the registry and encrypted pull credential in this installation’s build settings.</li>
             <li><a href="/servers/connect">Connect the builder</a> using SSH user <code>tc-builder</code>. Its readiness check verifies the build tools.</li>

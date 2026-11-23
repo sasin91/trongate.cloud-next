@@ -32,12 +32,68 @@ class Servers extends Trongate {
     }
 
     function index(): void {
+        $this->module('proxmox');
         $this->trongate_security->make_sure_allowed();
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->action();
             return;
         }
-        $this->templates->_render('servers', 'index', 'servers');
+        $capacities = [];
+        foreach ($this->records->_all('server') as $server) {
+            $capacities[$server['id']] = $this->monitoring->model->_summary($server['id']);
+        }
+        $this->templates->_render('servers', 'index', 'servers', [
+            'capacities' => $capacities,
+            'proxmox_connections' => $this->proxmox->model->_connections()
+        ]);
+    }
+
+    function proxmox(): void {
+        $this->module('proxmox');
+        $this->trongate_security->make_sure_allowed();
+        $message = null;
+        $progress = null;
+        $connections = $this->proxmox->model->_connections();
+        $operation = (string) ($_GET['operation'] ?? '');
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $this->trongate_security->_csrf();
+            try {
+                $request = (string) ($_POST['request'] ?? '');
+                if ($request === '' || !hash_equals($_SESSION['proxmox_request'] ?? '', $request)) {
+                    throw new RuntimeException('This form has expired. Reload the page before creating a server.');
+                }
+                $operation = $this->proxmox->_create_connected(
+                    (string) ($_POST['connection'] ?? ''),
+                    (string) ($_POST['name'] ?? ''),
+                    $_POST['vmid'] ?? '',
+                    ($_POST['confirm_capacity'] ?? '') === '1',
+                    $request
+                );
+                $_SESSION['proxmox_request_queued'] = true;
+                header('Location: /servers/proxmox?operation=' . rawurlencode($operation), true, 303);
+                return;
+            } catch (RuntimeException $error) {
+                http_response_code(422);
+                $message = $error->getMessage();
+            }
+        } elseif ($operation !== '') {
+            try {
+                $progress = $this->proxmox->model->_progress($operation);
+                if ($progress['status'] === 'succeeded' && isset($progress['server_id'])) {
+                    $_SESSION['draft_server'] = $progress['server_id'];
+                }
+            } catch (RuntimeException) {
+                http_response_code(404);
+                $message = 'Server creation could not be found. Return to Servers to check the available servers.';
+            }
+        } elseif (!empty($_SESSION['proxmox_request_queued'])) {
+            unset($_SESSION['proxmox_request'], $_SESSION['proxmox_request_queued']);
+        }
+        $_SESSION['proxmox_request'] ??= bin2hex(random_bytes(16));
+        $this->templates->_render('servers', 'proxmox', 'proxmox-server', [
+            'message' => $message, 'proxmox_connections' => $connections,
+            'proxmox_progress' => $progress, 'proxmox_operation' => $operation
+        ]);
     }
     function builds(): void {
         $this->trongate_security->make_sure_allowed();
@@ -50,100 +106,11 @@ class Servers extends Trongate {
             $this->action();
             return;
         }
-        if (isset($_GET['operation'])) {
-            $created = $this->providers->model->_status((string) $_GET['operation']);
-            if ($created['status'] !== 'succeeded') {
-                header('Location: /servers/provision?operation=' . rawurlencode($created['operation']), true, 303);
-                return;
-            }
-            $_SESSION['created_server'] = $created;
-        }
-        if (isset($_SESSION['created_server'])) {
-            $created = $_SESSION['created_server'];
-            $_POST = ['id' => $created['name'], 'host' => $created['host'], 'provision_operation' => $created['operation']];
-        }
         $this->templates->_render('servers', 'confirm', 'connect-server');
     }
 
     function create(): void {
-        $this->trongate_security->make_sure_allowed();
-        $message = null;
-        try {
-            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-                $this->trongate_security->_csrf();
-                $command = $_POST['command'] ?? '';
-                if ($command === 'review') {
-                    $_SESSION['server_config'] = array_intersect_key($_POST, array_flip(['provider', 'name', 'location', 'server_type', 'image', 'ssh_key']));
-                    $_SESSION['server_review'] = $this->providers->model->_quote($_SESSION['server_config']);
-                } elseif ($command === 'create') {
-                    $quote = $_SESSION['server_review']['quote'] ?? '';
-                    if (!hash_equals($quote, (string) ($_POST['quote'] ?? '')) || $quote === '') {
-                        throw new RuntimeException('Review the server configuration first.');
-                    }
-                    $result = $this->providers->model->_create($quote, ($_POST['confirm_cost'] ?? '') === '1');
-                    $_SESSION['server_operation'] = $result['operation'];
-                    header('Location: /servers/provision', true, 303);
-                    return;
-                } elseif ($command === 'edit') {
-                    unset($_SESSION['server_review']);
-                } else {
-                    $_SESSION['server_config'] = ['provider' => $_POST['provider'] ?? ''];
-                    unset($_SESSION['server_review']);
-                }
-            } elseif (isset($_GET['provider']) && ($_SESSION['server_config']['provider'] ?? '') !== $_GET['provider']) {
-                $_SESSION['server_config'] = ['provider' => $_GET['provider']];
-                unset($_SESSION['server_review']);
-            }
-            unset($_SESSION['server_options']);
-            $provider = $_SESSION['server_config']['provider'] ?? '';
-            $_SESSION['server_options'] = $provider !== '' ? $this->providers->model->_options($provider) : null;
-        } catch (RuntimeException $error) {
-            $message = $error->getMessage();
-        }
-        $this->templates->_render('servers', 'create', 'create-server', ['message' => $message]);
-    }
-
-    function provision(): void {
-        $this->trongate_security->make_sure_allowed();
-        $message = null;
-        try {
-            unset($_SESSION['server_status']);
-            $status = $this->providers->model->_creation_progress((string) ($_GET['operation'] ?? $_SESSION['server_operation'] ?? ''));
-            $_SESSION['server_operation'] = $status['operation'];
-            $_SESSION['server_status'] = $status;
-            if ($status['status'] === 'succeeded') {
-                $_SESSION['created_server'] = $status;
-            }
-        } catch (RuntimeException $error) {
-            if (($_GET['poll'] ?? '') === '1') {
-                $this->trongate_security->_json(['error' => 'Server creation not found.'], 404);
-                return;
-            }
-            $message = $error->getMessage();
-        }
-        if (($_GET['poll'] ?? '') === '1') {
-            $this->trongate_security->_json($status);
-            return;
-        }
-        $this->templates->_render('servers', 'provision', 'server-progress', ['message' => $message]);
-    }
-
-    function delete(): void {
-        $this->trongate_security->make_sure_allowed();
-        $message = null;
-        $operation = (string) ($_POST['operation'] ?? $_GET['operation'] ?? '');
-        try {
-            $status = $this->providers->model->_status($operation);
-            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-                $this->providers->model->_delete_created_server($operation, (string) ($_POST['name'] ?? ''));
-                unset($_SESSION['created_server'], $_SESSION['enrollment'], $_SESSION['server_review'], $_SESSION['server_config'], $_SESSION['server_options'], $_SESSION['server_operation'], $_SESSION['server_status']);
-                header('Location: /servers/delete?operation=' . rawurlencode($operation), true, 303);
-                return;
-            }
-        } catch (RuntimeException $error) {
-            $message = $error->getMessage();
-        }
-        $this->templates->_render('servers', 'delete', 'delete-server', ['message' => $message, 'deleting_server' => $status ?? null]);
+        $this->proxmox();
     }
 
     function confirm(): void {
@@ -157,15 +124,14 @@ class Servers extends Trongate {
     function action(): void {
         $this->trongate_security->make_sure_allowed();
         $this->trongate_security->_csrf();
-        $store = $this->model;
-        $control = new Control($store);
+        $model = $this->model;
         $inline = ($_POST['inline'] ?? '') === 'server';
         $command = (string)($_POST['command'] ?? '');
         try {
             match ($command) {
-                'connect-server' => $this->_connect($store, $control, $command, $inline),
-                'confirm-server' => $this->_confirm($store, $control, $command, $inline),
-                'inspect-connected-server' => $this->_inspect($store, $control, $command, $inline),
+                'connect-server' => $this->_connect($model, $command, $inline),
+                'confirm-server' => $this->_confirm($model, $command, $inline),
+                'inspect-connected-server' => $this->_inspect($model, $command, $inline),
                 default => throw new RuntimeException('Unknown server action')
             };
         } catch (Throwable $e) {
@@ -178,20 +144,10 @@ class Servers extends Trongate {
         }
     }
     // Internal HMVC entry points: Core blocks underscore methods from URL dispatch.
-    function _connect(Model $store, Control $control, string $command, bool $inline): void {
+    function _connect(Model $model, string $command, bool $inline): void {
         $id = Validate::id($_POST['id'] ?? '');
-        $created = [];
-        if (!empty($_POST['provision_operation'])) {
-            $created = $this->providers->model->_status($_POST['provision_operation']);
-            if ($created['status'] !== 'succeeded') {
-                throw new RuntimeException('Wait for server creation to finish.');
-            }
-            if ($created['host'] !== ($_POST['host'] ?? '')) {
-                throw new RuntimeException('Use the address returned by the provider.');
-            }
-        }
         $server = Validate::server(['host' => $_POST['host'] ?? '', 'port' => $_POST['port'] ?? 22, 'user' => $_POST['user'] ?? 'root', 'credential' => 'ssh-' . substr(hash('sha256', $id), 0, 32)]);
-        foreach ($store->all('server') as $existing) {
+        foreach ($this->records->_all('server') as $existing) {
             if ($existing['id'] === $id) {
                 throw new RuntimeException('Server name is already in use.');
             }
@@ -199,50 +155,39 @@ class Servers extends Trongate {
         if (trim($_POST['private_key'] ?? '') === '') {
             throw new RuntimeException('Provide the SSH private key for this server.');
         }
-        $store->secret($server['credential'], $_POST['private_key']);
-        $_SESSION['enrollment'] = $control->execute('server-scan', $server) + ['id' => $id, 'host' => $server['host']];
-        if ($created) {
-            $_SESSION['enrollment'] += ['provider' => $created['provider'], 'provider_id' => $created['provider_id']];
-            $_SESSION['enrollment']['expected_os'] = 'nixos';
-        }
+        $model->secret($server['credential'], $_POST['private_key']);
+        $_SESSION['enrollment'] = $this->_scan_server($server) + ['id' => $id, 'host' => $server['host']];
         $_POST['enrollment'] = $_SESSION['enrollment']['enrollment'];
-        $this->_confirm($store, $control, 'confirm-server', $inline);
+        $this->_confirm($model, 'confirm-server', $inline);
     }
-    function _confirm(Model $store, Control $control, string $command, bool $inline): void {
+    function _confirm(Model $model, string $command, bool $inline): void {
         $pending = $_SESSION['enrollment'] ?? [];
         if ($inline && !hash_equals($pending['enrollment'] ?? '', (string)($_POST['enrollment'] ?? ''))) {
             throw new RuntimeException('This server confirmation expired. Connect again.');
         }
         $confirmation = ['id' => $pending['id'] ?? '', 'enrollment' => $pending['enrollment'] ?? '', 'fingerprint' => $pending['fingerprint'] ?? ''];
-        if (isset($pending['provider_id'])) {
-            $created = $store->get('provider-server', (string) $pending['provider_id']);
-            if (isset($created['operation']) && $this->providers->model->_status($created['operation'])['status'] !== 'succeeded') {
-                throw new RuntimeException('This server is being deleted or has been deleted. Create a replacement from Servers.');
-            }
-            $confirmation += ['provider' => $pending['provider'], 'provider_id' => $pending['provider_id']];
-        }
         if (isset($pending['expected_os'])) {
             $confirmation['expected_os'] = $pending['expected_os'];
         }
-        $result = $control->execute('server-confirm', $confirmation);
+        $result = $this->_confirm_server($confirmation);
         $this->apps->_restore_draft();
         $destination = '/servers';
         if ($result['application_ready'] && isset($_SESSION['app_draft'])) {
-            $_SESSION['draft_server'] = $result['id'] ?? $pending['id'];
+            $_SESSION['draft_server'] = $result['id'];
             $destination = '/apps/create';
         }
         if ($inline) {
-            unset($_SESSION['enrollment'], $_SESSION['created_server']);
+            unset($_SESSION['enrollment']);
             $this->trongate_security->_json($result + ['host' => $pending['host']]);
             return;
         }
-        unset($_SESSION['enrollment'], $_SESSION['created_server']);
+        unset($_SESSION['enrollment']);
         header('Location: ' . $destination, true, 303);
         exit;
     }
-    function _inspect(Model $store, Control $control, string $command, bool $inline): void {
+    function _inspect(Model $model, string $command, bool $inline): void {
         $id = Validate::id($_POST['server'] ?? '');
-        $result = $control->execute('server-inspect', ['server' => $id]);
+        $result = $this->_inspect_server(['server' => $id]);
         if (!$inline) {
             if ($result['application_ready'] && isset($_SESSION['app_draft'])) {
                 $_SESSION['draft_server'] = $id;
@@ -250,11 +195,51 @@ class Servers extends Trongate {
             header('Location: /servers', true, 303);
             return;
         }
-        $this->trongate_security->_json($result + ['id' => $id, 'host' => $store->get('server', $id)['host']]);
+        $this->trongate_security->_json($result + ['id' => $id, 'host' => $this->records->_get(['kind' => 'server', 'id' => $id])['host']]);
         return;
     }
     function _display(string $view, array $data): void {
         $data['viewData'] = $data;
         $this->view($view, $data);
+    }
+    function _scan_server(array $p): array {
+        $s = $this->model;
+        $server = Validate::server($p);
+        $identity = (new Ssh($s))->scan($server);
+        $id = bin2hex(random_bytes(16));
+        $this->records->_put(['kind' => 'enrollment', 'id' => $id, 'data' => ['server' => $server, 'identity' => $identity, 'expires' => time() + 900]]);
+        return ['enrollment' => $id] + $identity + ['instruction' => 'Verify fingerprint using an independent server console, then server-confirm.'];
+    }
+    function _confirm_server(array $p): array {
+        $s = $this->model;
+        $pending = $this->records->_get(['kind' => 'enrollment', 'id' => $p['enrollment']]);
+        if ($pending['expires'] < time() || !hash_equals($pending['identity']['fingerprint'], $p['fingerprint'])) {
+            throw new RuntimeException('Expired enrollment or fingerprint mismatch');
+        }
+        $id = Validate::id($p['id']);
+        foreach ($this->records->_all('server') as $existing) {
+            if ($existing['id'] === $id || $existing['host_key'] === $pending['identity']['key']) {
+                throw new RuntimeException('Server identity already enrolled; do not create aliases for the same host');
+            }
+        }
+        $server = $pending['server'] + ['host_key' => $pending['identity']['key']];
+        $inspection = (new Ssh($s))->inspect($server);
+        if (($p['expected_os'] ?? '') === 'nixos' && ($inspection['facts']['os'] ?? '') !== 'nixos') {
+            throw new RuntimeException('The created server is not running NixOS. Check the prepared template before enrolling it.');
+        }
+        $this->records->_put(['kind' => 'server', 'id' => $id, 'data' => $server + $inspection]);
+        return ['id' => $id] + $inspection;
+    }
+    function _inspect_server(array $p): array {
+        $s = $this->model;
+        $server = $this->records->_get(['kind' => 'server', 'id' => $p['server']]);
+        $inspection = (new Ssh($s))->inspect($server);
+        $this->records->_put(['kind' => 'server', 'id' => $p['server'], 'data' => array_replace($server, $inspection)]);
+        return $inspection;
+    }
+    function scan(): void {
+        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->_csrf();
+        $this->trongate_security->_json($this->_scan_server($_POST));
     }
 }

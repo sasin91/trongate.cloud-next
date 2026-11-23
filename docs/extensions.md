@@ -1,39 +1,46 @@
-# Adding an adapter without changing the product model
+# Module boundaries
 
-Only Hetzner is currently supported as a provider. Hostinger, Linode and Vultr
-are future adapters, not UI options or empty implementations.
+Records owns the shared JSON records table. Its internal `_get`, `_find`, `_all`,
+`_insert`, `_put` and `_delete` actions delegate persistence to its model. Use
+Modules::run() for independent calls, or the native module loader when records
+must share a transaction with job or credential writes. Feature modules own
+validation and workflows. Keep JSON encoding helpers private to their owning
+classes; do not register global serialization helpers.
 
-A provider implementation should expose the small set of concrete operations
-actually used by `Control`/`Worker`: account validation, option/image enumeration,
-resource creation/inspection, asynchronous action inspection, reboot and explicit
-deletion. Use an injectable HTTP boundary like `Http` for fixture tests. Keep
-provider credentials in `credentials`, referenced by the connection record.
+Proxmox is the sole provisioning platform. Keep application deployment and
+server provisioning distinct; do not build a provider framework for hypothetical
+future integrations.
 
-Persist operation intent before mutations, label/tag resources with the stable
-operation ID, and implement reconciliation for a timeout after acceptance. If a
-provider lacks an idempotency key or discoverable label, do not automatically retry
-an ambiguous create. Map statuses to pending/succeeded/failed/uncertain; a 202 or
-new provider ID is not successful provisioning. Validate architecture/image/type
-compatibility using that provider's live catalog. New provider code does not own
-SSH, application rollout or Nix activation.
+The top-level Proxmox module owns provisioning and enrollment orchestration. Its
+model owns persistence. Internal actions have individual block_url guards;
+the constructor does not block future authenticated browser actions.
 
-To replace deploy-rs, implement `HostDeployer::deploy`, `inspect`, `rollback` and `reconcile`
-using the existing server inventory and frozen revision directory. Return our
-structured statuses, intended/observed store generation, prior generation and
-health findings. Preserve remote fencing and generation roots. Keep backend CLI
-flags/output parsing inside that implementation, and change the worker's single
-backend construction point. No provider, release, inventory or customer status
-schema should need replacement. A subprocess launching successfully is insufficient;
-observe the activated configuration and service/application health.
+Provision creates Proxmox_client and Proxmox_ssh directly and passes them to
+helpers. There is no configuration step or cloned controller. Controllers use
+the native lazy model property and load other modules through Trongate.
+The loader shares database transactions across those modules.
 
-The SSH transport owns scanned identity confirmation, strict subsequent checking,
-temporary 0600 credential files, argument-array local process execution, deadlines
-and heartbeat callbacks. Fixed helper commands accept JSON on stdin; do not splice
-operator settings into remote shell expressions. A transport replacement must
-preserve equivalent authenticated host identity and result uncertainty semantics.
+modules/jobs/worker.php starts the worker directly, with optional --once. modules/setup/init.php initializes the installation, modules/setup/migrate.php applies migrations, and modules/monitoring/collect.php collects metrics. Services invoke the scripts directly with PHP; there is no separate bin/tc wrapper.
+Product operations run through the panel. The VM integration suite has its own
+test-only driver for calling the same operations without a browser.
 
-The runtime owns staged containers, health checks, route transitions and retained
-releases. Runtime extensions must maintain the journal-before-mutation ordering and
-must not clear uncertainty when a migration or detached remote operation may still
-be running. Add failure/retry tests through normal CLI entry points and disposable
-hosts, alongside fixture tests for provider boundaries.
+HTTP transport is shared through the standalone `engine/Http_client.php` class.
+It owns TLS, connection deadlines and raw responses; modules own authentication,
+request encoding and API-specific errors. The client does not retry mutations.
+
+Controllers access the shared HTTP client through lazy `$this->http`, provided
+by `Trongate::__get` like `$this->model`. Test doubles implement `Http_client`;
+provider controllers must not double as their own transport.
+
+Proxmox owns a plain `Proxmox_client` class alongside its controller and model.
+The client wraps HTTPS transport with endpoint/token validation, Proxmox headers,
+form encoding, API envelope decoding and task-ID validation. Configure it once,
+then call `get($path)`, `post($path, $body)` or `put($path, $body)`. Credentials
+are not repeated at call sites. It does not retry ambiguous mutations.
+
+`Proxmox_ssh` owns Ed25519 keys, cloud-init SSH configuration, guest-agent
+identity discovery and pinned SSH readiness checks. It uses `Proxmox_client`
+for API access and the shared `Ssh` transport for host inspection. It returns
+verified server data; the controller decides enrollment and the model saves it.
+
+Jobs owns queue persistence and the worker lifecycle. Worker dispatch uses Modules::run() with a Job_context; it does not pass database connections, HTTP clients or SSH clients across that boundary. Apps, Servers, Deployments and Proxmox own feature commands and execution. Shared startup lives in root bootstrap.php; subprocess execution lives in engine/Process.php.

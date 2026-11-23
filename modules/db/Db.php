@@ -6,9 +6,7 @@
  * 
  * Security features include prepared statements and environment-aware error handling.
  */
-require_once __DIR__.'/traits/Database_connection.php';
 class Db extends Trongate {
-    use Database_connection;
 
     private $host;
     private $port;
@@ -35,7 +33,8 @@ class Db extends Trongate {
      * with the Trongate module system.
      * 
      * @param string|null $module_name The module name (passed by framework for integration)
-     * @param string|null $db_group Database group name from config/database.php (defaults to 'default')
+     * @param string|null $db_group Reserved database group argument.
+     * @param PDO|null $connection Existing connection for a shared workflow transaction.
      * @return void
      * @throws Exception If database group is not configured
      * @throws Exception If database connection fails
@@ -54,18 +53,33 @@ class Db extends Trongate {
      *     'database' => 'myapp'
      * ];
      */
-    public function __construct(?string $module_name = null, ?string $db_group = null) {
+    public function __construct(?string $module_name = null, ?string $db_group = null, ?PDO $connection = null) {
         // Call parent constructor first - REQUIRED by framework!
         parent::__construct($module_name);
 
         // Block all direct URL access to this module
-        block_url('db');
+        if (PHP_SAPI !== 'cli') {
+            block_url('db');
+        }
         
         // Determine environment mode
         $this->is_dev_mode = defined('ENV') && strtolower(ENV) === 'dev';
         
-        $this->dbh = self::_connect_database();
+        $dsn = getenv('TC_DSN') ?: 'mysql:unix_socket=/run/mysqld/mysqld.sock;dbname=tc';
+        $this->dbh = $connection ?? new PDO(
+            $dsn,
+            getenv('TC_DB_USER') ?: 'tc',
+            getenv('TC_DB_PASSWORD') ?: '',
+            str_starts_with($dsn, 'mysql:') ? [PDO::MYSQL_ATTR_FOUND_ROWS => true] : []
+        );
+        $this->dbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $this->dbh->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
+    }
+
+    /** Share this connection when a workflow spans several module models. */
+    public function connection(): PDO {
+        return $this->dbh;
     }
 
     /**
@@ -149,7 +163,7 @@ class Db extends Trongate {
      * Execute a raw SQL query
      * 
      * @param string $sql SQL query
-     * @param string|null $return_type 'object', 'array', or null for no return
+     * @param string|null $return_type 'object', 'array', 'column', 'statement', or null for no return
      * @return mixed Query results or null
      * 
      * Examples:
@@ -163,7 +177,12 @@ class Db extends Trongate {
 
         $this->prepare_and_execute($sql, []);
 
-        if ($return_type === 'object') {
+        if ($return_type === 'statement') {
+            // The caller owns the cursor; do not retain a second reference and read lock.
+            $statement = $this->stmt;
+            $this->stmt = null;
+            return $statement;
+        } elseif ($return_type === 'object') {
             return $this->stmt->fetchAll(PDO::FETCH_OBJ);
         } elseif ($return_type === 'array') {
             return $this->stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -178,8 +197,8 @@ class Db extends Trongate {
      * Execute a raw SQL query with parameter binding
      * 
      * @param string $sql SQL query with named parameters
-     * @param array $data Associative array of parameters
-     * @param string|null $return_type 'object', 'array', or null for no return
+     * @param array $data Named parameters or a zero-based list for positional placeholders
+     * @param string|null $return_type 'object', 'array', 'column', 'statement', or null for no return
      * @return mixed Query results or null
      * 
      * Example:
@@ -196,7 +215,12 @@ class Db extends Trongate {
 
         $this->prepare_and_execute($sql, $data);
 
-        if ($return_type === 'object') {
+        if ($return_type === 'statement') {
+            // The caller owns the cursor; do not retain a second reference and read lock.
+            $statement = $this->stmt;
+            $this->stmt = null;
+            return $statement;
+        } elseif ($return_type === 'object') {
             return $this->stmt->fetchAll(PDO::FETCH_OBJ);
         } elseif ($return_type === 'array') {
             return $this->stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -731,7 +755,7 @@ class Db extends Trongate {
                 default => PDO::PARAM_STR,
             };
             
-            $param_key = (str_starts_with($key, ':')) ? $key : ":$key";
+            $param_key = is_int($key) ? $key + 1 : (str_starts_with($key, ':') ? $key : ":$key");
             $this->stmt->bindValue($param_key, $value, $type);
         }
     }

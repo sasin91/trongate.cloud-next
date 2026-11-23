@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 final class Ssh {
-    function __construct(private Model $store, private Process $process = new Process) {
+    function __construct(private Model $model, private Process $process = new Process) {
     }
     function scan(array $server): array {
         $s = Validate::server($server);
@@ -20,7 +20,7 @@ final class Ssh {
         $dir = state_dir() . '/ssh-' . bin2hex(random_bytes(12));
         mkdir($dir, 0700);
         try {
-            $key = str_replace(["\r\n", "\r"], "\n", $this->store->secret($s['credential']));
+            $key = str_replace(["\r\n", "\r"], "\n", $this->model->secret($s['credential']));
             file_put_contents($dir . '/identity', trim($key) . "\n");
             chmod($dir . '/identity', 0600);
             // HostKeyAlias makes IPv6/port handling independent from known_hosts syntax.
@@ -42,7 +42,7 @@ final class Ssh {
 set -eu
 . /etc/os-release
 printf 'os=%s\narch=%s\n' "$ID" "$(uname -m)"
-for tool in podman systemctl curl python3 flock caddy nix; do
+for tool in podman systemctl curl php flock caddy nix; do
  if command -v "$tool" >/dev/null 2>&1; then printf '%s=yes\n' "$tool"; fi
 done
 if test -x /run/current-system/sw/bin/tc-runtime || command -v tc-runtime >/dev/null 2>&1; then echo agent=yes; fi
@@ -51,7 +51,7 @@ if systemctl is-active --quiet tc-proxy; then echo proxy=yes; fi
 if podman info >/dev/null 2>&1; then echo podman-ready=yes; fi
 if test -f /sys/fs/cgroup/cgroup.controllers && grep -qw memory /sys/fs/cgroup/cgroup.controllers && grep -qw cpu /sys/fs/cgroup/cgroup.controllers; then echo cgroups=yes; fi
 if test "$(tc-runtime --version 2>/dev/null)" = 1; then echo protocol=yes; fi
-if test "$(id -u)" != 0 && command -v tc-build >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && podman info >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then echo builder=yes; fi
+if test "$(id -u)" != 0 && command -v tc-build >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v php >/dev/null 2>&1 && podman info >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then echo builder=yes; fi
 if test "$(id -u)" = 0 && command -v tc-build >/dev/null 2>&1 && id tc-builder >/dev/null 2>&1 && runuser -u tc-builder -- env XDG_RUNTIME_DIR=/run/user/1100 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1100/bus systemctl --user show-environment >/dev/null 2>&1; then echo local-builder=yes; fi
 SH;
         $r = $this->command($s, 'sh -s', $script);
@@ -75,7 +75,7 @@ SH;
             }
         }
         $missing = [];
-        foreach (['podman', 'systemctl', 'curl', 'python3', 'flock', 'caddy', 'agent', 'privileged', 'proxy', 'podman-ready', 'cgroups', 'protocol'] as $tool) {
+        foreach (['podman', 'systemctl', 'curl', 'php', 'flock', 'caddy', 'agent', 'privileged', 'proxy', 'podman-ready', 'cgroups', 'protocol'] as $tool) {
             if (($facts[$tool] ?? '') !== 'yes') {
                 $missing[] = $tool;
             }
@@ -83,11 +83,15 @@ SH;
         return ['local_builder_ready' => ($facts['local-builder'] ?? '') === 'yes', 'builder_ready' => ($facts['builder'] ?? '') === 'yes', 'facts' => $facts, 'missing' => $missing, 'application_ready' => $missing === [], 'managed_eligible' => ($facts['os'] ?? '') === 'nixos' && ($facts['nix'] ?? '') === 'yes' && ($facts['privileged'] ?? '') === 'yes', 'inspected_at' => time(), 'connected_at' => time()];
     }
     function runtime(array $server, array $request, ?callable $heartbeat = null): array {
-        $r = $this->command($server, 'tc-runtime', tc_json($request), 1800, $heartbeat);
+        $r = $this->command($server, 'tc-runtime', self::_encode_json($request), 1800, $heartbeat);
         $data = json_decode($r['out'], true);
         if ($r['exit'] !== 0 || !is_array($data)) {
             throw new RuntimeException('Remote operation interrupted; reconcile required');
         }
         return $data;
+    }
+
+    private static function _encode_json(array $value): string {
+        return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     }
 }

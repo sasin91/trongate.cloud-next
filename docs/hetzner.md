@@ -1,3 +1,5 @@
+> Historical record: this describes earlier work. The product now provisions only Proxmox/NixOS; old provider commands and image builders have been removed. See README.md and proxmox.md for current workflows.
+
 # Hetzner project and NixOS snapshot bootstrap
 
 Official documentation checked 2026-11-17:

@@ -1,10 +1,13 @@
 <?php
-require_once dirname(__DIR__).'/db/traits/Database_access.php';
-require_once dirname(__DIR__).'/operations/traits/Inventory_records.php';
-require_once dirname(__DIR__).'/operations/traits/Encrypted_credentials.php';
-require_once dirname(__DIR__).'/operations/traits/Operation_queue.php';
+require_once APPPATH . 'modules/trongate_security/traits/Encrypted_credentials.php';
+require_once APPPATH . 'modules/jobs/traits/Job_queue.php';
 class Deployments_model extends Model {
-    use Database_access, Inventory_records, Encrypted_credentials, Operation_queue;
+    use Encrypted_credentials, Job_queue;
+    public function __construct(?string $module_name = null, PDO|Closure|null $connection = null) {
+        parent::__construct($module_name, $connection);
+        $this->module('records');
+    }
+
     function _timeline(string $id): ?array {
         $job = $this->job($id);
         if (!in_array($job['kind'], ['build', 'deploy', 'rollback'], true)) {
@@ -12,26 +15,27 @@ class Deployments_model extends Model {
         }
         $build = $job['kind'] === 'build' ? $job : null;
         $deploy = $job['kind'] === 'build' ? null : $job;
-        foreach ($this->all('build-deployment') as $link) {
+        foreach ($this->records->_all('build-deployment') as $link) {
             if ($link['id'] === $id || $link['operation'] === $id) {
                 $build = $this->job($link['id']);
                 $deploy = $this->job($link['operation']);
                 break;
             }
         }
-        $payload = json_decode(($deploy ?? $build)['payload'], true);
+        $current = $deploy ?? $build;
+        $payload = json_decode($current['payload'], true);
         $app = $payload['app'] ?? $payload['launch']['app'] ?? null;
         $serverId = $payload['server'] ?? $payload['launch']['server'] ?? null;
-        $server = $serverId ? $this->get('server', $serverId) : [];
-        $result = json_decode(($deploy ?? $build)['result'], true) ?: [];
+        $server = $serverId ? $this->records->_get(['kind' => 'server', 'id' => $serverId]) : [];
+        $result = json_decode($current['result'], true) ?: [];
         $phase = $result['phase'] ?? '';
         if ($deploy && $deploy['status'] === 'running') {
-            $progress = $this->run("SELECT data FROM steps WHERE operation=? AND step='progress' ORDER BY at DESC LIMIT 1", [$deploy['id']])->fetchColumn();
+            $progress = $this->db->query_bind("SELECT data FROM steps WHERE operation=? AND step='progress' ORDER BY at DESC LIMIT 1", [$deploy['id']], 'statement')->fetchColumn();
             if ($progress) {
                 $phase = json_decode($progress, true)['phase'] ?? '';
             }
         }
-        $status = ($deploy ?? $build)['status'];
+        $status = $current['status'];
         $failed = in_array($status, ['failed', 'uncertain'], true);
         $publicFailure = ($result['error'] ?? '') === 'public health check failed';
         $localFailure = str_contains($result['error'] ?? '', 'candidate health');
@@ -44,7 +48,7 @@ class Deployments_model extends Model {
         ];
         $domain = $result['candidate']['domain'] ?? '';
         if ($domain === '' && $app) {
-            $domain = $this->get('app', $app)['domain'] ?? '';
+            $domain = $this->records->_get(['kind' => 'app', 'id' => $app])['domain'] ?? '';
         }
         $problem = null;
         if ($failed) {
@@ -66,7 +70,7 @@ class Deployments_model extends Model {
             $data = json_decode($item['result'], true) ?: [];
             $diagnostics[] = ['operation' => $item['id'], 'kind' => $item['kind'], 'status' => $item['status'], 'result' => array_intersect_key($data, array_flip(['status', 'phase', 'error', 'errno', 'recovery', 'restored', 'image', 'commit', 'deployment', 'missing', 'reason', 'message']))];
             $activity[] = ['at' => (int) floor($item['created'] / 1000000), 'text' => ucfirst($item['kind']) . ' queued.'];
-            foreach ($this->run('SELECT at,step,data FROM steps WHERE operation=? ORDER BY at,id', [$item['id']])->fetchAll() as $step) {
+            foreach ($this->db->query_bind('SELECT at,step,data FROM steps WHERE operation=? ORDER BY at,id', [$item['id']], 'statement')->fetchAll() as $step) {
                 $detail = json_decode($step['data'], true) ?: [];
                 $text = match ($step['step']) {
                     'claimed' => ucfirst($item['kind']) . ' started.',
@@ -96,17 +100,6 @@ class Deployments_model extends Model {
         } elseif (filter_var($server['host'] ?? '', FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
             $records[] = ['type' => 'AAAA', 'value' => $server['host']];
         }
-        if (isset($server['provider_id'])) {
-            try {
-                $metadata = $this->get('provider-server', (string) $server['provider_id'])['server'];
-                $prefix = explode('/', $metadata['public_net']['ipv6']['ip'] ?? '')[0];
-                $ip = str_ends_with($prefix, '::') ? $prefix . '1' : $prefix;
-                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) && !in_array($ip, array_column($records, 'value'), true)) {
-                    $records[] = ['type' => 'AAAA', 'value' => $ip];
-                }
-            } catch (RuntimeException) {
-            }
-        }
         return $records;
     }
 
@@ -122,14 +115,14 @@ class Deployments_model extends Model {
         $result = json_decode($job['result'], true, 512, JSON_THROW_ON_ERROR);
         $domain = $result['candidate']['domain'] ?? '';
         Validate::match($domain, '/^[a-z0-9]+(?:[.-][a-z0-9]+)+$/D', 'domain');
-        $expected = $this->_dns_records($this->get('server', $payload['server']));
+        $expected = $this->_dns_records($this->records->_get(['kind' => 'server', 'id' => $payload['server']]));
         $observed = @dns_get_record($domain, DNS_A | DNS_AAAA) ?: [];
         $addresses = array_values(array_filter(array_map(static fn($record) => $record['ip'] ?? $record['ipv6'] ?? null, $observed)));
         if (!self::_dns_matches($addresses, array_column($expected, 'value'))) {
             throw new RuntimeException('DNS is not ready yet. Update the records below, remove old A or AAAA records, and try again after they propagate. Your deployment is saved.');
         }
         $payload['go_live'] = true;
-        $this->run("UPDATE jobs SET payload=?,status='pending',lease=0 WHERE id=? AND status='waiting'", [tc_json($payload), $id]);
+        $this->db->query_bind("UPDATE jobs SET payload=?,status='pending',lease=0 WHERE id=? AND status='waiting'", [self::_encode_json($payload), $id], 'statement');
         return $id;
     }
 
@@ -152,5 +145,44 @@ class Deployments_model extends Model {
             'preparing-database' => 'Preparing the app database.',
             default => 'Deployment progress updated.'
         };
+    }
+    function _queue(string $command, array $p): string {
+        if (!in_array($command, ['deploy', 'rollback'], true)) {
+            throw new RuntimeException('Unknown deployment action');
+        }
+        $s = $this;
+        $app = $s->records->_get(['kind' => 'app', 'id' => $p['app']]);
+        if ($command === 'deploy' && $s->records->_get(['kind' => 'release', 'id' => $p['release']])['app'] !== $p['app']) {
+            throw new RuntimeException('Release belongs to another application');
+        }
+        return $s->enqueue($command, 'server:' . $app['server'], $p + ['server' => $app['server']]);
+    }
+    function _queue_host(string $command, array $p): string {
+        if (!in_array($command, ['host-update', 'host-rollback'], true)) {
+            throw new RuntimeException('Unknown host action');
+        }
+        $s = $this;
+        $server = $s->records->_get(['kind' => 'server', 'id' => $p['server']]);
+        if (!$server['managed_eligible']) {
+            throw new RuntimeException('Host is not eligible for NixOS management');
+        }
+        if ($command === 'host-update') {
+            if (isset($p['revision'])) {
+                Validate::match($p['revision'], '/^[a-f0-9]{64}$/D', 'revision');
+                $p = ['server' => $p['server'], 'revision' => $p['revision']];
+            } else {
+                $configuration = $server['nixos'] ?? null;
+                if (!is_array($configuration) || empty($configuration['hardware_file'])) {
+                    throw new RuntimeException('Configure local NixOS settings for this server before updating its OS.');
+                }
+                DeployRs::configuration($server, $configuration);
+                $p = ['server' => $p['server'], 'configuration' => $configuration];
+            }
+        }
+        return $s->enqueue($command, 'server:' . $p['server'], $p);
+    }
+
+    private static function _encode_json(array $value): string {
+        return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     }
 }

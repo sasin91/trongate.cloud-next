@@ -1,17 +1,16 @@
 <main class="panel">
     <h1>Servers</h1>
     <p><a href="/servers/builds">Build servers</a></p>
-    <p><a class="wz-ok" href="/servers/create">Create at a provider</a> <a class="wz-ok" href="/servers/connect">Connect an existing server</a></p>
+    <p><a class="wz-ok" href="/servers/create">Create on Proxmox</a> <a class="wz-ok" href="/servers/connect">Connect an existing server</a></p>
     <?php if (isset($_SESSION['app_draft'])): ?><p><a href="/apps/create">Continue app setup</a></p><?php endif ?>
     <?php $this->servers->_display('pending', $viewData); ?>
-    <?php $monitor = new Monitoring_model('monitoring'); ?>
     <?php foreach ($inventory['servers'] as $server): ?>
     <section class="card">
         <h2><?php if ($server['application_ready']): ?><a href="/servers/details?server=<?= $e(rawurlencode($server['id'])) ?>"><?= $e($server['id']) ?></a><?php else: ?><?= $e($server['id']) ?><?php endif ?></h2>
         <?php if ($server['application_ready']): ?><p><a href="/servers/details?server=<?= $e(rawurlencode($server['id'])) ?>">Apps and resource allocations →</a></p><?php endif ?>
         <p><?= $e($server['host']) ?> · <?= !empty($server['builder_ready']) ? 'Ready for builds' : ($server['application_ready'] ? 'Ready for apps' : 'Runtime preparation required') ?></p>
         <?php if (!empty($server['local_builder_ready'])): ?><p>Local builds enabled</p><?php endif ?>
-        <?php $capacity = $monitor->_summary($server['id']); $sample = $capacity['latest']; ?>
+        <?php $capacity = $capacities[$server['id']]; $sample = $capacity['latest']; ?>
         <?php if ($sample): ?>
         <h3>Capacity</h3>
         <p class="wz-hint"><?= $capacity['stale'] ? 'Last known readings — monitoring is stale' : 'Updated ' . $e(gmdate('H:i', $sample['at'])) . ' UTC · sampled every five minutes' ?></p>
@@ -32,5 +31,4 @@
         </form>
     </section>
     <?php endforeach ?>
-    <?php if (isset($_SESSION['server_operation'])): ?><p><a href="/servers/provision">View server creation progress</a></p><?php endif ?>
 </main>

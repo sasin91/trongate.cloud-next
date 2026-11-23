@@ -10,7 +10,7 @@ same host: both own ports 80/443 and the local Caddy admin endpoint in this PoC.
 The panel/worker OS account is `tc`. MariaDB uses local Unix-socket authentication
 for this account; no password needs to appear in Nix. The panel's key and mutable
 state live in `/var/lib/tc-control`, mode 0700. The administrator bootstrap input
-should be a temporary 0600 file on `/run`, piped to `tc init`, then removed.
+should be a temporary 0600 file on `/run`, piped to `php /run/current-system/sw/share/tc/modules/setup/init.php`, then removed.
 
 With a remote database, set `databaseDsn`, `localDatabase=false`, and an
 `environmentFile` **string path**, such as `/run/secrets/tc-environment`. Its contents
@@ -36,14 +36,14 @@ live in server inventory, independent of system-global known_hosts.
 Existing Linux targets may deploy applications without NixOS host management.
 Prepare them explicitly before enrollment:
 
-1. Install Podman, systemd, Caddy, Python 3, curl, util-linux (`flock`) and `which`.
+1. Install Podman, systemd, Caddy, PHP 8.4, curl, util-linux (`flock`) and `which`.
    Use a host with cgroup memory/CPU limits enabled.
-2. Install `runtime/tc-runtime.py` as root-owned `/usr/local/libexec/tc-runtime.py`
+2. Install all four `runtime/*.php` helpers together in root-owned `/usr/local/libexec/`
    and a root-owned executable `/usr/local/bin/tc-runtime` wrapper:
 
 ```sh
 #!/bin/sh
-exec /usr/bin/python3 /usr/local/libexec/tc-runtime.py "$@"
+exec /usr/bin/php /usr/local/libexec/tc-runtime.php "$@"
 ```
 
 3. Install `runtime/tc-systemd-generator.sh` as root-owned executable
@@ -78,7 +78,7 @@ install a second proxy over an existing production service using those ports.
 cd /opt/trongate-cloud-next
 git pull --ff-only
 sudo nixos-rebuild switch --flake /etc/nixos#YOUR_MACHINE
-sudo -u tc env TC_STATE=/var/lib/tc-control tc migrate
+sudo -u tc env TC_STATE=/var/lib/tc-control php /run/current-system/sw/share/tc/modules/setup/migrate.php
 sudo systemctl restart tc-worker
 sudo journalctl -u tc-worker -u phpfpm-tc --since '10 minutes ago'
 ```
@@ -113,7 +113,7 @@ sudo systemctl start tc-worker
 
 Restore the database and the **matching key** with the original permissions;
 restore pinned source/revisions and runtime environment, then initialize services.
-Do not run a fresh `tc init` with a different key over restored ciphertext.
+Do not run a fresh `php /run/current-system/sw/share/tc/modules/setup/init.php` with a different key over restored ciphertext.
 Inspect uncertain jobs before enabling workers. Existing targets continue serving
 while the control plane is restored. Keep provider console access for a host that
 cannot be reached using its restored SSH key.
@@ -124,11 +124,11 @@ data corruption or an incompatible migration.
 
 ## Upgrading to native Trongate login
 
-Back up the database, then run `tc migrate` using the new package before activating
+Back up the database, then run `php /run/current-system/sw/share/tc/modules/setup/migrate.php` using the new package before activating
 the updated panel. Existing administrator names and password hashes are imported
 into Trongate's login tables. Sign in again at `/login/login/1`; existing custom
 sessions are not reused. Re-running the migration preserves native accounts.
-`tc init` remains the explicit local password setup/reset command.
+`php /run/current-system/sw/share/tc/modules/setup/init.php` remains the explicit local password setup/reset command.
 
 The web server connection flow uses trust on first use: it accepts and pins the
 first observed SSH host key, then checks runtime readiness over that pinned

@@ -25,7 +25,7 @@ let cfg = config.services.trongate-builder; in {
     };
     services.openssh.enable = true;
     services.openssh.settings.PasswordAuthentication = false;
-    environment.systemPackages = [ cfg.package pkgs.git pkgs.python3 pkgs.slirp4netns pkgs.fuse-overlayfs ];
+    environment.systemPackages = [ cfg.package pkgs.git pkgs.php84 pkgs.slirp4netns pkgs.fuse-overlayfs ];
     networking.firewall.allowedTCPPorts = [ 22 ] ++ lib.optionals (cfg.registryDomain != null) [ 80 443 ];
     systemd.slices."user-1100".sliceConfig = { MemoryMax = "3G"; TasksMax = 2048; };
     services.dockerRegistry = lib.mkIf (cfg.registryDomain != null) {

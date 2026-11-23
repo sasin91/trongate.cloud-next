@@ -31,7 +31,7 @@ let cfg = config.services.trongate-runtime; in {
     };
     services.openssh.enable = true;
     networking.firewall.allowedTCPPorts = [ 22 80 443 ];
-    environment.systemPackages = [ cfg.package pkgs.caddy pkgs.curl pkgs.python3 pkgs.util-linux ] ++ lib.optionals cfg.localBuilds [ cfg.builderPackage pkgs.git pkgs.slirp4netns pkgs.fuse-overlayfs ];
+    environment.systemPackages = [ cfg.package pkgs.caddy pkgs.curl pkgs.php84 pkgs.util-linux ] ++ lib.optionals cfg.localBuilds [ cfg.builderPackage pkgs.git pkgs.slirp4netns pkgs.fuse-overlayfs ];
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
     # Retained profile generations + explicit runtime roots protect rollback inputs.
     nix.gc.automatic = lib.mkDefault false;

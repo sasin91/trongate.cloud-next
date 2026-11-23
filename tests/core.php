@@ -1,14 +1,15 @@
 <?php
+require_once __DIR__ . '/model_fixture.php';
 require __DIR__.'/bootstrap.php';
-require dirname(__DIR__).'/modules/operations/bootstrap.php';
-function database(): Operations_model { $s=new Operations_model('operations',new PDO('sqlite::memory:')); (new Setup_model('setup',$s->connection()))->migrate(); return $s; }
+require_once dirname(__DIR__).'/bootstrap.php';
+function database(): Jobs_model { $s=new Test_model('jobs',new PDO('sqlite::memory:')); (new Setup_model('setup',$s->db->connection()))->migrate(); return $s; }
 test('queue claims atomically, fences conflicts, recovers same expired claim',function() {
     $s=database(); $a=$s->enqueue('deploy','server:a',[]); $b=$s->enqueue('deploy','server:a',[]);
     $claimed=$s->claim('worker-a'); assert_same($a,$claimed['id']); assert_same(null,$s->claim('worker-b'));
-    $s->run('UPDATE jobs SET lease=0 WHERE id=?',[$a]); assert_same($a,$s->claim('worker-b')['id']);
+    $s->db->query_bind('UPDATE jobs SET lease=0 WHERE id=?',[$a], 'statement'); assert_same($a,$s->claim('worker-b')['id']);
     assert_throws(fn()=>$s->finish($a,'worker-a','succeeded',[]),'lease lost');
     $s->finish($a,'worker-b','uncertain',[]); assert_same(null,$s->claim('worker-c'));
-    (new Control($s))->execute('reconcile',['operation'=>$a]); assert_same($a,$s->claim('worker-c')['id']);
+    $s->_retry($a); assert_same($a,$s->claim('worker-c')['id']);
     $s->finish($a,'worker-c','succeeded',[]); assert_same($b,$s->claim('worker-d')['id']);
 });
 test('parallel resources can progress and pending provider polling keeps its lock',function() {
@@ -38,49 +39,15 @@ test('diagnostic redaction removes explicit credentials and PEM blocks',function
     $redacted=Redact::text($text,['credential-value']);
     assert_same(false,str_contains($redacted,'credential-value')); assert_same(false,str_contains($redacted,'abc123')); assert_same(false,str_contains($redacted,'encoded'));
 });
-class FixtureHttp extends Http {
-    public array $calls=[];
-    function __construct(public array $responses) {}
-    function request(string $method,string $path,string $token,?array $body=null): array {
-        $this->calls[]=[$method,$path,$body];
-        $next=array_shift($this->responses); if ($next instanceof Throwable) { throw $next; } return $next;
-    }
-}
-test('Hetzner action status mapping includes asynchronous errors',function() {
-    $http=new FixtureHttp([['action'=>['status'=>'running']],['action'=>['status'=>'success']],['action'=>['status'=>'error','error'=>['code'=>'resource_unavailable']]]]);
-    $p=new Hetzner('never-logged',$http);
-    assert_same('pending',$p->action(1)['status']); assert_same('succeeded',$p->action(1)['status']); assert_same('failed',$p->action(1)['status']);
+test('unsupported legacy jobs cannot execute feature actions', function () {
+    $model = database();
+    assert_same(0, (int) $model->db->query_bind('SELECT COUNT(*) FROM jobs', [], 'statement')->fetchColumn());
+    $id = $model->enqueue('provision', 'legacy-provider', []);
+    (new Worker($model))->once();
+    assert_same('uncertain', $model->job($id)['status']);
+    assert_same([], $model->all('external'));
 });
-test('ambiguous create reconciles by stable operation label without a second POST',function() {
-    $http=new FixtureHttp([['images'=>[]],['servers'=>[['id'=>99]]]]);
-    $p=new Hetzner('secret',$http); $p->list('images'); assert_same(99,$p->reconcile_create(str_repeat('a',32))['id']);
-    assert_same(['GET','GET'],array_column($http->calls,0)); assert_contains('label_selector=tc-operation',$http->calls[1][1]);
-});
-test('duplicate matching provider resources fail closed',function() {
-    $p=new Hetzner('secret',new FixtureHttp([['servers'=>[['id'=>1],['id'=>2]]]]));
-    assert_throws(fn()=>$p->reconcile_create(str_repeat('a',32)),'Multiple provider');
-});
-test('worker persists ambiguous create intent and never reissues POST after recovery',function() {
-    $dir=sys_get_temp_dir().'/tc-provider-'.bin2hex(random_bytes(5)); mkdir($dir); putenv('TC_STATE='.$dir); file_put_contents($dir.'/key',Encryptor::generate_key());
-    $s=database(); $s->secret('token','provider-secret'); $s->put('provider','hetzner',['credential'=>'token']);
-    $payload=['provider'=>'hetzner','name'=>'web','image'=>12,'server_type'=>'cx23','location'=>'fsn1','ssh_keys'=>[1]];
-    $id=$s->enqueue('provision','provider:hetzner',$payload);
-    $http=new FixtureHttp([
-        ['servers'=>[]],
-        ['image'=>['type'=>'snapshot','status'=>'available','labels'=>['tc-nixos'=>'true'],'architecture'=>'x86']],
-        ['server_types'=>[['name'=>'cx23','architecture'=>'x86']]],
-        new RuntimeException('transport timeout provider-secret'),
-        ['servers'=>[]],
-    ]);
-    $worker=new Worker($s,$http); $worker->once();
-    assert_same('uncertain',$s->job($id)['status']); assert_same(false,str_contains($s->job($id)['result'],'provider-secret'));
-    (new Control($s))->execute('reconcile',['operation'=>$id]); $worker->once();
-    assert_same('uncertain',$s->job($id)['status']);
-    assert_same(1,count(array_filter($http->calls,fn($c)=>$c[0]==='POST')));
-    assert_contains('&name=cx23',$http->calls[2][1]);
-    assert_same($id,$http->calls[3][2]['labels']['tc-operation']);
-    unlink($dir.'/key'); rmdir($dir); putenv('TC_STATE');
-});
+
 class FixtureProcess extends Process {
     public array $args=[];
     function run(array $argv,string $input='',int $timeout=60,?callable $heartbeat=null,array $extra_env=[]): array {
@@ -124,7 +91,7 @@ class BackendProcess extends Process {
         $this->calls[]=$argv;
         if ($argv[0]==='ssh') {
             $request=json_decode($input,true);
-            return ['exit'=>0,'out'=>tc_json(['status'=>$request['action']==='host-begin'?'reserved':'succeeded','generation'=>$request['expected'] ?? '/nix/store/observed']),'err'=>''];
+            return ['exit'=>0,'out'=>json_encode(['status'=>$request['action']==='host-begin'?'reserved':'succeeded','generation'=>$request['expected'] ?? '/nix/store/observed'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),'err'=>''];
         }
         return ['exit'=>0,'out'=>'activation completed','err'=>''];
     }

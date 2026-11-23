@@ -8,7 +8,7 @@ its tests are reused, including encoded custom commands and Node/Bun build stage
 
 Use a separate, disposable builder VM with no route/credentials to the control
 plane database and no fleet/provider secrets. Enable rootless Podman with working
-user namespaces/cgroup delegation, git, Python and sufficient disk space. Install:
+user namespaces/cgroup delegation, git, PHP 8.4 and sufficient disk space. Install:
 
 ```sh
 nix profile install /opt/trongate-cloud-next#builder
@@ -47,13 +47,7 @@ No extra VMs or registry accounts are created by automatic selection.
 }
 ```
 
-```sh
-tc build build.json
-tc operation operation.json
-# Copy the succeeded result's image and commit into a release specification.
-tc release release.json
-tc deploy deploy.json
-```
+Use the app wizard to build and deploy. The Apps module queues the build and hands its image digest to Deployments. Follow progress on the Jobs page.
 
 Leave `base` blank to use the pinned FrankenPHP 1.12 / PHP 8.4 Debian image.
 The generated build adds Composer and common Trongate PHP extensions and listens

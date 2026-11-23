@@ -54,7 +54,7 @@ and free space, load average, app count and configured app CPU/memory limits.
 Unlike the original Kubernetes collector, it reads Linux host counters over the
 existing pinned SSH connection. No public metrics port is opened.
 
-`tc monitor` runs every five minutes. Application servers and upgraded dedicated builders are sampled. Each server retains up to 288 samples
+`php /run/current-system/sw/share/tc/modules/monitoring/collect.php` runs every five minutes. Application servers and upgraded dedicated builders are sampled. Each server retains up to 288 samples
 (about 24 hours). Missing or stale readings are shown as unavailable, not zero.
 Three high samples spanning at least 500 seconds trigger CPU/memory/disk hints
 at 85%; less than 5 GiB free produces an immediate build-space hint. CPU is a

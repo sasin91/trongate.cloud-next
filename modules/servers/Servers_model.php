@@ -1,20 +1,23 @@
 <?php
-require_once dirname(__DIR__).'/db/traits/Database_access.php';
-require_once dirname(__DIR__).'/operations/traits/Inventory_records.php';
-require_once dirname(__DIR__).'/operations/traits/Encrypted_credentials.php';
-require_once dirname(__DIR__).'/operations/traits/Operation_queue.php';
+require_once APPPATH . 'modules/trongate_security/traits/Encrypted_credentials.php';
+require_once APPPATH . 'modules/jobs/traits/Job_queue.php';
 class Servers_model extends Model {
-    use Database_access, Inventory_records, Encrypted_credentials, Operation_queue;
+    use Encrypted_credentials, Job_queue;
+    public function __construct(?string $module_name = null, PDO|Closure|null $connection = null) {
+        parent::__construct($module_name, $connection);
+        $this->module('records');
+    }
+
 
     function _resources(string $id, ?array $change = null): array {
-        $server = $this->get('server', Validate::id($id));
+        $server = $this->records->_get(['kind' => 'server', 'id' => Validate::id($id)]);
         if (empty($server['application_ready'])) {
             throw new RuntimeException('Connect an application-ready server to view app resources.');
         }
         $request = ['action' => 'resources'];
         if ($change !== null) {
             $app = Validate::id((string) ($change['app'] ?? ''));
-            if ($this->get('app', $app)['server'] !== $id) {
+            if ($this->records->_get(['kind' => 'app', 'id' => $app])['server'] !== $id) {
                 throw new RuntimeException('This app belongs to a different server.');
             }
             $mode = (string) ($change['mode'] ?? '');
@@ -31,7 +34,7 @@ class Servers_model extends Model {
                 $request += ['memory_mb' => $memory, 'cpus' => $cpu];
             }
         }
-        $result = (new Ssh($this))->command($server, 'tc-runtime', tc_json($request), 120);
+        $result = (new Ssh($this))->command($server, 'tc-runtime', self::_encode_json($request), 120);
         $data = json_decode($result['out'], true);
         if ($result['exit'] !== 0 || !is_array($data) || ($data['status'] ?? '') !== 'succeeded') {
             $error = ($data['status'] ?? '') === 'failed' ? ($data['error'] ?? null) : null;
@@ -43,26 +46,19 @@ class Servers_model extends Model {
     }
 
     function _pending_connections(): array {
-        $connected = $this->all('server');
-        $providers = new Providers_model('providers', $this->connection());
+        $this->module('proxmox');
         $pending = [];
-        $jobs = $this->run('SELECT id FROM jobs WHERE kind=? ORDER BY created DESC', ['provision'])->fetchAll();
+        $jobs = $this->db->query_bind(
+            'SELECT id FROM jobs WHERE kind=? AND status<>? ORDER BY created DESC',
+            ['proxmox-provision', 'succeeded'], 'statement'
+        )->fetchAll();
         foreach ($jobs as $job) {
-            $status = $providers->_status($job['id']);
-            if ($status['status'] === 'deleted') {
-                continue;
-            }
-            $matched = false;
-            foreach ($connected as $server) {
-                if (isset($status['provider_id']) && ($server['provider'] ?? '') === $status['provider'] && (string) ($server['provider_id'] ?? '') === (string) $status['provider_id']) {
-                    $matched = true;
-                    break;
-                }
-            }
-            if (!$matched) {
-                $pending[] = $status;
-            }
+            $pending[] = $this->proxmox->model->_progress($job['id']);
         }
         return $pending;
+    }
+
+    private static function _encode_json(array $value): string {
+        return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     }
 }

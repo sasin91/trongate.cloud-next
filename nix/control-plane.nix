@@ -20,7 +20,7 @@ in {
   config = lib.mkIf cfg.enable {
     users.groups.tc = {};
     users.users.tc = { isSystemUser = true; group = "tc"; home = "/var/lib/tc-control"; createHome = true; };
-    environment.systemPackages = [ cfg.package cfg.deployPackage pkgs.nix pkgs.openssh ];
+    environment.systemPackages = [ cfg.package cfg.deployPackage pkgs.php84 pkgs.nix pkgs.openssh ];
     nix.settings = { experimental-features = [ "nix-command" "flakes" ]; trusted-users = [ "root" "tc" ]; };
     services.mysql = lib.mkIf cfg.localDatabase {
       enable = true; package = pkgs.mariadb;
@@ -58,19 +58,19 @@ in {
       path = commandPackages;
       serviceConfig = {
         Type = "oneshot"; User = "tc"; Group = "tc"; UMask = "0077";
-        ExecStart = "${cfg.package}/bin/tc monitor";
+        ExecStart = "${pkgs.php84}/bin/php ${root}/modules/monitoring/collect.php";
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
       };
     };
     systemd.services.tc-worker = lib.mkIf cfg.worker {
-      description = "Trongate durable operation worker";
+      description = "Trongate background job worker";
       wantedBy = [ "multi-user.target" ]; after = [ "network-online.target" "mysql.service" ];
       wants = [ "network-online.target" ];
       inherit environment;
       path = commandPackages;
       serviceConfig = {
         User = "tc"; Group = "tc"; UMask = "0077";
-        ExecStart = "${cfg.package}/bin/tc worker"; Restart = "always"; RestartSec = 5;
+        ExecStart = "${pkgs.php84}/bin/php ${root}/modules/jobs/worker.php"; Restart = "always"; RestartSec = 5;
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
       };
     };
