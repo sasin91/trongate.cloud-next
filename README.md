@@ -1,137 +1,130 @@
 # Trongate Cloud
 
-Code deployments and NixOS server provisioning on Proxmox. This continues the
-original Trongate Cloud product in ~/Herd/trongate.cloud: its feature specifications,
-guided workflows, and calm, structured interface remain the reference. Proxmox and
-NixOS replace the old Kubernetes infrastructure; other cloud providers are out of scope.
+Code deployments (DeployHQ-style workflow) and bare-metal FreeBSD application
+hosting. This continues the original Trongate Cloud product in
+`~/Herd/trongate.cloud`: its feature specifications, guided workflows, and calm,
+structured Mint/Trongate interface remain the reference. Bare-metal FreeBSD
+(14.3+/15.x) with ZFS, vanilla `jail(8)`, `nullfs`, `rctl(8)`, `pf`, host Caddy,
+and shared MariaDB/Valkey platform jails is the sole runtime platform.
 
-The current implementation includes application builds, releases, deployment
-progress, rollback, server resources, and Proxmox VM creation with automatic SSH
-enrollment. It is still being developed; this is not a claim of full feature parity
-with the original product.
+The current implementation includes ephemeral FreeBSD build jails, immutable ZFS
+releases, spin-up-standby blue/green deployments, sub-second rollback, soft and
+purged app teardown, ARC-aware capacity monitoring, and live `rctl`/ZFS resource
+controls.
 
-Application licensing follows the original proprietary
-application; upstream Trongate MIT notices are preserved in `engine/LICENSE.txt`.
+Application licensing follows the original proprietary application; upstream
+Trongate MIT notices are preserved in `engine/LICENSE.txt`.
 
-## Install on an existing NixOS control-plane VM
+## Architecture overview
 
-Clone this repository. No request to a hosted
-Trongate control plane is required. A single control-plane VM runs MariaDB,
-PHP-FPM, Caddy and the worker. Application targets and untrusted builders are
-separate machines in this PoC.
+- **Platform**: Bare-metal FreeBSD 14.3+/15.x, ZFS, vanilla `jail(8)` under
+  `/etc/jail.conf.d/`, read-only `nullfs` base and PHP 8.4 runtime mounts,
+  `rctl(8)` hard resource caps, and non-VNET `pf` isolation on `lo1`
+  (`10.99.0.0/16`).
+- **Control plane**: Runs in its own `tc_panel` jail (`10.99.0.2`) on Host #1,
+  talking to Host #1 via `10.99.0.1:22` (`pf`-restricted to `tc_panel`) and to
+  Host #2..N over the exact same pinned Ed25519 SSH transport.
+- **Security boundary**: Non-root `tc-agent` SSH user with an `authorized_keys`
+  forced-command `/usr/local/bin/doas /usr/local/libexec/tc-runtime` speaking
+  protocol v2 JSON over stdin/stdout with `flock` locking and `fsync` journals.
+  Zero arbitrary shell execution from PHP — even `Ssh::inspect()` sends
+  `{"action":"inspect-host"}`.
+- **Blue/Green lifecycle**: Each app has `blue` and `green` jail slots with a
+  single running jail steady-state (`php-fpm` `pm = ondemand`). Deploys spin up
+  the standby slot, verify PHP-FPM health locally, switch host Caddy atomically,
+  and stop the previous slot while retaining it on ZFS for sub-second rollback.
+- **Shared platform jails**: Dedicated `tc_mariadb` (`recordsize=16K`, per-app
+  DB/user with `MAX_USER_CONNECTIONS=20` and `max_statement_time=30`) and
+  `tc_valkey` (sessions only, per-app ACL `~tc:<app>:*`) expose Unix sockets
+  under `/var/run/tc/{mariadb,valkey}` (`root:wheel 0755`).
+- **Host Caddy edge & TLS**: Serves static assets directly from ZFS ARC,
+  proxies PHP via Unix FastCGI sockets
+  (`/var/run/tc/sockets/<app>-<slot>/php-fpm.sock`), and handles automatic HTTPS
+  for each explicit site block in `/var/db/tc/runtime/Caddyfile`.
+
+## Provision a bare-metal FreeBSD host
+
+Run the host provisioning scripts under [`infra/`](infra/README.md) as
+`root` on a FreeBSD 14.3+ or 15.x machine with ZFS (`zroot` by default):
 
 ```sh
 git clone git@github.com:sasin91/trongate.cloud-next.git /opt/trongate-cloud-next
 cd /opt/trongate-cloud-next
-nix flake check --no-build
-nix build .#default .#runtime
+sh infra/scripts/bootstrap.sh
+sh infra/scripts/build-runtime.sh
+sh infra/scripts/platform-jails.sh
 ```
 
-Add a local path input to your existing `/etc/nixos/flake.nix`, preserving its
-hardware module, administrator keys, bootloader and filesystem configuration:
-
-```nix
-inputs.tc.url = "path:/opt/trongate-cloud-next";
-# Add tc to the outputs argument, then to your machine's modules:
-tc.nixosModules.control-plane
-{
-  services.trongate-cloud = {
-    enable = true;
-    domain = "control.example.com";
-  };
-}
-```
+Initialize the control-plane encryption key, schema, and administrator account
+inside the `tc_panel` jail (see [infra/README.md](infra/README.md) and
+[docs/self-hosting.md](docs/self-hosting.md)):
 
 ```sh
-sudo nixos-rebuild switch --flake /etc/nixos#YOUR_MACHINE
-# Create /run/tc-admin.json with mode 0600 using an editor:
+# Create a temporary 0600 admin JSON file:
 # {"name":"admin","password":"a unique password of at least 14 characters"}
-sudo sh -c 'cat /run/tc-admin.json | sudo -u tc env TC_STATE=/var/lib/tc-control php /run/current-system/sw/share/tc/modules/setup/init.php'
-sudo rm /run/tc-admin.json
-sudo systemctl restart tc-worker
+jexec tc_panel sh -c 'cat /tmp/tc-admin.json | env TC_STATE=/var/db/tc/panel php /app/modules/setup/init.php'
+jexec tc_panel rm -f /tmp/tc-admin.json
+jexec tc_panel service tc_worker restart
 ```
 
-Point the domain at the VM and open HTTPS. `php /run/current-system/sw/share/tc/modules/setup/init.php` creates the installation
-encryption key and schema before the panel is usable. It can also reset a local
-administrator password during recovery. Back up the key immediately.
+Each module owns its command-line entry point:
 
-Each module owns its command-line entry point. From a checkout, run:
+```sh
+php modules/setup/init.php
+php modules/setup/migrate.php
+php modules/jobs/worker.php --once
+php modules/monitoring/collect.php
+```
 
-    php modules/setup/init.php
-    php modules/setup/migrate.php
-    php modules/jobs/worker.php --once
-    php modules/monitoring/collect.php
+Run manual CLI commands with the same database and `TC_STATE` environment as
+the panel and worker. Product operations run through the authenticated panel.
 
-On an installed NixOS system, these paths are relative to
-`/run/current-system/sw/share/tc/`.
-The worker service and monitoring timer call their respective scripts directly. Run manual commands as
-the installation OS user with the same database and TC_STATE environment.
-Product operations run through the authenticated panel.
+## Deploy code and manage apps
 
-See [self-hosting](docs/self-hosting.md) for installation and recovery.
+1. Open **Servers** and enroll Host #1 (`10.99.0.1`, user `tc-agent`) or any
+   additional bootstrapped FreeBSD host using its pinned Ed25519 key. Readiness
+   inspection calls `tc-runtime` with `{"action":"inspect-host"}` and verifies
+   ZFS, `jail(8)`, `rctl(8)`, `pf`, Caddy, MariaDB, Valkey, PHP 8.4, base and
+   runtime datasets, builder snapshot, and protocol v2.
+2. Open **Apps → Create app**, choose a public GitHub repository and branch or
+   commit, select optional curated PHP extensions, review build commands,
+   environment variables, persistent mounts, and domain.
+3. Follow deployment progress, connect DNS, and click **Check DNS and go live**.
+   Retained previous jail slots support sub-second rollback without rebuilding.
 
-## Deploy code and provision servers
+Config overlays (`/app/config/config.php` patching only `BASE_URL` and `ENV` in
+place so custom user defines stay intact, and `/app/config/database.php`
+generated from the provisioned MariaDB grant) are materialized `0440` (`root:www`)
+and mounted read-only via `nullfs`. Persistent named mounts live under
+`zroot/tc/apps/<app>/data/<mount>` with `exec=off,setuid=off`.
 
-1. Open **Servers → Create on Proxmox**. The installation supplies the Proxmox
-   connection and prepared NixOS template. Review capacity and create a VM.
-   Provisioning configures SSH and enrolls the server automatically after verifying
-   its identity and runtime readiness. See [Proxmox setup](docs/proxmox.md).
-2. Open **Apps → Create app**, choose the repository or image and target server,
-   and review build commands, configuration and domain.
-3. Follow deployment progress, connect the domain, and go live. Retained releases
-   support rollback without rebuilding.
-
-The long-running worker executes queued operations. For a one-shot test:
-`php /run/current-system/sw/share/tc/modules/jobs/worker.php --once`. A missing runtime helper, privilege, tool or proxy service is
-reported explicitly during inspection. Enrollment never installs or replaces an OS.
-
-Images must contain a service listening on `container_port` (default 8080),
-normally the existing FrankenPHP image. `PORT` is injected. Persistent named
-mounts live under `/var/lib/tc/runtime/apps/APP/data`; immutable release config
-and encrypted secret references are stored separately from host revisions.
-`file_secrets` mounts existing PHP configuration files from encrypted credentials,
-so static Trongate configuration need not be baked into an image.
-
-Candidate health must pass before routing changes. A failed post-switch check
-restores and checks the prior route. Successful releases retain the preceding
-container and its configuration; old processes are stopped after acceptance and
-restarted for rollback. Public HTTPS checks are enabled by default; set
-`"public_check":false` only when DNS/TLS is unavailable in a disposable environment.
-The result records whether that check was requested.
-
-## Deployment workflow
-
-The panel includes guided server onboarding, the app launch wizard adapted from
-the original Trongate Cloud, app release/rollback controls and live operation
-progress. Git launches resolve a public branch to an immutable commit, build on
-a separate builder, then queue deployment of the returned image digest. Image
-launches skip the build. Environment values are encrypted before jobs are queued.
-The Jobs page shows background work and offers explicit reconciliation for uncertain jobs. Each feature owns its actions; there is no generic command console.
-Local administrators have installation-wide authority. Original features still awaiting implementation here include multi-tenant roles, GitHub login, private Git
-repositories and billing. Their absence here does not remove them from the original product scope.
-Application database provisioning/imports, repository configuration suggestions,
-mail capture and background-process configuration from the original platform are
-not yet available; the wizard describes the supported database connection path.
+Candidate local health (`cgi-fcgi` over the slot's PHP-FPM Unix socket) must
+pass before Caddy routes change. A failed post-switch check restores and checks
+the prior route. Public HTTPS checks are enabled by default; set
+`"public_check": false` only when DNS/TLS is unavailable in a disposable
+environment.
 
 ## Verification
 
 ```sh
-composer test                      # PHP models, providers, worker and build-generator tests
-php tests/web.php                  # real HTTP login, CSRF, authenticated console
-TC_DSN='mysql:host=127.0.0.1;dbname=tc' TC_DB_USER=tc php tests/mariadb.php
-nix flake check --no-build          # configurations and derivations evaluate
-nix build .#default .#runtime .#builder
-nix build .#checks.x86_64-linux.runtime-vm -L  # disposable VM, real SSH/Podman/systemd/Caddy
-nix build .#proxmox-template -L     # prepared NixOS VM template; needs Linux/KVM
+make check                         # PHP lint + all colocated .phpt tests (auto-skips MariaDB without TC_DSN)
+php tests/run-tests.php            # direct .phpt runner (Windows/Linux/FreeBSD, no make or composer needed)
+TC_DSN='mysql:host=127.0.0.1;dbname=tc' TC_DB_USER=tc make test-mariadb
 ```
 
-The panel, provider actions and managed-server helpers are PHP. `composer test`
-includes runtime recovery, isolated builds and resource-allocation tests. The
-NixOS VM test uses the standard NixOS test driver; the deployed product does not
-require a Python interpreter.
+Tests are plain PHP-internals-style `.phpt` files colocated with their owning
+module (`engine/tests/`, `modules/*/tests/`, `infra/runtime/tests/`) plus
+cross-module integration tests under `tests/`. They run on Windows, Linux, and
+FreeBSD using overridable system-command seams in `Runtime`, `Builder`,
+`Resources`, and `Metrics`.
 
-See [verification evidence and limits](docs/verification.md). Fixture tests do not
-prove provider provisioning. No live billable resource is created by ordinary CI.
-
-Further reading: [architecture and recovery](docs/architecture.md),
-[module boundaries](docs/extensions.md), [source inspection](docs/inspection.md).
+Further reading:
+- [FreeBSD host bring-up](infra/README.md)
+- [Architecture and recovery](docs/architecture.md)
+- [Builds](docs/builds.md)
+- [Builds and capacity monitoring](docs/builds-and-monitoring.md)
+- [Resource allocation](docs/resource-allocation.md)
+- [Self-hosting and backup](docs/self-hosting.md)
+- [Module boundaries](docs/extensions.md)
+- [Verification evidence and limits](docs/verification.md)
+- [Historical source inspection](docs/inspection.md)

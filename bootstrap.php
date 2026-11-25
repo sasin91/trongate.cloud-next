@@ -3,18 +3,12 @@ declare(strict_types=1);
 define('APPPATH', __DIR__ . '/');
 require_once APPPATH . 'engine/Trongate.php';
 spl_autoload_register(function (string $class): void {
-    $provider_modules = [
-        'Proxmox_ssh' => 'proxmox/Proxmox_ssh.php',
-        'Proxmox_client' => 'proxmox/Proxmox_client.php',
-        'Provider_error' => 'proxmox/Provider_error.php',
-    ];
     $services = [
         'Build' => 'apps',
         'Build_commands' => 'apps',
+        'Trongate_config' => 'apps',
         'Worker' => 'jobs',
         'Job_context' => 'jobs',
-        'DeployRs' => 'deployments',
-        'HostDeployer' => 'deployments',
         'Ssh' => 'servers',
         'Encryptor' => 'trongate_security',
         'Redact' => 'trongate_security',
@@ -22,8 +16,6 @@ spl_autoload_register(function (string $class): void {
     ];
     if (in_array($class, ['Model', 'Modules', 'Http_client', 'Process'], true)) {
         require_once APPPATH . 'engine/' . $class . '.php';
-    } elseif (isset($provider_modules[$class])) {
-        require_once APPPATH . 'modules/' . $provider_modules[$class];
     } elseif (isset($services[$class])) {
         require_once APPPATH . 'modules/' . $services[$class] . '/services/' . $class . '.php';
     } elseif (preg_match('/^[A-Z][A-Za-z_]*$/D', $class)) {

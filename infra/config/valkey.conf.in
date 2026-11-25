@@ -1,0 +1,13 @@
+# Sessions-only Valkey over Unix socket with per-app ACLs.
+port 0
+unixsocket /var/run/tc/valkey/valkey.sock
+unixsocketperm 777
+aclfile /var/db/valkey/users.acl
+dir /var/db/valkey
+pidfile /var/run/valkey/valkey.pid
+daemonize yes
+maxmemory @VALKEY_MAXMEM_MB@mb
+maxmemory-policy volatile-lru
+save ""
+appendonly no
+protected-mode yes

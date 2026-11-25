@@ -65,10 +65,10 @@ class Db extends Trongate {
         // Determine environment mode
         $this->is_dev_mode = defined('ENV') && strtolower(ENV) === 'dev';
         
-        $dsn = getenv('TC_DSN') ?: 'mysql:unix_socket=/run/mysqld/mysqld.sock;dbname=tc';
+        $dsn = getenv('TC_DSN') ?: 'mysql:unix_socket=/var/run/tc/mariadb/mysqld.sock;dbname=tc_panel';
         $this->dbh = $connection ?? new PDO(
             $dsn,
-            getenv('TC_DB_USER') ?: 'tc',
+            getenv('TC_DB_USER') ?: 'tc_panel',
             getenv('TC_DB_PASSWORD') ?: '',
             str_starts_with($dsn, 'mysql:') ? [PDO::MYSQL_ATTR_FOUND_ROWS => true] : []
         );

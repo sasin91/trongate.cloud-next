@@ -26,16 +26,19 @@ class Worker {
             $this->model->finish($id, $owner, $status, $result);
         } catch (Throwable $e) {
             // Exceptions may originate in libraries with credential-bearing messages.
-            // Keep a safe class and step; raw provider/build/customer output is not logged.
-            $this->model->finish($id, $owner, 'uncertain', ['error' => get_class($e), 'message' => $e instanceof Provider_error ? $e->getMessage() : 'Operation not verified; inspect remote/provider state and reconcile.']);
+            // Keep a safe class and step; raw host/build/customer output is not logged.
+            $this->model->finish($id, $owner, 'uncertain', [
+                'error' => get_class($e),
+                'message' => 'Operation not verified; inspect remote host state and reconcile.',
+            ]);
         }
         return true;
     }
     function perform(Job_context $context): array {
         $action = match ($context->kind) {
-            'proxmox-provision' => 'proxmox/provision',
             'build' => 'apps/_build',
-            'deploy', 'rollback', 'host-update', 'host-rollback' => 'deployments/_run',
+            'deploy', 'rollback' => 'deployments/_run',
+            'destroy-app' => 'deployments/_destroy',
             default => throw new RuntimeException('Unsupported job kind'),
         };
         return Modules::run($action, $context);

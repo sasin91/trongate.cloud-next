@@ -2,186 +2,167 @@
 
 ## Trongate modules and routing
 
-Core routes directly to `apps`, `servers`, `deployments`, and
-`jobs`. Each public feature entry point calls
-`$this->trongate_security->make_sure_allowed()` before handling its own request.
-There is no console command dispatcher or custom authentication module.
-`templates` composes the shared layout and module-owned views. Apps, servers, deployments and jobs have dedicated pages. Server creation keeps
-its configuration, review and operation ID in the session. App setup saves an
-encrypted session draft before navigation and restores the current question
-when returning. Tokens and SSH private keys are never stored in localStorage.
+Core routes directly to `apps`, `servers`, `deployments`, and `jobs`. Each
+public feature entry point calls `$this->trongate_security->make_sure_allowed()`
+before handling its request, and validates `csrf_token` on mutations. There is
+no console command dispatcher or custom authentication module. `templates`
+composes the shared layout and module-owned views while preserving the calm
+Mint/Trongate interface. App setup saves an encrypted session draft before
+navigation and restores the current question when returning. Tokens and SSH
+private keys are never stored in `localStorage`.
 
-The `login`, `trongate_tokens`, form, validation and supporting framework modules
-come from the existing Trongate installation. `login/config/login.php` maps the
-administrator level to `trongate_administrators`. Native password validation,
-rate limiting and token issuance handle sign-in; the application security scenario
-requires level 1 and validates `csrf_token` for mutations. Login uses the native
-validation CSRF check. Logout requires POST and CSRF. Remember-me and password
-reset are disabled for this installation. Sessions rotate on login and tokens
-retain the previous one-hour lifetime.
-
-`php /run/current-system/sw/share/tc/modules/setup/migrate.php` creates the native login tables and copies legacy administrator
-password hashes once per username. Repeated migrations do not overwrite native
-accounts; `php /run/current-system/sw/share/tc/modules/setup/init.php` remains the explicit local administrator password setup path.
-Old custom sessions no longer authorize requests. Migration is additive, so the
-legacy tables remain available for rollback. Back up the database before upgrading.
+The `login`, `trongate_tokens`, form, validation, and supporting framework
+modules come from the bundled Trongate installation. `login/config/login.php`
+maps administrator level 1 to `trongate_administrators`. Native password
+validation, rate limiting, and token issuance handle sign-in. Logout requires
+POST and CSRF. Remember-me and password reset are disabled. Sessions rotate on
+login and tokens retain a one-hour lifetime.
 
 The native `Db` module uses the control plane's configured PDO connection; its
-table-existence check also supports SQLite test fixtures. Other framework code
-is kept in the bundled engine/modules. JSON encoding helpers are private to their
-owning classes. They return strings and preserve throwing on invalid JSON and
-unescaped slashes; Trongate's `json()` helper is for displaying data.
+table-existence check also supports SQLite test fixtures. JSON encoding helpers
+are private to their owning classes, returning strings with
+`JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES`.
 
-Internal methods use the underscore convention enforced by Core. Feature assets
-use normal `_module` URLs and Core's asset checks. Shared styles live in
-`templates/css`. Launch and Proxmox persistence lives in `Apps_model` and `Proxmox_model`,
-accessed through Trongate's `$this->model`. Records owns shared JSON record storage;
-credential encryption and queue access use traits. `Jobs_model` owns atomic queue transitions;
-module loading shares the calling model's PDO connection so launch writes and
-job creation commit or roll back together. CLI and workers load the same models.
-Supporting classes live under their owning modules in `services/`: app builds,
-provider HTTP, server SSH, deployment backends, security and jobs. Shared
-web/CLI initialization lives in `bootstrap.php`. Service files
-are loaded explicitly and are not module controllers.
+Internal controller methods use the underscore convention enforced by
+`engine/Core.php` (or individual `block_url(...)` guards where required); never
+block an entire controller in its constructor. Feature assets use normal
+`_module` URLs and Core's asset checks. Shared styles live in `templates/css`.
+Controllers access their model via `$this->model` and load other modules through
+Trongate's module loader so database transactions share the caller's PDO
+connection. Supporting service classes live under their owning modules in
+`services/` and are autoloaded by root `bootstrap.php`.
 
 The canonical MariaDB schema is root `setup.sql`; SQLite tests use
-`modules/setup/fixtures/setup.sqlite.sql`. The CLI-only `Setup_model` applies these
-SQL files and asks `Login_model` to import legacy administrator hashes. There is
-no browser setup controller or schema creation during ordinary requests.
+`modules/setup/fixtures/setup.sqlite.sql`. The CLI-only `Setup_model` applies
+these SQL files and imports legacy administrator hashes once per username. There
+is no browser setup controller or schema creation during ordinary requests.
 
 ## Module ownership
 
-Jobs owns enqueueing, claims, leases, resource locks, progress, terminal results
-and explicit reconciliation. Its model has no inventory or credential access.
-Worker handles that lifecycle and calls Modules::run() with a Job_context containing only the job ID, kind, payload and lease-renewal callback. Feature actions use their own model connections. The worker commits its claim before dispatch; feature-local transactions remain within their owning modules.
-The Jobs page is history and recovery, not a generic command console.
+- **Jobs** owns enqueueing, claims, leases, resource locks, progress, terminal
+  results, and explicit reconciliation. Its model has no inventory or credential
+  access. `Worker` (`modules/jobs/services/Worker.php`) dispatches `build`,
+  `deploy`, `rollback`, and `destroy-app` via `Modules::run()` with a
+  `Job_context` carrying only identity, payload, and the lease-renewal callback.
+- **Records** owns all access to the shared `records` table through internal
+  `_get`, `_find`, `_all`, `_insert`, `_put`, and `_delete` actions.
+- **Apps** owns app/release persistence, `Trongate_config`, `Build` /
+  `Build_commands`, build execution (`apps/_build`), and build-to-deployment
+  handoff.
+- **Servers** owns FreeBSD host enrollment, SSH host-key pinning, protocol v2
+  readiness inspection (`Ssh::inspect()`), and live `rctl`/ZFS resource
+  management views.
+- **Deployments** owns application rollout (`deployments/_run`), rollback
+  (`deployments/_run`), teardown (`deployments/_destroy`), DNS go-live
+  verification, and deployment timeline/progress reporting.
+- **Monitoring** owns ARC-aware FreeBSD host metrics collection
+  (`modules/monitoring/collect.php` -> `monitoring/_collect`) and capacity
+  pressure hints.
+- **Setup** owns initialization (`modules/setup/init.php`) and migrations
+  (`modules/setup/migrate.php`).
 
-Apps owns app/release persistence, build planning and execution, and the
-build-to-deployment handoff. Servers owns SSH scanning, confirmation and inspection.
-Deployments owns application rollout, rollback, NixOS preparation, activation and
-host recovery. Proxmox owns VM provisioning and automatic enrollment.
-Controllers orchestrate work and call their own models for persistence.
+## Transport and FreeBSD host security boundary
 
-The root bootstrap.php supplies application startup and class loading.
-engine/Process.php runs bounded subprocesses. Records owns all access to the
-records table through internal controller actions and its model. Independent
-calls can use Modules::run(); calls that participate in a transaction use the
-native module loader to share the caller's connection. Insert rejects duplicate
-keys; put replaces an existing record. Product decisions remain in feature modules.
-Encrypted_credentials belongs to
-trongate_security/traits. Job_queue is a thin native-module forwarding trait.
-Setup owns initialization and migrations; Monitoring owns collection.
-modules/setup/init.php initializes the installation, modules/setup/migrate.php applies migrations, and modules/monitoring/collect.php collects metrics. modules/jobs/worker.php starts the worker directly, with optional --once.
+The control plane runs inside the dedicated `tc_panel` jail (`10.99.0.2`) on
+Host #1 and connects to Host #1 (`10.99.0.1:22`, `pf`-restricted to `tc_panel`)
+and Host #2..N over the exact same pinned Ed25519 SSH path:
 
-Existing database tables, job kinds, resource locks and remote operation IDs
-are preserved by the operations-to-Jobs rename; no data migration is required.
-
-The single installation administrator can operate all inventory. Web entry points
-require a local password session and CSRF token; the CLI requires OS access to
-the installation key and database. There is no unattended provider provisioning
-or destructive mutation without a queued, explicitly confirmed operator request.
+1. `Ssh` pins the server's Ed25519 host key in a per-call temporary
+   `known_hosts` file with `StrictHostKeyChecking=yes` and `BatchMode=yes`.
+2. Target hosts expose a non-root `tc-agent` SSH user whose `authorized_keys`
+   entry forces `/usr/local/bin/doas /usr/local/libexec/tc-runtime` with
+   `no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty`.
+3. `/usr/local/etc/doas.conf` allows only
+   `permit nopass tc-agent as root cmd /usr/local/libexec/tc-runtime args`.
+4. PHP never runs arbitrary shell commands on target hosts. Every operation —
+   `inspect-host`, `build`, `deploy`, `rollback`, `destroy-app`, `boot`, `status`,
+   `inspect`, `metrics`, `resources`, `resources-update`, and `cleanup` — passes
+   as structured protocol v2 JSON over stdin/stdout to `infra/runtime/runtime.php`.
 
 ## Queue and fencing
 
-Jobs use random stable operation IDs, atomic conditional claims, 90-second leases,
-ten-second subprocess heartbeats, at most 30 claims, and per-command deadlines.
-A resource lock belongs to an operation, not a worker. Expiring a worker lease
-does not release that lock. A replacement worker can claim only the same operation.
-All host/app changes for an enrolled server share its `server:ID` lock. Provider
-requests are serialized by connection. The remote helper also uses `flock`, a
-journal and a persistent host-deployment reservation.
+Jobs use random 32-hex operation IDs, atomic conditional claims, 90-second
+leases, 10-second subprocess heartbeats, at most 30 claims, and per-command
+deadlines. A resource lock belongs to an operation, not a worker; expiring a
+worker lease does not release that lock. A replacement worker can claim only the
+same operation.
 
-`pending` means queued or waiting on a provider action; `running` has a worker
-lease; `succeeded` is verified; `failed` is a terminal failure with safe recovery;
-`uncertain` retains its lock. `the Jobs reconciliation action` changes uncertain to pending and
-repeats observation using the same operation ID. It never creates a fresh ID.
+All app deploy, rollback, and destroy operations for a FreeBSD host share its
+`server:<id>` lock. On the host itself, `tc-runtime` acquires a non-blocking
+`flock` on `/var/db/tc/runtime/operation.lock` (and `build.lock` for builds)
+and writes durable `fsync` + atomic-rename journals under
+`/var/db/tc/runtime/jobs/<op>.json`.
 
-Every provider mutation gets a durable intent before HTTP. Creates carry
-`tc-operation` labels. A timeout after submission searches those labels before
-any decision. If nothing is visible, it stays uncertain and **does not send another
-create**. This can require manual resolution when a request was never accepted;
-avoiding a duplicate billable resource takes precedence over automatic progress.
+Job states:
+- `pending`: queued and ready for claim.
+- `running`: claimed under an active worker lease.
+- `waiting`: candidate jail passed local health checks and is awaiting DNS and
+  go-live confirmation.
+- `succeeded`: verified terminal state.
+- `failed`: terminal failure with prior slot/route safely restored.
+- `uncertain`: retains its lock until an operator inspects host state and
+  reconciles from the Jobs page using the exact same operation ID.
 
-## Application operations
+## Blue/Green FreeBSD jail lifecycle
 
-An immutable release includes digest, optional commit, configuration version,
-environment/config-file secret references, domain, health path, persistent mounts,
-resource limits and optional migration argument array. A separate container and
-unit are created for each operation. Filesystem journals precede migrations and
-route switches; writes use fsync and atomic rename. Repeating a completed operation
-returns its journal. An interrupted candidate/switch attempts to restore the
-recorded previous route; a migration with an unknown exit status remains uncertain.
+Each application alternates between `blue` and `green` jail slots (`tc_<app>_blue`
+and `tc_<app>_green`), keeping **one running jail steady-state** per app with
+`php-fpm` configured in `pm = ondemand` mode:
 
-Migration commands run with `podman exec` argument arrays. They must explicitly
-declare `schema_compatible:true`; rollback does not undo database or file changes.
-Use expand/contract migrations compatible with both retained versions. Health
-endpoints are application-defined; a 2xx/3xx response cannot prove business-level
-correctness or schema compatibility. Old containers/configs are retained and
-consume space; automatic pruning is intentionally absent.
+1. **Allocate resources (`allocating-resources`)**: `Resources::apply()`
+   validates ARC-aware memory headroom, overcommit budget, and `rctl` caps.
+2. **Prepare database (`preparing-database`)**: Idempotently creates database
+   and user `tc_<app_sql>` inside `tc_mariadb` (`MAX_USER_CONNECTIONS=20`,
+   `max_statement_time=30`) when `database: true`.
+3. **Prepare sessions (`preparing-sessions`)**: Idempotently configures Valkey
+   ACL user `tc_<app>` scoped to `~tc:<app>:*` inside `tc_valkey`.
+4. **Stage release (`staging-release`)**: Ensures ZFS datasets
+   (`zroot/tc/apps/<app>` with quota, `zroot/tc/apps/<app>/data` with
+   `exec=off,setuid=off`), clones `zroot/tc/skeleton@v1` (`quota=128M`) into the
+   inactive slot (`zroot/tc/jails/<app>-<slot>`), writes `0440` read-only config
+   overlays (`/app/config/config.php` via `Trongate_config` and
+   `/app/config/database.php` when not overridden), writes
+   `/etc/tc/php.d/extensions.ini` and `php-fpm.conf`, writes the `nullfs` fstab
+   mounting RO FreeBSD base, RO PHP 8.4 runtime, RO release dir, RW data mounts,
+   and RW socket parent directories (`/var/run/tc/{mariadb,valkey}` owned
+   `root:wheel 0755`), and writes `/etc/jail.conf.d/tc_<app>_<slot>.conf` with
+   `exec.poststart` `rctl` rules.
+5. **Start standby (`starting-standby`)**: Registers the slot IP (`10.99.x.y` on
+   `lo1`) in PF `<tc_jails>`, starts the standby jail with `jail -c`, and
+   enforces `rctl` limits.
+6. **Optional migration**: If `migration` is non-empty and
+   `schema_compatible: true`, executes the argument array via `jexec` inside the
+   standby jail. Rollback never undoes database or file changes; use
+   expand/contract migrations.
+7. **Local health check (`checking-local`)**: Probes the standby slot's Unix
+   FastCGI socket (`/var/run/tc/sockets/<app>-<slot>/php-fpm.sock`) with
+   `cgi-fcgi`. For a first deployment with `defer_public: true`, the operation
+   pauses in `awaiting-go-live` until the user verifies DNS and triggers go-live.
+8. **Atomic Caddy cutover (`switching`)**: Writes the app's explicit Caddy site
+   block serving static assets directly from ZFS ARC (`root * .../releases/<op>/public`
+   + `file_server`) and proxying PHP over the standby FastCGI socket, validates
+   and reloads Caddy (automatic HTTPS), and re-verifies local health.
+9. **Public HTTPS check (`checking-public`)**: Verifies HTTPS through the public
+   domain (`curl`, 30 attempts). On failure for a replacement deploy, Caddy is
+   restored to the previous slot.
+10. **Retire previous (`retiring-previous`)**: Drains in-flight FastCGI
+    connections and stops the previous slot jail while retaining its ZFS dataset
+    and `/etc/jail.conf.d/` files for sub-second rollback (`rollback` simply
+    restarts the retained slot, health-checks it, flips Caddy, and stops the
+    replaced slot).
 
-The control plane may be offline while systemd keeps applications and Caddy
-serving their accepted releases. Reconciliation is conservative: operator review
-is required for unknown migrations, failed restoration, provider mutations whose
-action IDs were lost, and incomplete host activations. Inspect journals under
-`/var/lib/tc/runtime/operations` and provider action history before resolving such
-events. Do not delete lock rows to make a dashboard turn green.
+## Teardown and recovery
 
-## Managed host operations
+`destroy-app` removes the app's Caddy route and allowlist entry, stops and
+destroys both `blue`/`green` jail datasets and `/etc/jail.conf.d/` configs,
+removes `pf` and `rctl` entries, and deletes the Valkey session ACL user. By
+default (`purge_data: false`), the MariaDB database and persistent ZFS dataset
+(`zroot/tc/apps/<app>`) are retained for safe recovery; pass `purge_data: true`
+to drop the database/user and destroy the ZFS dataset permanently.
 
-The host-update operation prepares and builds the NixOS configuration inside the deployments module before activation. No separate preparation script is required. Installation administrators supply a nixos object in the server inventory:
-
-```json
-{"nixos":{"hostname":"web","system":"x86_64-linux","hardware_file":"/secure/web-hardware.nix"}}
-```
-
-The hardware file is **trusted local administrator code**, including boot/filesystem,
-networking and dedicated authorized SSH public keys. It must be self-contained
-(imports through pinned `modulesPath` are fine) and contain no secrets.
-For an existing host, include its existing `system.stateVersion`; the generated
-module supplies only a default and must not silently advance stateful service defaults.
-Do not reuse the control-plane hardware module for application targets. JSON
-inventory settings are imported with `builtins.fromJSON`; web input cannot inject
-Nix expressions. Configuration content determines the revision ID. The revision
-directory preserves the source modules, lock, hardware input, generated flake,
-inventory and built expected store path. The worker saves the prepared revision before activation and reuses it on retries. Existing frozen revisions may still be supplied explicitly. Hardware paths and Nix source come from installation-owned inventory, not request fields.
-
-```sh
-# POST to /deployments/host with a valid session and CSRF token; action=host-update:
-# {"server":"web"}
-# POST to /deployments/host; action=host-rollback:
-# {"server":"web","generation":"/nix/store/RETAINED-nixos-system-..."}
-```
-
-The backend reserves the remote host, roots its previous generation, then invokes
-the bundled pinned deploy-rs with strict SSH checking, activation rollback and
-connectivity confirmation. Success additionally requires the expected observed
-`/run/current-system`, sshd/proxy health and each active application's local health.
-Rollback accepts only a retained product root, activates it, and observes it before
-success. Desired revision, intended generation, previous generation, result and
-observed generation remain separate from app releases.
-
-Automatic GC is disabled on managed hosts; explicit roots protect prior
-generations. Do not remove roots while their releases/operations are retained.
-An SSH interruption does not prove deploy-rs stopped. A repeated activation with
-an existing reservation stays uncertain instead of racing it. If the original
-finishes, its terminal journal lets reconciliation observe success.
-
-If the worker was lost before recording a terminal result, stop **all** installation
-workers first, including detached/manual workers, and use:
-
-```sh
-# Use Recover host update on the Jobs page, or POST /deployments/host with action=host-reconcile:
-# {"operation":"HOST OPERATION ID","confirm_workers_stopped":true}
-```
-
-The backend refuses recovery while a remote activation process exists. It compares
-the current healthy generation with the reserved intended and previous generations:
-intended becomes succeeded; verified previous becomes failed/restored; anything else
-remains uncertain. Only a verified terminal result releases the database/host fence.
-Restart workers after reconciliation. The explicit confirmation is an operator
-assertion that no old worker can resume a delayed activation.
-
-Failed reboots can require provider rescue/console access. Activation rollback
-cannot undo application data, migrations, external APIs, firmware or disk layout
-changes. This PoC performs live configuration activation, not unattended reboot
-or OS conversion. A future backend must preserve those outcome distinctions.
+The control plane may be offline while FreeBSD jails and host Caddy continue
+serving accepted releases and persist across host reboots via `/etc/jail.conf.d/`
+and `exec.poststart` `rctl` rules. Reconciliation is conservative: operator
+review is required for uncertain migrations or failed route restoration. Inspect
+journals under `/var/db/tc/runtime/jobs/` before reconciling. Do not delete lock
+rows to make a dashboard turn green.

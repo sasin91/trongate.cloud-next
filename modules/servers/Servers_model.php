@@ -1,19 +1,22 @@
 <?php
+declare(strict_types=1);
+
 require_once APPPATH . 'modules/trongate_security/traits/Encrypted_credentials.php';
-require_once APPPATH . 'modules/jobs/traits/Job_queue.php';
+
 class Servers_model extends Model {
-    use Encrypted_credentials, Job_queue;
-    public function __construct(?string $module_name = null, PDO|Closure|null $connection = null) {
+    use Encrypted_credentials;
+
+    function __construct(?string $module_name = null, PDO|Closure|null $connection = null) {
         parent::__construct($module_name, $connection);
         $this->module('records');
     }
 
-
     function _resources(string $id, ?array $change = null): array {
         $server = $this->records->_get(['kind' => 'server', 'id' => Validate::id($id)]);
         if (empty($server['application_ready'])) {
-            throw new RuntimeException('Connect an application-ready server to view app resources.');
+            throw new RuntimeException('Connect an application-ready FreeBSD host to view app resources.');
         }
+
         $request = ['action' => 'resources'];
         if ($change !== null) {
             $app = Validate::id((string) ($change['app'] ?? ''));
@@ -26,36 +29,38 @@ class Servers_model extends Model {
             }
             $request = ['action' => 'resources-update', 'app' => $app, 'mode' => $mode];
             if ($mode === 'manual') {
-                $memory = Validate::number($change['memory_mb'] ?? '', 256, PHP_INT_MAX);
-                $cpu = filter_var($change['cpus'] ?? '', FILTER_VALIDATE_FLOAT);
-                if ($cpu === false || !is_finite($cpu) || $cpu < 0.05 || round($cpu, 2) !== $cpu) {
-                    throw new RuntimeException('CPU shares must be at least 0.05, with up to two decimal places.');
+                $memory = filter_var($change['memory_mb'] ?? '', FILTER_VALIDATE_INT);
+                if ($memory === false || $memory < 64) {
+                    throw new RuntimeException('Memory cap must be a whole number of at least 64 MiB.');
                 }
-                $request += ['memory_mb' => $memory, 'cpus' => $cpu];
+                $cpu_percent = filter_var($change['cpu_percent'] ?? '', FILTER_VALIDATE_INT);
+                if ($cpu_percent === false || $cpu_percent < 10 || $cpu_percent > 1600) {
+                    throw new RuntimeException('CPU cap must be a whole percentage between 10% and 1600%.');
+                }
+                $disk_quota = filter_var($change['disk_quota_mb'] ?? '', FILTER_VALIDATE_INT);
+                if ($disk_quota === false || $disk_quota < 128) {
+                    throw new RuntimeException('ZFS disk quota must be a whole number of at least 128 MiB.');
+                }
+                $request += [
+                    'memory_mb' => (int) $memory,
+                    'cpu_percent' => (int) $cpu_percent,
+                    'disk_quota_mb' => (int) $disk_quota,
+                ];
             }
         }
+
         $result = (new Ssh($this))->command($server, 'tc-runtime', self::_encode_json($request), 120);
         $data = json_decode($result['out'], true);
         if ($result['exit'] !== 0 || !is_array($data) || ($data['status'] ?? '') !== 'succeeded') {
             $error = ($data['status'] ?? '') === 'failed' ? ($data['error'] ?? null) : null;
-            throw new RuntimeException($error ?? 'Could not read or update resources. The server may be busy or need a runtime upgrade. Refresh and try again.');
+            throw new RuntimeException(
+                $error ?? 'Could not read or update resources. The server may be busy or need a tc-runtime upgrade. Refresh and try again.'
+            );
         }
+
         $data['server'] = $id;
         $data['host_address'] = $server['host'];
         return $data;
-    }
-
-    function _pending_connections(): array {
-        $this->module('proxmox');
-        $pending = [];
-        $jobs = $this->db->query_bind(
-            'SELECT id FROM jobs WHERE kind=? AND status<>? ORDER BY created DESC',
-            ['proxmox-provision', 'succeeded'], 'statement'
-        )->fetchAll();
-        foreach ($jobs as $job) {
-            $pending[] = $this->proxmox->model->_progress($job['id']);
-        }
-        return $pending;
     }
 
     private static function _encode_json(array $value): string {

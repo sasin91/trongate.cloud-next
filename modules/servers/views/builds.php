@@ -1,26 +1,33 @@
 <main class="panel">
     <p><a href="/servers">← Servers</a></p>
-    <h1>Build servers</h1>
+    <h1>Build jails &amp; servers</h1>
     <section class="card">
-        <h2>Build on your app server</h2>
-        <p>This is the default. Builds run as an unprivileged user, limited to 1 CPU and 1 GB of memory. Your live app keeps running. Images stay on the server.</p>
-        <p>Managed NixOS servers enable local builds through <code>services.trongate-runtime.localBuilds = true;</code>. Update older runtime installations, then recheck readiness on the Servers page.</p>
+        <h2>Ephemeral FreeBSD build jails</h2>
+        <p>By default, Git builds run directly on your FreeBSD application server inside short-lived, <code>rctl</code>-bounded build jails cloned from <code>zroot/tc/runtimes/builder@v1</code>.</p>
+        <p>Each build jail is capped at 1536 MiB RAM, 200% CPU, and a 2 GB ZFS quota with swap disabled. Your active Blue/Green app slot keeps serving traffic uninterrupted while Composer and optional Node/Bun build commands run.</p>
+        <p>Verified builds produce immutable ZFS release directories (<code>zroot/tc/apps/&lt;app&gt;/releases/&lt;op&gt;</code>) with a SHA-256 manifest digest, after checking the Git commit, guarding against symlink escapes, and verifying Trongate’s <code>public/index.php</code> and <code>config/config.php</code>. The ephemeral build jail is destroyed as soon as the build finishes.</p>
+        <p class="wz-hint">Provision or update the builder snapshot with <code>infra/scripts/build-runtime.sh</code>, then select <strong>Refresh capabilities</strong> on the Servers page.</p>
     </section>
     <section class="card">
-        <h2>Set up a dedicated builder</h2>
-        <p>Choose this when builds compete with your apps for resources. Use a separate NixOS server with the same CPU architecture as your application server.</p>
-        <ol>
-            <li><a href="/servers/create">Create a NixOS server on Proxmox</a>, or use a spare server. Review available capacity before creating it.</li>
-            <li>Apply the repository’s <code>nixosModules.builder</code> module. Enable <code>services.trongate-builder</code> and supply your SSH public key in <code>authorizedKeys</code>.</li>
-            <li>Configure a private registry and its push credentials for the build user. Set the registry and encrypted pull credential in this installation’s build settings.</li>
-            <li><a href="/servers/connect">Connect the builder</a> using SSH user <code>tc-builder</code>. Its readiness check verifies the build tools.</li>
-            <li>Choose “Dedicated build server” in app setup. We select a compatible builder with the shortest queue.</li>
-        </ol>
-        <p>Dedicated setup currently requires NixOS and registry configuration. <a href="https://github.com/sasin91/trongate.cloud-next/blob/main/docs/builds-and-monitoring.md">Setup instructions</a></p>
-    </section>
-    <section class="card"><h2>Connected builders</h2>
-    <?php $builders = array_filter($inventory['servers'], static fn($server) => !empty($server['builder_ready'])); ?>
-    <?php if (!$builders): ?><p>No dedicated builder connected yet.</p><?php endif ?>
-    <?php foreach ($builders as $server): ?><p><?= $e($server['id']) ?> · <?= $e($server['facts']['arch'] ?? '') ?></p><?php endforeach ?>
+        <h2>Build-ready FreeBSD hosts</h2>
+        <?php $builders = array_filter(
+            $inventory['servers'] ?? [],
+            static fn(array $server): bool => !empty($server['local_builder_ready']) || !empty($server['builder_ready'])
+        ); ?>
+        <?php if (!$builders): ?>
+        <p>No build-ready FreeBSD host connected yet. <a href="/servers/connect">Connect a FreeBSD host</a> or run <code>infra/scripts/build-runtime.sh</code> on an existing server.</p>
+        <?php else: ?>
+        <?php foreach ($builders as $server):
+            $facts = is_array($server['facts'] ?? null) ? $server['facts'] : [];
+            $mode = !empty($server['application_ready']) ? 'Local build jails' : 'Dedicated builder';
+        ?>
+        <p>
+            <strong><?= $e($server['id']) ?></strong> · <?= $e($mode) ?>
+            <?php if (!empty($facts['freebsd_version'])): ?> · FreeBSD <?= $e($facts['freebsd_version']) ?><?php endif ?>
+            <?php if (!empty($facts['arch'])): ?> (<?= $e($facts['arch']) ?>)<?php endif ?>
+            <?php if (!empty($facts['zfs_pool'])): ?> · ZFS <code><?= $e($facts['zfs_pool']) ?></code><?php endif ?>
+        </p>
+        <?php endforeach ?>
+        <?php endif ?>
     </section>
 </main>

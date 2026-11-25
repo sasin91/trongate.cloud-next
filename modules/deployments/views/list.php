@@ -1,1 +1,27 @@
-<section class="card"><h2>Deployments and operations</h2><?php if (!$jobs): ?><p>Your first deployment will appear here.</p><?php else: ?><div class="table-wrap"><table><thead><tr><th>Operation</th><th>App / resource</th><th>Status</th></tr></thead><tbody><?php foreach ($jobs as $op): ?><tr><td><a href="<?= $op['kind'] === 'proxmox-provision' ? '/servers/proxmox' : '/deployments' ?>?operation=<?= $e($op['id']) ?>"><?= $e($op['kind']) ?> · <?= $e(substr($op['id'],0,8)) ?></a></td><td><?= $e($op['resource']) ?></td><td><span class="status" data-status="<?= $e($op['status']) ?>"><?= $e($op['status']) ?></span></td></tr><?php endforeach ?></tbody></table></div><?php endif ?></section>
+<section class="card">
+    <h2>Deployments and operations</h2>
+    <?php if (!$jobs): ?>
+        <p>Your first deployment will appear here.</p>
+    <?php else: ?>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Operation</th>
+                        <th>App / resource</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($jobs as $op): ?>
+                    <tr>
+                        <td><a href="/deployments?operation=<?= $e($op['id']) ?>"><?= $e($op['kind']) ?> · <?= $e(substr($op['id'], 0, 8)) ?></a></td>
+                        <td><?= $e($op['resource']) ?></td>
+                        <td><span class="status" data-status="<?= $e($op['status']) ?>"><?= $e($op['status']) ?></span></td>
+                    </tr>
+                <?php endforeach ?>
+                </tbody>
+            </table>
+        </div>
+    <?php endif ?>
+</section>

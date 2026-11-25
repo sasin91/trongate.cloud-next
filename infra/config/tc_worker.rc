@@ -1,0 +1,25 @@
+#!/bin/sh
+# PROVIDE: tc_worker
+# REQUIRE: tc_panel_fpm
+# KEYWORD: shutdown
+. /etc/rc.subr
+name="tc_worker"
+rcvar="tc_worker_enable"
+pidfile="/var/run/tc_worker.pid"
+start_cmd="tc_worker_start"
+
+tc_worker_start() {
+    if [ ! -f /app/modules/jobs/worker.php ]; then
+        echo "tc_worker: /app/modules/jobs/worker.php not deployed yet; skipping."
+        return 0
+    fi
+    set -a
+    [ -f /var/db/tc/panel/db.env ] && . /var/db/tc/panel/db.env
+    set +a
+    export PHP_INI_SCAN_DIR="/usr/local/etc/php-base:/etc/tc/php.d"
+    export TC_STATE="/var/db/tc/panel"
+    /usr/sbin/daemon -f -r -P "$pidfile" -u www /usr/local/bin/php /app/modules/jobs/worker.php
+}
+
+load_rc_config "$name"
+run_rc_command "$1"

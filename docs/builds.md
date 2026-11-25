@@ -1,112 +1,109 @@
-# Public GitHub to OCI
+# Git Builds in Ephemeral FreeBSD Jails
 
-The first Git flow is a public GitHub repository and an exact 40-character commit.
-Resolve a branch to a reviewed SHA with Git/GitHub, then pass that SHA. Private
-GitHub App OAuth, webhooks, branch-head reconciliation and the old Kubernetes
-configuration editor are not ported. The original Build_commands generator and
-its tests are reused, including encoded custom commands and Node/Bun build stages.
+Application builds run directly on the target FreeBSD host inside ephemeral,
+`rctl(8)`- and `pf`-bounded FreeBSD build jails managed by
+`infra/runtime/builder.php` (invoked through `tc-runtime` with
+`{"action":"build",...}`). No OCI images, Dockerfiles, container engines, or
+external image registries are used.
 
-Use a separate, disposable builder VM with no route/credentials to the control
-plane database and no fleet/provider secrets. Enable rootless Podman with working
-user namespaces/cgroup delegation, git, PHP 8.4 and sufficient disk space. Install:
+## Build flow
 
-```sh
-nix profile install /opt/trongate-cloud-next#builder
-```
+1. **Commit resolution**: The `Apps` module resolves a public GitHub branch or
+   tag to an immutable 40-character commit SHA via the GitHub API and queues a
+   `build` job.
+2. **Admission & locking**: `tc-runtime` acquires a non-blocking `flock` on
+   `/var/db/tc/runtime/build.lock` and checks for at least 2 GiB free space
+   before writing a `running` journal. Repeating a succeeded operation ID
+   returns its recorded result idempotently.
+3. **Ephemeral build jail**: `Builder` clones `zroot/tc/skeleton@v1` with
+   `quota=2G` into a throwaway jail dataset, mounts the read-only FreeBSD base
+   (`zroot/tc/bases/<ver>` at `/.base`), read-only builder runtime
+   (`zroot/tc/runtimes/builder` at `/usr/local`), and a clean workspace (`/app`).
+   The build jail runs on dedicated `lo1` IP `10.99.254.1/32` inside `pf`
+   `<tc_jails>` and is bounded by `rctl(8)` hard caps:
+   - `memoryuse:deny=1536M`
+   - `swapuse:deny=1536M`
+   - `pcpu:deny=200` (2 CPU cores)
+   - `maxproc:deny=256`
+   - `openfiles:deny=2048`
+   - 30-minute subprocess timeout
+   The build jail has no access to application secrets, `/var/db/tc/runtime`,
+   MariaDB/Valkey sockets, SSH keys, or other apps' datasets, and is always
+   stopped and ZFS-destroyed in `finally`.
+4. **Shallow fetch & source verification**: Inside the workspace, Git performs
+   a shallow fetch (`--depth=1`, `-c protocol.file.allow=never`) and verifies
+   `git rev-parse HEAD` matches the exact requested 40-hex commit. Before and
+   after running build commands, `Builder` verifies:
+   - No symlinks escape the repository root.
+   - Required Trongate entry points `public/index.php` and `config/config.php`
+     exist.
+5. **Composer & optional Node/Bun commands**: `jexec` runs `composer install`
+   (when `composer.json` is present) and any base64-encoded user
+   `Build_commands` strictly inside the build jail, with
+   `PHP_INI_SCAN_DIR=/usr/local/etc/php-base:/etc/tc/php.d` loading only the
+   requested curated optional PHP extensions.
+6. **Immutable ZFS release**: The built tree (excluding `.git`) is staged into
+   an immutable ZFS release directory (`zroot/tc/apps/<app>/releases/<op>`) and
+   hashed into a deterministic SHA-256 manifest digest (`sha256:<64hex>`).
 
-Make `tc-build` available in the dedicated builder SSH user's noninteractive PATH.
-Enable its systemd user manager (for example `loginctl enable-linger BUILDER_USER`)
-and cgroup delegation; build commands run in a bounded user scope. Rootless Podman
-still needs its ordinary in-namespace build capabilities to install PHP extensions.
-Configure registry credentials on that builder with `podman login REGISTRY` as
-the builder user; use credentials scoped to pushing its application repositories.
-They stay outside the source/build context. Do not mount a container-engine socket,
-installation state or host credentials into customer build containers.
+## Shared PHP 8.4 runtime and curated optional extensions
 
-Enroll the builder using the same two-phase SSH identity flow. Its application
-readiness may be false; that is expected for an unprivileged build-only machine.
-The web wizard automatically selects an inspected, unprivileged builder with
-`tc-build`, working Podman and a systemd user manager. It matches the application's
-CPU architecture, excludes the application host and hosts already assigned apps,
-and prefers the shortest build queue. Reinspect existing builders to record these
-capabilities. Configure `services.trongate-cloud.buildRegistry` (or
-`TC_BUILD_REGISTRY`) with a registry/namespace such as `registry.example.com/apps`.
-The wizard generates a distinct image tag per launch; registry authentication
-stays on the builder. Image pulls must also be accessible to application hosts.
-No extra VMs or registry accounts are created by automatic selection.
+`infra/scripts/build-runtime.sh` builds a single read-only PHP 8.4 runtime dataset
+(`zroot/tc/runtimes/php84@v1`) mounted into every app and build jail via
+`nullfs`:
+
+- **Core Trongate extensions** live in `/usr/local/etc/php-base` and are always
+  loaded.
+- **Curated optional extensions** (`.so` files pre-installed in the shared
+  runtime but NOT enabled globally):
+  `imagick`, `soap`, `gmp`, `pdo_pgsql`, `pgsql`, `ldap`, `sockets`, `xsl`,
+  `calendar`, `imap`, `pcntl`, `shmop`, `sysvsem`, `ftp`.
+- Each jail sets `PHP_INI_SCAN_DIR=/usr/local/etc/php-base:/etc/tc/php.d` and
+  writes only its requested optional extensions into
+  `/etc/tc/php.d/extensions.ini`.
+
+## Release configuration and secrets
+
+Releases carry immutable specifications validated by `Validate::release()`:
 
 ```json
 {
-  "builder":"builder-one",
-  "repository":"owner/public-trongate-app",
-  "commit":"0123456789012345678901234567890123456789",
-  "base":"registry.example.com/trongate-base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "tag":"registry.example.com/demo:reviewed-build",
-  "extensions":["intl"],
-  "commands":"npm ci\nnpm run build"
+  "artifact": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "domain": "demo.example.com",
+  "health": "/",
+  "config_version": "v1",
+  "php_version": "8.4",
+  "extensions": ["imagick"],
+  "database": true,
+  "memory_mb": 128,
+  "cpu_percent": 100,
+  "disk_quota_mb": 1024,
+  "secrets": {},
+  "file_secrets": {
+    "/app/config/config.php": "demo-config"
+  },
+  "mounts": {
+    "uploads": "/app/public/uploads"
+  },
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "migration": [],
+  "schema_compatible": true
 }
 ```
 
-Use the app wizard to build and deploy. The Apps module queues the build and hands its image digest to Deployments. Follow progress on the Jobs page.
+- If `/app/config/config.php` is not explicitly overridden in `file_secrets`,
+  `tc-runtime` patches only `BASE_URL` and `ENV` in the release's existing
+  `config/config.php` via PHP tokenization, preserving all custom user
+  `define()` constants and routing defaults.
+- If `database` is `true` and `/app/config/database.php` is not overridden in
+  `file_secrets`, `tc-runtime` renders `/app/config/database.php` pointing at
+  the app's provisioned MariaDB database over `/var/run/tc/mariadb/mysqld.sock`.
+- `file_secrets` are decrypted only at deploy time, materialized `0440` inside
+  the release overlay directory, and mounted read-only into `/app/config` via
+  `nullfs`.
+- `secrets` map uppercase environment variable names to encrypted credential IDs
+  injected into the jail's `0600` `php-fpm.conf` (`clear_env = yes`).
 
-Leave `base` blank to use the pinned FrankenPHP 1.12 / PHP 8.4 Debian image.
-The generated build adds Composer and common Trongate PHP extensions and listens
-on the selected container port (8080 by default). Advanced users can supply their
-own digest-pinned base image. Application output still needs your registry.
-The default upstream image and Composer digests were resolved on 2026-11-19.
-See https://frankenphp.dev/docs/docker/ for the upstream image conventions. Build source must
-contain `public/index.php` and `config/config.php`. Escaping source symlinks are
-rejected. Composer install and custom commands run inside rootless build containers
-limited to 2 GiB, two CPU cores and 512 PIDs; subprocesses have a 30-minute limit.
-Dedicated builder VM disk quota/firewall enforce total storage/network boundaries.
-The VM must not host trusted workloads: containers are not a hostile-code VM boundary.
-
-A repository Dockerfile is ignored; an application Caddyfile is preserved. The
-published registry digest, not the mutable tag, is the deployment artifact.
-App config is preserved in the image unless overridden by release `file_secrets`:
-
-```json
-"file_secrets": {
-  "/app/config/config.php":"demo-config",
-  "/app/config/database.php":"demo-database"
-}
-```
-
-Create those credentials from complete valid PHP configuration files. They are
-encrypted in SQL, materialized only on the target in 0600 release files, and
-mounted read-only. They never enter the image or Nix store. Environment `secrets`
-map environment names to credential IDs; multiline values require a file secret.
-Use new credential IDs and a new `config_version` when changing application
-configuration. A retained deployed release keeps its original materialized files;
-redeploying a specification resolves its referenced credential IDs at execution time.
-For private images, `registry_secret` refers to an encrypted Podman auth.json;
-the target uses a temporary auth file only during pull and removes it afterwards.
-
-Customer output is not logged because build/migration output can echo secrets.
-Operation steps, exit outcomes and digests are retained; inspect builder-local
-tools privately for deeper diagnostics. A builder interruption is uncertain until
-its locked, per-operation result is observed. Container resource limits do not
-bound Git repository size; impose disk quotas and network policy on the builder VM.
-
-## Dedicated NixOS builder
-
-Import `nixosModules.builder`, enable `services.trongate-builder`, and set its
-`authorizedKeys` to a dedicated enrollment public key. The `tc-builder` user has
-rootless Podman, a persistent systemd user manager, and no administrative groups.
-The build account is limited to 3 GiB; individual build scopes remain limited to
-2 GiB, two CPU cores, and 512 tasks.
-
-Optionally set `registryDomain` to host a private OCI registry on the same machine.
-Point DNS at the builder before requesting HTTPS. Install a bcrypt htpasswd file
-at `registryPasswordFile`, owned by root and readable by the docker-registry group.
-Registry storage and authentication files are not writable by the build user.
-Place the builder's registry auth JSON at
-`/home/tc-builder/.config/containers/auth.json` with mode 0600. Keep all credentials
-out of Nix expressions and Git. The registry listens only on loopback behind Caddy.
-
-Store application pull authentication as an encrypted credential in the control
-plane and set `services.trongate-cloud.buildRegistrySecret` to that credential ID.
-Only this registry credential is passed to application deployments, never the
-builder's SSH key or provider credentials. Set `buildRegistry` to the registry
-hostname and image namespace, then enroll the host as `tc-builder` and inspect it.
-No application containers run on this host.
+Customer build output is not logged in the panel database because build scripts
+can echo secrets. Operation steps, exit status, release path, commit, and
+manifest digest are recorded in the job journal.

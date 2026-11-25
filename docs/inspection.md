@@ -1,4 +1,9 @@
-> Historical record: this describes earlier work. The product now provisions only Proxmox/NixOS; old provider commands and image builders have been removed. See README.md and proxmox.md for current workflows.
+> Historical record: this describes the initial repository inspection from
+> 2026-11-17 before the infrastructure was replaced with bare-metal FreeBSD,
+> ZFS, vanilla `jail(8)`, `rctl(8)`, `pf`, host Caddy, and shared MariaDB/Valkey
+> platform jails. See [README.md](../README.md),
+> [architecture.md](architecture.md), and [infra/README.md](../infra/README.md)
+> for the current architecture.
 
 # Existing project inspection
 
@@ -6,40 +11,29 @@ Inspected 2026-11-17, before implementation:
 
 | Repository | Inspected commit | Evidence |
 |---|---|---|
-| `sasin91/trongate.cloud` | `715699cf6c314cdf26e994413316992e381eae7f` | Cloned to a separate local checkout; inspected engine, encryption, deployment worker/task, build generator, image Dockerfile/Caddyfile, tests and `docs/agents.md` |
-| `sasin91/trongate-cloud-infra` | `666b88d2deab3d322309e4a00bead723eb537f6b` | Existing clean checkout; inspected license, deployment declarations, checks and `TRONGATE-CLOUD.md` |
+| `sasin91/trongate.cloud` | `715699cf6c314cdf26e994413316992e381eae7f` | Cloned to a separate local checkout; inspected engine, encryption, deployment worker/task, build generator, UI design docs, tests, and `docs/agents.md` |
+| `sasin91/trongate-cloud-infra` | `666b88d2deab3d322309e4a00bead723eb537f6b` | Existing clean checkout; inspected license and platform design notes |
 
-The local `platform.trongate.cloud` directory instead points at
-`sasin91/hcloud-k3s-platform-kit`. It was not treated as the application source.
-No unrelated checkout was modified. No next-generation implementation existed.
+## Reused vs replaced
 
-Source behavior: the existing worker uses PDO, task scripts, stale thresholds,
-GitHub source resolution, generated Dockerfiles, isolated BuildKit work and
-Kubernetes manifests. It tracks application config files, deployment steps,
-backups and health. Its deployment task and backup orchestration depend on the
-old Kubernetes storage/secrets/runtime model, so copying the whole worker would
-retain the wrong target semantics.
+- **Preserved from `~/Herd/trongate.cloud`**: Trongate dispatcher/base
+  controller, framework-independent `Encryptor`, `Build_commands` and its ten
+  behavior tests, guided app-creation wizard, calm Mint/Trongate UI design, and
+  core product scope (DeployHQ-style code deployments and managed PHP hosting).
+- **Replaced infrastructure**: The original Kubernetes/container/FrankenPHP
+  layer and intermediate Linux PoC experiments were replaced completely with
+  bare-metal FreeBSD (14.3+/15.x), ZFS, vanilla `jail(8)` under
+  `/etc/jail.conf.d/`, read-only `nullfs` base and PHP 8.4 runtime mounts,
+  `rctl(8)` hard caps, non-VNET `pf` isolation on `lo1` (`10.99.0.0/16`),
+  shared `tc_mariadb` and `tc_valkey` platform jails, host Caddy with
+  automatic HTTPS, and pinned Ed25519 SSH forced-command `doas`
+  `tc-runtime` protocol v2.
+- **Queue & recovery model**: The small PDO worker retains the straightforward
+  task-processing approach while adding sticky `server:<id>` resource locks,
+  worker lease fencing, and host-side `flock` + `fsync` journals.
 
-Reused directly: Trongate dispatcher/base controller, framework-independent
-Encryptor, Build_commands and its ten behavior tests. The small PDO worker
-retains the existing straightforward task-processing approach while introducing
-sticky resource locks, worker fencing and remote journals. Local admin auth is
-implemented separately because the original customer/GitHub/token/Valkey setup
-does not provide a standalone installation bootstrap.
+## License review
 
-The old application base uses FrankenPHP in classic mode with PORT=8080, app files
-in `/app`, public files in `/app/public`, PHP extensions and Composer inside the
-image. That OCI contract is preserved. Its trusted-proxy subnet assumes k3s;
-operators must replace that configuration when forwarded client addresses matter
-on a Podman host. The outer proxy is Caddy, with loopback-only candidate ports.
-
-Declared infrastructure: the infra checkout contains Hetzner/Kubernetes/Flux and
-Traefik configuration. Its narrative says it had not been applied when written.
-Neither that statement nor old capacity/pricing notes establish today's runtime
-state. No existing production cluster, server, credential or provider account
-was contacted during inspection.
-
-License review: `composer.json` marks the application proprietary; `license.txt`
-carries the upstream Trongate MIT notice. The new repository remains private and
-proprietary, with source provenance and the upstream notice preserved. The infra
-repository is MIT (2026 sasin91); no operational cluster manifests were copied.
+`composer.json` marks the application proprietary; `engine/LICENSE.txt` carries
+the upstream Trongate MIT notice. This repository preserves source provenance
+and the upstream Trongate MIT notice.

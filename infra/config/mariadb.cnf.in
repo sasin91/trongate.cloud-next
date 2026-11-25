@@ -1,0 +1,20 @@
+[mysqld]
+skip-networking = 1
+socket = /var/run/tc/mariadb/mysqld.sock
+datadir = /var/db/mysql
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+# InnoDB tuned for ZFS recordsize=16K
+innodb_buffer_pool_size = @INNODB_POOL_MB@M
+innodb_file_per_table = 1
+innodb_flush_log_at_trx_commit = 1
+innodb_use_native_aio = 0
+
+# Per-tenant safety limits
+max_connections = 300
+max_user_connections = 20
+max_statement_time = 30
+
+[client]
+socket = /var/run/tc/mariadb/mysqld.sock

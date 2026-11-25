@@ -13,7 +13,7 @@
         <p>Set these records for <strong><?= $e($live['domain']) ?></strong> at your DNS provider. Remove old A and AAAA records for this hostname. There is no deadline.</p>
         <table><thead><tr><th>Type</th><th>Value</th></tr></thead><tbody><?php foreach ($live['records'] as $record): ?><tr><td><?= $e($record['type']) ?></td><td><code><?= $e($record['value']) ?></code></td></tr><?php endforeach ?></tbody></table>
         <form method="post" action="/deployments/live" mx-post="/deployments/live" mx-target="#deployment-content" mx-select="#deployment-content" mx-swap="outerHTML" mx-after-swap="timelineRefresh" mx-on-error="#mx-error-trigger" mx-on-timeout="panelMxTimeout"><?= $csrf() ?><input type="hidden" name="operation" value="<?= $e($live['operation']) ?>"><button class="wz-ok">Check DNS and go live</button></form>
-        <p class="wz-hint">We’ll verify DNS and HTTPS before marking your app live. You can leave this page and return later.</p>
+        <p class="wz-hint">We’ll verify DNS and Caddy HTTPS before marking your app live. You can leave this page and return later.</p>
     </section>
     <?php endif ?>
     <?php if ($timeline['problem']): ?><section class="card" role="alert"><h2><?= $e($timeline['problem']['title']) ?></h2><ul><?php foreach ($timeline['problem']['suggestions'] as $suggestion): ?><li><?= $e($suggestion) ?></li><?php endforeach ?></ul></section><?php endif ?>

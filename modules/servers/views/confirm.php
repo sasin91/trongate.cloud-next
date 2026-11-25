@@ -1,8 +1,22 @@
-<div class="wz-wrap"><main class="wz-main"><div class="wz-stage"><div class="wz-q"><h1>Connect your server.</h1><p>We’ll connect over SSH and check that the server is ready to run your apps.</p></div>
-<?php if ($page==='confirm-server' && isset($_SESSION['enrollment'])): $pending=$_SESSION['enrollment']; ?>
+<div class="wz-wrap"><main class="wz-main"><div class="wz-stage"><div class="wz-q"><h1>Connect your FreeBSD server.</h1><p>We’ll connect over pinned Ed25519 SSH and verify FreeBSD, ZFS, jails, rctl, pf, Caddy, MariaDB, and Valkey via <code>tc-runtime</code>.</p></div>
+<?php if ($page === 'confirm-server' && isset($_SESSION['enrollment'])): $pending = $_SESSION['enrollment']; ?>
 <p>Server: <strong><?= $e($pending['host']) ?></strong></p>
-<p>Finish connecting to check whether this server is ready for your apps.</p>
+<?php if (!empty($pending['fingerprint'])): ?><p class="wz-hint">Ed25519 fingerprint: <code><?= $e($pending['fingerprint']) ?></code></p><?php endif ?>
+<p>Finish connecting to check whether this FreeBSD host is ready for your apps.</p>
 <form method="post"><?= $csrf() ?><input type="hidden" name="command" value="confirm-server"><button class="wz-ok">Finish connecting</button></form>
 <p><a href="/servers/connect">Edit SSH connection details</a></p>
 <?php else: ?>
-<p class="wz-hint">Install the application runtime before connecting. <a href="https://github.com/sasin91/trongate.cloud-next/blob/main/docs/self-hosting.md#prepared-linux-target" target="_blank" rel="noreferrer">Server preparation instructions</a></p><form method="post" action="/servers/connect"><?= $csrf() ?><input type="hidden" name="command" value="connect-server"><?php $field('id','Server name (lowercase, hyphens)','web'); $field('host','IP address or hostname'); $field('port','SSH port',22,'number'); $field('user','SSH user','root'); ?><label class="wz-field"><span class="wz-label">SSH private key</span><textarea class="wz-in mono" name="private_key" rows="5" required autocomplete="off" spellcheck="false"></textarea><span class="wz-hint">Stored encrypted. The server’s SSH key is saved automatically on first connection.</span></label><button class="wz-ok">Connect server</button></form><?php endif ?></div></main></div>
+<p class="wz-hint">Prepare your bare-metal FreeBSD host with the <code>infra/scripts/</code> bootstrap scripts before connecting. SSH uses the non-root <code>tc-agent</code> account with a forced-command <code>doas /usr/local/libexec/tc-runtime</code> entry.</p>
+<form method="post" action="/servers/connect">
+    <?= $csrf() ?>
+    <input type="hidden" name="command" value="connect-server">
+    <?php
+        $field('id', 'Server name (lowercase, hyphens)', 'freebsd-1');
+        $field('host', 'IP address or hostname');
+        $field('port', 'SSH port', 22, 'number');
+        $field('user', 'SSH user', 'tc-agent');
+    ?>
+    <label class="wz-field"><span class="wz-label">SSH private key</span><textarea class="wz-in mono" name="private_key" rows="5" required autocomplete="off" spellcheck="false"></textarea><span class="wz-hint">Stored encrypted. The server’s Ed25519 SSH host key is pinned automatically on first connection.</span></label>
+    <button class="wz-ok">Connect server</button>
+</form>
+<?php endif ?></div></main></div>

@@ -1,80 +1,91 @@
 # Application resource allocation
 
-The application host is authoritative. `/servers/details?server=web` reads live
-container usage and limits, and offers automatic or manual allocation per app.
-Every edit and deployment admission runs under the runtime's host operation lock.
-The control plane does not calculate limits from stale monitoring samples.
+The FreeBSD application host is authoritative. `/servers/details?server=<id>`
+reads live `rctl(8)` usage, `rctl(8)` hard limits, ZFS dataset usage/quotas, and
+ARC-aware host memory via `tc-runtime` (`{"action":"resources"}`), and offers
+automatic or manual allocation per app (`{"action":"resources-update",...}`).
+Every edit and deployment admission runs under `/var/db/tc/runtime/operation.lock`.
+The control plane never calculates limits from stale monitoring samples.
 
-## Budget
+## ARC-aware host budget and overcommit
 
-Subtract system, database and local-build reserves from physical capacity. Reserve
-two copies of each manual app's allocation, then divide the remainder by twice
-the number of automatic apps. Memory rounds down to whole MiB; CPU shares round
-down to hundredths. Minimum per version: 256 MiB and 0.05 CPU shares. An allocation
-that cannot satisfy those minimums is rejected rather than overcommitted.
+FreeBSD caches ZFS blocks aggressively in the Adaptive Replacement Cache (ARC),
+so raw "free" memory understates available capacity. `Resources::host()`
+(`infra/runtime/resources.php`) computes host available memory as:
 
-Defaults in `nix/runtime.nix`:
+```text
+available_mb = free + inactive + laundry + reclaimable_arc
+reclaimable_arc = max(0, kstat.zfs.misc.arcstats.size - kstat.zfs.misc.arcstats.c_min)
+```
 
-| Reserve | Memory | CPU budgeting units |
-| --- | ---: | ---: |
-| OS and proxy | 512 MiB | 0.25 |
-| Application databases | 512 MiB | 0.25 |
-| Local builder, if enabled | 1536 MiB | 1 |
+System and platform-jail reserves are read from `/etc/tc-resources.json` (auto-
+scaled by `infra/scripts/bootstrap.sh` on hosts under 32 GiB RAM):
 
-System/database memory reserves are configurable Nix options. The database reserve
-is a capacity allowance, not automatic database provisioning or a database cgroup
-limit. Operators must size it for the databases actually installed. Disabling local
-builds frees its reserve; merely selecting a dedicated builder for one app does not.
+| Reserve | 32 GiB+ default | Purpose |
+| --- | ---: | --- |
+| `system_memory_mb` | 2048 MiB | FreeBSD kernel, host Caddy, `tc_panel` |
+| `database_memory_mb` | 2048 MiB | Shared `tc_mariadb` jail |
+| `valkey_memory_mb` | 512 MiB | Shared `tc_valkey` session jail |
+| `build_memory_mb` | 1536 MiB | Ephemeral FreeBSD build jail headroom |
+| `memory_overcommit_ratio` | 3.0 | Effective budget multiplier for `php-fpm` `pm = ondemand` jails |
 
-Memory is a per-container hard limit. CPU values determine proportional weights
-(`cpu-shares = allocation * 1024`), not guaranteed or capped core counts. Containers
-can use spare CPU. Existing containers receive a quota equal to the physical host
-CPU count when updated: the installed Podman silently ignores attempts to reset a
-quota using zero or minus one. This permits full-host bursting; new containers are
-created without a quota. CPU shares are not reserved physical cores.
+With a single steady-state running jail per app (`pm = ondemand`) and standby
+blue/green spin-up only during deploys, a 32 GiB bare-metal FreeBSD host
+supports 100–250+ low-traffic Trongate applications:
 
-The grid separates measured usage, currently enforced limits and the proposed
-automatic allocation. Existing 256-MiB containers are not silently changed by
-opening the page; Apply or the next deployment adopts the current policy.
+- Base app memory budget:
+  `memory_budget_mb = max(0, physical_mb - system - database - valkey - build)`
+- Effective overcommit budget:
+  `effective_memory_budget_mb = floor(memory_budget_mb * memory_overcommit_ratio)`
+- Manual apps reserve their configured `memory_mb` (plus standby overlap for the
+  largest deployable slot). Automatic apps share the remaining effective budget
+  evenly, clamped between `MIN_MEMORY = 64` MiB and `MAX_AUTO_MEMORY = 512` MiB
+  (default `128` MiB).
 
-## Deployment and recovery
+## Enforced limits per jail
 
-Active, staged and otherwise still-running managed releases count toward admission.
-An app cannot start a third simultaneous version. Retained stopped rollback
-containers also receive new limits so rollback cannot revive obsolete allocations.
-Podman reports a stopped container's last runtime spec until it starts again;
-updates are persisted for the next start. The real-container regression test
-checks those settings after stop/update/start, including kernel-enforced limits.
-An interrupted creation is counted even if its release metadata was not written
-yet. A removed historical container does not make resource inspection fail.
-Pending apps with no running container receive their share when deployment starts.
-Failed first deployments leave no durable app reservation once their containers
-are stopped; the next allocation recalculates the remaining apps' shares.
+Each application jail is bounded by `rctl(8)` hard caps (persisted in
+`/etc/jail.conf.d/tc_<app>_<slot>.conf` via `exec.poststart` and updated live
+with `rctl -a`) plus a ZFS dataset quota on `zroot/tc/apps/<app>`:
 
-Before any edits, all memory reductions are checked against current cgroup usage.
-A reduction must leave 25% plus 32 MiB above measured usage. The check repeats
-immediately before each reduction. This is a point-in-time guard, not a guarantee
-against subsequent application memory spikes. Such spikes remain subject to the
-app's memory limit. Host available memory must also cover the running containers'
-remaining allowance, any starting candidate, and 128 MiB headroom.
+| Limit | Default | Allowed range | Enforcement |
+| --- | ---: | --- | --- |
+| Memory (`memoryuse`) | 128 MiB | 64–32768 MiB | `rctl -a jail:<name>:memoryuse:deny=<N>M` |
+| Swap (`swapuse`) | `memoryuse` | `memoryuse` | `rctl -a jail:<name>:swapuse:deny=<N>M` |
+| CPU (`pcpu`) | 100% | 10–1600% | `rctl -a jail:<name>:pcpu:deny=<N>` |
+| Processes (`maxproc`) | 64 | 64 | `rctl -a jail:<name>:maxproc:deny=64` |
+| Open files (`openfiles`) | 1024 | 1024 | `rctl -a jail:<name>:openfiles:deny=1024` |
+| Disk quota | 1024 MiB | 128–1048576 MiB | `zfs set quota=<N>M zroot/tc/apps/<app>` |
 
-Reductions run before increases. A durable `resources-pending.json` records original
-limits and policies before the first Podman mutation. Failed changes restore those
-limits. After interruption, the next mutation restores them before proceeding.
-Recovery refuses to shrink a container if its usage has since grown too high;
-the journal remains and further allocations block until usage falls/operator
-reconciliation. Successful policy writes are persisted in `resources.json` on the
-host. The grid reports interrupted updates and never invents successful limits.
+Platform jails (`tc_mariadb`, `tc_valkey`, `tc_panel`) and ephemeral build jails
+(`tc_build_*`) are excluded from customer app allocation and carry their own
+dedicated `rctl` rules configured by `infra/scripts/platform-jails.sh` and
+`infra/runtime/builder.php`.
 
-The database and build reserves are not doubled: only application versions overlap.
-Disk space is not divided using this formula. Builds retain their existing disk
-preflight and cache cleanup; persistent storage quotas are a separate feature.
+## Admission, live-use guards, and recovery
+
+- **Live shrink guard**: Before reducing a running jail's `memoryuse` cap,
+  `Resources` checks `rctl -u jail:<name>` and requires at least **25% + 16 MiB**
+  of headroom above measured resident memory. The check repeats immediately
+  before each reduction.
+- **Host pressure guard**: When starting a standby candidate jail or applying
+  resource edits, host ARC-aware `available_mb` must retain at least **256 MiB**
+  (`AVAILABLE_HEADROOM_MB`) of real headroom.
+- **Standby & retained slot consistency**: Updating an app's limits updates its
+  live jail via `rctl -a`, rewrites `/etc/jail.conf.d/` so stopped rollback
+  slots and host reboots inherit the new caps, and applies `zfs set quota` on
+  `zroot/tc/apps/<app>`.
+- **Partial-failure rollback (`resources-pending.json`)**: Reductions run before
+  increases. Before the first `rctl`/`zfs` mutation, `Resources` writes original
+  limits and policies to `/var/db/tc/runtime/resources-pending.json`. If a
+  mutation fails or is interrupted, the next call restores prior limits before
+  proceeding (refusing to shrink a jail whose live usage has grown past the safe
+  threshold until usage drops or an operator reconciles). Successful policies
+  persist in `/var/db/tc/runtime/resources.json`.
 
 ## Verification
 
-`tests/resources_test.php` covers two-slot arithmetic, manual/automatic mixing,
-boundary rejection, live-use guards, retained rollback containers, partial failures
-and interrupted-update recovery. `php tests/resource_podman.php LOCAL_IMAGE_ID` explicitly
-tests disposable real containers, including the effective kernel memory and CPU
-limits. It never uses the live runtime directory. The NixOS VM test also exercises
-resources through the runtime alongside deploy/rollback.
+`infra/runtime/tests/resources_and_metrics.phpt` covers ARC-aware host budgeting, 100/250-app 32 GiB
+overcommit math, manual/automatic mixing, boundary rejection, `25% + 16 MiB`
+shrink guards, `256 MiB` host headroom checks, `rctl`/`zfs` mutation sequences,
+platform-jail exclusion, and `resources-pending.json` partial-failure recovery.

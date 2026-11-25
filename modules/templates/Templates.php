@@ -13,7 +13,6 @@ class Templates extends Trongate {
         $_SESSION['csrf_token'] ??= bin2hex(random_bytes(32));
         $data+=['page'=>$page,'operation'=>null,'signedIn'=>true,'message'=>null,'deleting_server'=>null,'timeline'=>null,'resource_details'=>null,'resources_saved'=>false,
             'inventory'=>['servers' => Modules::run('records/_all', 'server'), 'apps' => Modules::run('records/_all', 'app'), 'releases' => Modules::run('records/_all', 'release')],'jobs'=>$this->jobs->model->_recent()];
-        $data['pending_servers'] = $this->servers->model->_pending_connections();
         $data['view_module']=$module; $data['view_file']=$view;
         // view_module selects a view in Trongate::view; the shell itself belongs here.
         $data['content_module']=$module; unset($data['view_module']);

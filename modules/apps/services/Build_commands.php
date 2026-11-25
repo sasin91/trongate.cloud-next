@@ -1,46 +1,48 @@
 <?php
+declare(strict_types=1);
 
 /**
- * An app's build commands (app_runtime.build_commands): shell lines the deploy runs
- * in the image build, after composer and the app's files are in /app, such
- * as `npm ci` and `npm run build`. They run in a build stage that has Node
- * or Bun when the commands name them; the app image takes only /app from
- * it, so the tools never ship (see dockerfile()).
+ * An app's build commands: shell lines executed inside the ephemeral FreeBSD
+ * build jail after Composer install (e.g. `npm ci` and `npm run build`).
  *
- * suggest() reads the repository's root files while an app is created and
+ * suggest() inspects a repository's root files while an app is created and
  * prefills the commands for the package manager its lockfile names, plus
- * the PHP extensions composer.json requires (ext-*, what `pie install`
- * would install) that the base image lacks.
+ * PHP extensions composer.json requires (ext-*) that the shared PHP runtime
+ * does not enable globally.
  *
  * Framework-free: the panel and the worker both load it.
  */
 final class Build_commands {
-
     const MAX_BYTES = 4000;
     const MAX_LINES = 40;
     const MAX_LINE_BYTES = 500;
 
-    /** Where the build stage copies Node and Bun from */
-    const NODE_IMAGE = 'node:24-bookworm-slim';
-    const BUN_IMAGE = 'oven/bun:1-debian';
-
-    /** Words in the commands that need Node (pnpm and yarn come from corepack) */
+    /** Words in the commands that need Node (pnpm and yarn come from corepack). */
     const NODE_WORDS = ['node', 'npm', 'npx', 'pnpm', 'yarn', 'corepack'];
     const BUN_WORDS = ['bun', 'bunx'];
 
     /**
-     * Extensions the app base image already has (docker/app-base/Dockerfile),
-     * PHP's own ones included, so composer.json requiring them suggests nothing
+     * Core extensions enabled globally in the shared FreeBSD PHP 8.4 runtime
+     * (/usr/local/etc/php-base), including PHP's built-in extensions.
      */
     const BASE_EXTENSIONS = [
         'bcmath', 'core', 'ctype', 'curl', 'date', 'dom', 'exif', 'fileinfo', 'filter', 'gd',
-        'hash', 'iconv', 'intl', 'json', 'libxml', 'mbstring', 'mysqlnd', 'openssl', 'pcre',
-        'pdo', 'pdo_mysql', 'pdo_sqlite', 'phar', 'posix', 'random', 'readline', 'redis',
-        'reflection', 'session', 'simplexml', 'sodium', 'spl', 'sqlite3', 'standard',
-        'tokenizer', 'xml', 'xmlreader', 'xmlwriter', 'zip', 'zlib',
+        'hash', 'iconv', 'intl', 'json', 'libxml', 'mbstring', 'mysqli', 'mysqlnd', 'opcache',
+        'openssl', 'pcre', 'pdo', 'pdo_mysql', 'pdo_sqlite', 'phar', 'posix', 'random',
+        'readline', 'redis', 'reflection', 'session', 'simplexml', 'sodium', 'spl', 'sqlite3',
+        'standard', 'tokenizer', 'xml', 'xmlreader', 'xmlwriter', 'zip', 'zlib',
     ];
 
-    /** Lockfile => package manager, in the order they win */
+    /**
+     * Curated optional PHP extensions preinstalled in the shared FreeBSD runtime
+     * and opted in per jail via /etc/tc/php.d/extensions.ini.
+     */
+    const OPTIONAL_EXTENSIONS = [
+        'imagick', 'soap', 'gmp', 'pdo_pgsql', 'pgsql', 'ldap', 'sockets',
+        'xsl', 'calendar', 'imap', 'ftp', 'pcntl', 'shmop', 'sysvsem',
+    ];
+
+    /** Lockfile => package manager, in the order they win. */
     const LOCKFILES = [
         'bun.lock' => 'bun',
         'bun.lockb' => 'bun',
@@ -50,9 +52,8 @@ final class Build_commands {
     ];
 
     /**
-     * What the new-app wizard prefills, from the repository's root: its
-     * file names and the contents of package.json and composer.json (''
-     * when there is none)
+     * What the new-app wizard prefills from the repository's root: its file
+     * names and the contents of package.json and composer.json ('' when absent).
      *
      * @param list<string> $root_files
      * @return array{commands: string, php_extensions: list<string>, found: list<string>}
@@ -67,7 +68,7 @@ final class Build_commands {
             $lockfile = self::lockfile($root_files, $manager);
             $found[] = $lockfile ?? 'package.json';
 
-            // Only a build script makes installing worthwhile for a PHP app
+            // Only a build script makes installing worthwhile for a PHP app.
             if (is_string($package['scripts']['build'] ?? null)) {
                 $commands[] = self::install_command($manager, $lockfile !== null, in_array('.yarnrc.yml', $root_files, true));
                 $commands[] = $manager === 'npm' ? 'npm run build' : "{$manager} run build";
@@ -89,7 +90,7 @@ final class Build_commands {
 
     /**
      * package.json's "packageManager" (e.g. pnpm@9.1.0) when it names one we
-     * know, else the first lockfile's, else npm
+     * know, else the first lockfile's, else npm.
      *
      * @param list<string> $root_files
      */
@@ -111,7 +112,7 @@ final class Build_commands {
     }
 
     /**
-     * The lockfile of $manager in the root, or null
+     * The lockfile of $manager in the root, or null.
      *
      * @param list<string> $root_files
      */
@@ -126,7 +127,7 @@ final class Build_commands {
     }
 
     /**
-     * Install exactly the locked versions when there is a lockfile
+     * Install exactly the locked versions when there is a lockfile.
      */
     static function install_command(string $manager, bool $locked, bool $yarn_berry): string {
         if (!$locked) {
@@ -145,7 +146,7 @@ final class Build_commands {
     }
 
     /**
-     * composer.json's "require" ext-* entries the base image lacks, lowercase
+     * composer.json's "require" ext-* entries the base runtime lacks, lowercase.
      *
      * @return list<string>
      */
@@ -177,7 +178,7 @@ final class Build_commands {
 
     /**
      * The commands as stored: LF line ends, each line trimmed on the right,
-     * no blank lines at either end
+     * no blank lines at either end.
      */
     static function normalise(string $commands): string {
         $lines = preg_split('/\r\n|\r|\n/', $commands) ?: [];
@@ -187,7 +188,7 @@ final class Build_commands {
     }
 
     /**
-     * Why the commands cannot be saved, or null
+     * Why the commands cannot be saved, or null.
      */
     static function error(string $commands): ?string {
         $commands = self::normalise($commands);
@@ -216,7 +217,19 @@ final class Build_commands {
     }
 
     /**
-     * The tools the commands call: node (with npm, npx, pnpm and yarn) and bun
+     * Normalized shell commands for execution inside the FreeBSD build jail.
+     */
+    static function script(string $commands): string {
+        $error = self::error($commands);
+        if ($error !== null) {
+            throw new RuntimeException($error);
+        }
+
+        return self::normalise($commands);
+    }
+
+    /**
+     * The tools the commands call: node (with npm, npx, pnpm and yarn) and bun.
      *
      * @return list<string>
      */
@@ -236,69 +249,7 @@ final class Build_commands {
     }
 
     /**
-     * The app's Dockerfile. $setup are the lines that install its PHP
-     * extensions and composer packages and copy its files into /app on
-     * $base. Without build commands that is the whole image. With them,
-     * a build stage adds the tools and runs the commands, and the image
-     * is $base plus the extensions and the built /app.
-     *
-     * The commands reach the shell base64-encoded, so no line of them can
-     * become a Dockerfile instruction.
-     *
-     * @param list<string> $extension_lines what installs the extensions on $base
-     * @param list<string> $app_lines composer and COPY lines that fill /app
-     * @param list<string> $final_lines lines for the image only (e.g. its Caddyfile)
-     * @return list<string>
-     */
-    static function dockerfile(string $base, array $extension_lines, array $app_lines, array $final_lines, string $commands): array {
-        $commands = self::normalise($commands);
-
-        if ($commands === '') {
-            return array_merge(["FROM {$base}"], $extension_lines, $app_lines, $final_lines);
-        }
-
-        $lines = array_merge(["FROM {$base} AS build"], $extension_lines, $app_lines, self::tool_lines(self::tools($commands)));
-        $lines[] = 'ENV CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0';
-        $lines[] = 'RUN echo ' . base64_encode("set -e\n{$commands}\n") . ' | base64 -d > /tmp/build-commands.sh'
-            . ' && bash /tmp/build-commands.sh && rm /tmp/build-commands.sh';
-
-        // Same base and extension lines as the build stage: BuildKit runs them once
-        $lines[] = "FROM {$base}";
-        $lines = array_merge($lines, $extension_lines);
-        $lines[] = 'COPY --from=build /app /app';
-
-        return array_merge($lines, $final_lines);
-    }
-
-    /**
-     * Lines that put Node (npm, npx and corepack's pnpm and yarn) and Bun
-     * into the build stage
-     *
-     * @param list<string> $tools
-     * @return list<string>
-     */
-    static function tool_lines(array $tools): array {
-        $lines = [];
-
-        if (in_array('node', $tools, true)) {
-            $lines[] = 'COPY --from=' . self::NODE_IMAGE . ' /usr/local/bin/node /usr/local/bin/node';
-            $lines[] = 'COPY --from=' . self::NODE_IMAGE . ' /usr/local/lib/node_modules /usr/local/lib/node_modules';
-            $lines[] = 'RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm'
-                . ' && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx'
-                . ' && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack'
-                . ' && corepack enable pnpm yarn';
-        }
-
-        if (in_array('bun', $tools, true)) {
-            $lines[] = 'COPY --from=' . self::BUN_IMAGE . ' /usr/local/bin/bun /usr/local/bin/bun';
-            $lines[] = 'RUN ln -s bun /usr/local/bin/bunx';
-        }
-
-        return $lines;
-    }
-
-    /**
-     * A JSON object as an array, or null when it is not one
+     * A JSON object as an array, or null when it is not one.
      */
     static function json_object(string $json): ?array {
         if (trim($json) === '') {

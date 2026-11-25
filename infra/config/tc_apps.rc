@@ -1,0 +1,19 @@
+#!/bin/sh
+# PROVIDE: tc_apps
+# REQUIRE: jail pf
+# BEFORE: caddy
+# KEYWORD: shutdown
+. /etc/rc.subr
+name="tc_apps"
+rcvar="tc_apps_enable"
+start_cmd="tc_apps_start"
+stop_cmd=":"
+
+tc_apps_start() {
+    if [ -x /usr/local/libexec/tc-runtime ]; then
+        printf '{"action":"boot"}\n' | /usr/local/libexec/tc-runtime >/dev/null
+    fi
+}
+
+load_rc_config "$name"
+run_rc_command "$1"

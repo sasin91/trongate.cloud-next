@@ -1,137 +1,118 @@
-# Installation, updates and recovery
+# Self-Hosting, Updates, and Recovery
 
-The supported installation target is an existing NixOS VM. See the root README
-for the flake module and bootstrap. Use the same product source/lock on hosted and
-customer installations. Nix pins both the Nix tooling (through nixpkgs) and deploy-rs.
-The panel uses PHP-FPM and Caddy; application images retain FrankenPHP classic mode.
-Do not enable both the control-plane Caddy and managed application proxy on the
-same host: both own ports 80/443 and the local Caddy admin endpoint in this PoC.
+Trongate Cloud runs on bare-metal FreeBSD 14.3+ or 15.x with ZFS. The control
+plane runs inside its own dedicated `tc_panel` jail (`10.99.0.2` on `lo1`) on
+Host #1 and manages Host #1 (`10.99.0.1:22`, `pf`-restricted to `tc_panel`) and
+any additional FreeBSD hosts (Host #2..N) over the exact same pinned Ed25519
+SSH forced-command path.
 
-The panel/worker OS account is `tc`. MariaDB uses local Unix-socket authentication
-for this account; no password needs to appear in Nix. The panel's key and mutable
-state live in `/var/lib/tc-control`, mode 0700. The administrator bootstrap input
-should be a temporary 0600 file on `/run`, piped to `php /run/current-system/sw/share/tc/modules/setup/init.php`, then removed.
+See [infra/README.md](../infra/README.md) for the full bare-metal bring-up
+runbook and smoke-test checklist.
 
-With a remote database, set `databaseDsn`, `localDatabase=false`, and an
-`environmentFile` **string path**, such as `/run/secrets/tc-environment`. Its contents
-are installed separately with owner/root-readable permissions, never copied into
-the Nix store. Supply `TC_DB_USER` and `TC_DB_PASSWORD` there. Configure MariaDB
-TLS/network restrictions for the deployment environment. Database encryption in
-transit is an installation responsibility; the default Unix socket is local.
+## Initial host and control-plane setup
 
-For separate workers set `worker=false` on the panel, and `panel=false` and
-`localDatabase=false` on the worker VM. Both need the same database and installation
-key. Transfer prepared revision directories to workers before enqueueing host
-updates. Keep untrusted builders separate from both; builders must not receive
-the installation key or provider/fleet credentials.
-
-`TC_BASE_URL` controls the advertised origin and secure session cookie behavior.
-Use HTTPS in a real installation. Session files are local to the panel; this PoC
-supports one panel instance. Provider tokens and SSH/application credentials are
-encrypted with the same installation-owned libsodium key. SSH known-host identities
-live in server inventory, independent of system-global known_hosts.
-
-## Prepared Linux target
-
-Existing Linux targets may deploy applications without NixOS host management.
-Prepare them explicitly before enrollment:
-
-1. Install Podman, systemd, Caddy, PHP 8.4, curl, util-linux (`flock`) and `which`.
-   Use a host with cgroup memory/CPU limits enabled.
-2. Install all four `runtime/*.php` helpers together in root-owned `/usr/local/libexec/`
-   and a root-owned executable `/usr/local/bin/tc-runtime` wrapper:
+1. Provision Host #1 as `root`:
 
 ```sh
-#!/bin/sh
-exec /usr/bin/php /usr/local/libexec/tc-runtime.php "$@"
+git clone git@github.com:sasin91/trongate.cloud-next.git /opt/trongate-cloud-next
+cd /opt/trongate-cloud-next
+sh infra/scripts/bootstrap.sh
+sh infra/scripts/build-runtime.sh
+sh infra/scripts/platform-jails.sh
 ```
 
-3. Install `runtime/tc-systemd-generator.sh` as root-owned executable
-   `/etc/systemd/system-generators/tc-runtime`. It generates boot-persistent
-   application units from `/var/lib/tc/runtime/units` and `enabled` markers;
-   application deployments do not write into NixOS's immutable `/etc` unit tree.
-   Create `/var/lib/tc/runtime` mode 0700, owned by root, and initialize its
-   `Caddyfile` with `{ admin 127.0.0.1:2019 }` using multiline Caddyfile syntax:
+2. Generate a dedicated Ed25519 SSH key pair for `tc_panel` -> `tc-agent` and
+   install its public key in `/home/tc-agent/.ssh/authorized_keys` using the
+   forced-command prefix from `/home/tc-agent/.ssh/authorized_keys.sample`:
 
 ```text
-{
-  admin 127.0.0.1:2019
-}
+command="/usr/local/bin/doas /usr/local/libexec/tc-runtime",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... tc-panel
 ```
 
-4. Install a `tc-proxy.service` with
-   `ExecStart=/usr/bin/caddy run --config /var/lib/tc/runtime/Caddyfile --adapter caddyfile`,
-   `Restart=always` and a persistent `XDG_DATA_HOME=/var/lib/tc-caddy` environment.
-   Enable/start it. It runs as root in this PoC, as do deployment operations.
-5. Configure a dedicated SSH key for root, forbid password authentication, and
-   keep console access. Ordinary unprivileged SSH accounts are inspected but
-   explicitly marked not ready; privilege escalation is not silently attempted.
-6. Open application ports 80/443 and the configured SSH port. Candidate ports
-   bind only to 127.0.0.1. Do not expose Caddy's admin port.
+3. Environment variables configured inside `tc_panel` by `platform-jails.sh`:
 
-These are preparation actions, not actions performed by SSH enrollment. Do not
-install a second proxy over an existing production service using those ports.
+```sh
+TC_STATE=/var/db/tc/panel
+TC_KEY_FILE=/var/db/tc/panel/key
+TC_BASE_URL=https://control.example.com
+TC_DSN=mysql:unix_socket=/var/run/tc/mariadb/mysqld.sock;dbname=tc_panel;charset=utf8mb4
+TC_DB_USER=tc_panel
+# TC_DB_PASSWORD is stored in /var/db/tc/panel/db.env (0600, owned by www).
+```
 
-## Updates without the panel
+4. Initialize the encryption key, MariaDB schema, and local administrator:
+
+```sh
+# Create /tmp/tc-admin.json inside tc_panel with mode 0600:
+# {"name":"admin","password":"a unique password of at least 14 characters"}
+jexec tc_panel sh -c 'cat /tmp/tc-admin.json | env TC_STATE=/var/db/tc/panel php /app/modules/setup/init.php'
+jexec tc_panel rm -f /tmp/tc-admin.json
+jexec tc_panel service tc_worker restart
+```
+
+5. Back up `/var/db/tc/panel/key` immediately. Losing this key loses access to
+   all encrypted SSH keys, application environment secrets, and config-file
+   secrets stored in MariaDB.
+
+6. Enroll Host #1 in the panel as `10.99.0.1` (port `22`, user `tc-agent`). The
+   enrollment flow pins the server's Ed25519 host key on first connect and runs
+   `{"action":"inspect-host"}` over the pinned connection. Subsequent
+   connections reject changed host keys.
+
+## Adding Host #2..N
+
+Run `infra/scripts/bootstrap.sh`, `infra/scripts/build-runtime.sh`, and
+`infra/scripts/platform-jails.sh` (without enabling a second `tc_panel`) on each
+additional bare-metal FreeBSD host. Install the panel's `tc-agent` public key
+with the forced-command restriction, allow SSH from Host #1 on `pf`, and enroll
+the new host in **Servers** over its public/management IP.
+
+## Updating the control plane and host runtime
 
 ```sh
 cd /opt/trongate-cloud-next
 git pull --ff-only
-sudo nixos-rebuild switch --flake /etc/nixos#YOUR_MACHINE
-sudo -u tc env TC_STATE=/var/lib/tc-control php /run/current-system/sw/share/tc/modules/setup/migrate.php
-sudo systemctl restart tc-worker
-sudo journalctl -u tc-worker -u phpfpm-tc --since '10 minutes ago'
+sh infra/scripts/bootstrap.sh        # updates /usr/local/libexec/tc-runtime and runtime PHP helpers
+jexec tc_panel env TC_STATE=/var/db/tc/panel php /app/modules/setup/migrate.php
+jexec tc_panel service tc_worker restart
+jexec tc_panel service tc_monitor restart
+jexec tc_panel service tc_panel_fpm restart
 ```
 
-Review flake locks and changes before activating them. The SQL migration is
-idempotent; future schema changes must add explicit migrations. To roll back the
-control-plane installation, use `nixos-rebuild switch --rollback` from its console.
-Application schema downgrades are not automatic.
+`modules/setup/migrate.php` is idempotent. Always back up the control-plane
+database before upgrading.
 
 ## Backup and restore
 
-Stop the worker while taking a consistent initial backup. Back up:
+Stop `tc_worker` briefly (or use ZFS snapshots combined with a single-transaction
+MariaDB dump) to take a consistent backup:
 
-- A transactional MariaDB dump (inventory, encrypted credentials, operation locks,
-  jobs, steps and local admin hashes).
-- `/var/lib/tc-control/key` and all revision directories. Losing the key loses
-  access to encrypted credentials, even if the database remains intact.
-- Runtime environment files, dedicated SSH key recovery copies, registry config
-  and this installation's pinned Nix source/configuration.
-- Each target's `/var/lib/tc/runtime` (including persistent units/enabled markers) and
-  `/var/lib/tc-caddy`, plus application databases and persistent mounts.
-- Builder registry credentials if builds must resume after recovery.
+- **Control-plane database**: `mariadb-dump --single-transaction tc_panel`
+  (inventory, encrypted credentials, jobs, steps, locks, and admin hashes).
+- **Control-plane state & key**: `/var/db/tc/panel/key` and `/var/db/tc/panel/`.
+- **Host runtime metadata & TLS state**: `/var/db/tc/runtime` (state, jobs,
+  `ips.json`, `resources.json`, `Caddyfile`), `/etc/jail.conf.d/`,
+  `/etc/tc-resources.json`, and Caddy's ACME data directory.
+- **Application databases & ZFS datasets**: Consistent `mariadb-dump` per app
+  plus ZFS snapshots (`zfs snapshot -r zroot/tc/apps@backup-...`). Do not back
+  up live MariaDB datafiles without quiescing or taking a logical dump.
 
-Example on the control VM (outputs contain secrets and must be encrypted off-host):
+Example control-plane backup on Host #1 (encrypt off-host):
 
 ```sh
-sudo systemctl stop tc-worker
-sudo sh -c 'umask 077; mariadb-dump --single-transaction tc > /root/tc.sql'
-sudo tar -C / -czf /root/tc-state.tar.gz var/lib/tc-control etc/nixos
-sudo systemctl start tc-worker
+jexec tc_panel service tc_worker stop
+umask 077
+mariadb --socket=/var/run/tc/mariadb/mysqld.sock -e "SELECT 1" >/dev/null
+mariadb-dump --socket=/var/run/tc/mariadb/mysqld.sock --single-transaction tc_panel > /root/tc_panel.sql
+zfs snapshot -r zroot/tc/apps@backup-$(date +%Y%m%d%H%M)
+tar -C / -czf /root/tc-host-state.tar.gz var/db/tc/runtime etc/jail.conf.d etc/tc-resources.json
+jexec tc_panel service tc_worker start
 ```
 
-Restore the database and the **matching key** with the original permissions;
-restore pinned source/revisions and runtime environment, then initialize services.
-Do not run a fresh `php /run/current-system/sw/share/tc/modules/setup/init.php` with a different key over restored ciphertext.
-Inspect uncertain jobs before enabling workers. Existing targets continue serving
-while the control plane is restored. Keep provider console access for a host that
-cannot be reached using its restored SSH key.
-
-Do not copy a running application database's raw files as a backup. Coordinate its
-own consistent backup with persistent file snapshots. Code rollback cannot recover
-data corruption or an incompatible migration.
-
-## Upgrading to native Trongate login
-
-Back up the database, then run `php /run/current-system/sw/share/tc/modules/setup/migrate.php` using the new package before activating
-the updated panel. Existing administrator names and password hashes are imported
-into Trongate's login tables. Sign in again at `/login/login/1`; existing custom
-sessions are not reused. Re-running the migration preserves native accounts.
-`php /run/current-system/sw/share/tc/modules/setup/init.php` remains the explicit local password setup/reset command.
-
-The web server connection flow uses trust on first use: it accepts and pins the
-first observed SSH host key, then checks runtime readiness over that pinned
-connection. Later SSH connections reject changed host keys. No manual fingerprint
-entry is required in the web wizard; the CLI scan/confirm commands remain available
-for independently verified enrollment.
+When restoring:
+1. Restore the database and the **exact matching** `/var/db/tc/panel/key` with
+   `0600` permissions. Never run a fresh `init.php` with a new key over restored
+   ciphertext.
+2. Inspect any `uncertain` jobs before restarting `tc_worker`.
+3. Existing application jails and host Caddy continue serving traffic while
+   `tc_panel` is offline or being restored.

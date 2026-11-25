@@ -1,0 +1,25 @@
+#!/bin/sh
+# PROVIDE: tc_monitor
+# REQUIRE: tc_panel_fpm
+# KEYWORD: shutdown
+. /etc/rc.subr
+name="tc_monitor"
+rcvar="tc_monitor_enable"
+pidfile="/var/run/tc_monitor.pid"
+start_cmd="tc_monitor_start"
+
+tc_monitor_start() {
+    if [ ! -f /app/modules/monitoring/collect.php ]; then
+        echo "tc_monitor: /app/modules/monitoring/collect.php not deployed yet; skipping."
+        return 0
+    fi
+    set -a
+    [ -f /var/db/tc/panel/db.env ] && . /var/db/tc/panel/db.env
+    set +a
+    export PHP_INI_SCAN_DIR="/usr/local/etc/php-base:/etc/tc/php.d"
+    export TC_STATE="/var/db/tc/panel"
+    /usr/sbin/daemon -f -r -P "$pidfile" -u www /bin/sh -c 'while true; do /usr/local/bin/php /app/modules/monitoring/collect.php || true; sleep 60; done'
+}
+
+load_rc_config "$name"
+run_rc_command "$1"
