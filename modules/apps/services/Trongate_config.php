@@ -137,12 +137,27 @@ final class Trongate_config {
             throw new InvalidArgumentException('Database name, username, and host are required.');
         }
 
+        $h = var_export($host, true);
+        $u = var_export($username, true);
+        $p = var_export($password, true);
+        $d = var_export($database, true);
+
         return "<?php\n"
             . "// Managed by trongate.cloud (" . self::CONFIG_VERSION . ")\n"
-            . "define('HOST', " . var_export($host, true) . ");\n"
+            . "\$databases = [\n"
+            . "    'default' => [\n"
+            . "        'host' => " . $h . ",\n"
+            . "        'port' => '3306',\n"
+            . "        'user' => " . $u . ",\n"
+            . "        'password' => " . $p . ",\n"
+            . "        'database' => " . $d . ",\n"
+            . "    ],\n"
+            . "];\n"
+            . "\$GLOBALS['databases'] = \$databases;\n"
+            . "define('HOST', " . $h . ");\n"
             . "define('PORT', '3306');\n"
-            . "define('USER', " . var_export($username, true) . ");\n"
-            . "define('PASSWORD', " . var_export($password, true) . ");\n"
-            . "define('DATABASE', " . var_export($database, true) . ");\n";
+            . "define('USER', " . $u . ");\n"
+            . "define('PASSWORD', " . $p . ");\n"
+            . "define('DATABASE', " . $d . ");\n";
     }
 }

@@ -147,7 +147,7 @@ with_resources_fixture(function (Mock_freebsd_runtime $rt, Resources $res) {
 --EXPECT--
 host=32768|10240|20480|8|zroot|1024000|921600
 plan100=24576|73728|512
-plan250=294|100|1024
+plan250=294|100|128
 manual=succeeded|apps=2|mode=manual|mem=1024|cpu=200|disk=2048|slot=blue
 invalid_rctl_calls=0
 drift=caught

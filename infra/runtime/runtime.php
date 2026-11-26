@@ -39,10 +39,11 @@ class Runtime {
     public string $jails_root;
     public string $bases_root;
     public string $runtimes_root;
+    public bool $behind_tunnel;
 
     public function __construct(
         public string $root = '/var/db/tc/runtime',
-        string $pool = self::DEFAULT_POOL,
+        ?string $pool = null,
         ?string $jail_conf_dir = null,
         ?string $sockets_root = null,
         string $mariadb_socket = '/var/run/tc/mariadb/mysqld.sock',
@@ -51,9 +52,12 @@ class Runtime {
         ?string $jails_root = null,
         ?string $bases_root = null,
         ?string $runtimes_root = null,
+        ?bool $behind_tunnel = null,
     ) {
         $production = $root === '/var/db/tc/runtime';
+        $pool = $pool ?? ($production ? self::configured_pool() : self::DEFAULT_POOL);
         $this->pool = $pool;
+        $this->behind_tunnel = $behind_tunnel ?? ($production ? self::configured_behind_tunnel() : false);
         $this->jail_conf_dir = $jail_conf_dir ?? ($production ? '/etc/jail.conf.d' : $root . '/jail.conf.d');
         $this->sockets_root = $sockets_root ?? ($production ? '/var/run/tc/sockets' : $root . '/sockets');
         $this->mariadb_socket = $mariadb_socket;
@@ -63,7 +67,7 @@ class Runtime {
         $this->bases_root = $bases_root ?? ($production ? '/' . $pool . '/tc/bases' : $root . '/bases');
         $this->runtimes_root = $runtimes_root ?? ($production ? '/' . $pool . '/tc/runtimes' : $root . '/runtimes');
 
-        foreach (['', '/jobs', '/apps', '/routes'] as $directory) {
+        foreach (['', '/jobs', '/apps', '/routes', '/services'] as $directory) {
             self::directory($root . $directory);
         }
     }
@@ -405,10 +409,16 @@ class Runtime {
         return $creds;
     }
 
-    public function health(string $url, int $attempts = 20): bool {
+    public function health(string $url, int $attempts = 20, array $headers = []): bool {
         for ($i = 0; $i < $attempts; $i++) {
             try {
-                $this->run(['curl', '--fail', '--silent', '--max-time', '5', '--output', '/dev/null', $url], 10);
+                $args = ['curl', '--fail', '--silent', '--max-time', '5', '--output', '/dev/null'];
+                foreach ($headers as $header) {
+                    $args[] = '-H';
+                    $args[] = $header;
+                }
+                $args[] = $url;
+                $this->run($args, 10);
                 return true;
             } catch (RuntimeException) {
                 if ($i + 1 < $attempts) {
@@ -478,19 +488,135 @@ class Runtime {
         }
     }
 
-    public function route(string $app, ?array $release): void {
+    public static function canary_uuid_regex(int $weight): ?string {
+        if ($weight <= 0) {
+            return null;
+        }
+        $buckets = max(1, min(255, (int) round($weight * 256 / 100)));
+        $max = $buckets - 1;
+        $hi = intdiv($max, 16);
+        $lo = $max % 16;
+        $hex = static fn(int $n): string => dechex($n);
+        $range = static function (int $start, int $end) use ($hex): string {
+            if ($start === $end) {
+                return $hex($start);
+            }
+            if ($end <= 9 || $start >= 10) {
+                return '[' . $hex($start) . '-' . $hex($end) . ']';
+            }
+            $digits = $start === 9 ? '9' : ($start . '-9');
+            $letters = $end === 10 ? 'a' : ('a-' . $hex($end));
+            return '[' . $digits . $letters . ']';
+        };
+
+        if ($lo === 15) {
+            return '^' . $range(0, $hi);
+        }
+        $parts = [];
+        if ($hi > 0) {
+            $parts[] = $range(0, $hi - 1) . '[0-9a-f]';
+        }
+        $parts[] = $hex($hi) . $range(0, $lo);
+        return count($parts) === 1 ? '^' . $parts[0] : '^(?:' . implode('|', $parts) . ')';
+    }
+
+    private function render_slot_handler(string $app, array $release, string $role, ?string $set_cookie = null): string {
+        $release_base = (string) ($release['release_path'] ?? ($this->releases_root . '/' . $app . '/releases/' . $release['operation']));
+        $public_root = rtrim($release_base, '/') . '/public';
+        $socket = 'unix//' . ltrim((string) $release['socket'], '/');
+        $slot = self::match($release['slot'] ?? 'blue', 'blue|green');
+
+        $lines = [];
+        if ($set_cookie !== null) {
+            $lines[] = '        header +Set-Cookie "' . $set_cookie . '"';
+        }
+        $lines[] = '        header X-TC-Slot "' . $slot . '"';
+        $lines[] = '        header X-TC-Release "' . $role . '"';
+        $lines[] = '        root * ' . $public_root;
+        $lines[] = '        php_fastcgi ' . $socket . ' {';
+        $lines[] = '            root /app/public';
+        $lines[] = '        }';
+        $lines[] = '        file_server';
+        $lines[] = '        header {';
+        $lines[] = "            Content-Security-Policy \"frame-ancestors 'self'\"";
+        $lines[] = '        }';
+        return implode("\n", $lines) . "\n";
+    }
+
+    public function route(string $app, ?array $release, ?array $canary = null, int $canary_weight = 0): void {
         $app = self::match($app, '[a-z][a-z0-9-]{0,39}');
         $path = $this->root . '/routes/' . $app . '.caddy';
+        $logs_dir = $this->root . '/logs';
+        $access_log = $logs_dir . '/' . $app . '-access.log';
 
         if ($release === null) {
             self::remove($path);
+        } elseif ($canary !== null) {
+            self::directory($logs_dir, 0700);
+            $domain = self::match($release['domain'], '[a-z0-9]+(?:[.-][a-z0-9]+)+');
+            $weight = max(0, min(90, $canary_weight));
+            $sample_regex = self::canary_uuid_regex($weight);
+            $site = $this->behind_tunnel ? 'http://' . $domain : $domain;
+            $stable_cookie = 'tc_canary=0; Path=/; Max-Age=1800; SameSite=Lax';
+            $canary_cookie = 'tc_canary=1; Path=/; Max-Age=1800; SameSite=Lax';
+
+            $block = $site . " {\n"
+                . "    log {\n"
+                . "        output file " . $access_log . " {\n"
+                . "            roll_size 10MiB\n"
+                . "            roll_keep 2\n"
+                . "            roll_keep_for 24h\n"
+                . "        }\n"
+                . "        format json\n"
+                . "    }\n"
+                . "    @force_stable expression `{http.request.header.X-Canary} == \"0\" || {query.tc_canary} == \"0\"`\n"
+                . "    @force_canary expression `{http.request.header.X-Canary} == \"1\" || {query.tc_canary} == \"1\"`\n"
+                . "    @cookie_stable header Cookie *tc_canary=0*\n"
+                . "    @cookie_canary header Cookie *tc_canary=1*\n";
+            if ($sample_regex !== null) {
+                $block .= "    @sample_canary expression `{http.request.uuid}.matches(\"" . $sample_regex . "\")`\n";
+            }
+            $block .= "\n"
+                . "    handle @force_stable {\n"
+                . $this->render_slot_handler($app, $release, 'stable', $stable_cookie)
+                . "    }\n"
+                . "    handle @force_canary {\n"
+                . $this->render_slot_handler($app, $canary, 'canary', $canary_cookie)
+                . "    }\n"
+                . "    handle @cookie_stable {\n"
+                . $this->render_slot_handler($app, $release, 'stable')
+                . "    }\n"
+                . "    handle @cookie_canary {\n"
+                . $this->render_slot_handler($app, $canary, 'canary')
+                . "    }\n";
+            if ($sample_regex !== null) {
+                $block .= "    handle @sample_canary {\n"
+                    . $this->render_slot_handler($app, $canary, 'canary', $canary_cookie)
+                    . "    }\n";
+            }
+            $block .= "    handle {\n"
+                . $this->render_slot_handler($app, $release, 'stable', $sample_regex !== null ? $stable_cookie : null)
+                . "    }\n"
+                . "}\n";
+
+            $this->write($path, $block, 0644);
         } else {
+            self::directory($logs_dir, 0700);
             $domain = self::match($release['domain'], '[a-z0-9]+(?:[.-][a-z0-9]+)+');
             $release_base = (string) ($release['release_path'] ?? ($this->releases_root . '/' . $app . '/releases/' . $release['operation']));
             $public_root = rtrim($release_base, '/') . '/public';
             $socket = 'unix//' . ltrim((string) $release['socket'], '/');
 
-            $block = $domain . " {\n"
+            $site = $this->behind_tunnel ? 'http://' . $domain : $domain;
+            $block = $site . " {\n"
+                . "    log {\n"
+                . "        output file " . $access_log . " {\n"
+                . "            roll_size 10MiB\n"
+                . "            roll_keep 2\n"
+                . "            roll_keep_for 24h\n"
+                . "        }\n"
+                . "        format json\n"
+                . "    }\n"
                 . "    root * " . $public_root . "\n"
                 . "    php_fastcgi " . $socket . " {\n"
                 . "        root /app/public\n"
@@ -576,7 +702,7 @@ class Runtime {
 
         $memory_mb = max(64, (int) ($spec['memory_mb'] ?? 128));
         $cpu_percent = max(10, min(1600, (int) ($spec['cpu_percent'] ?? 100)));
-        $disk_quota_mb = max(128, (int) ($spec['disk_quota_mb'] ?? 1024));
+        $disk_quota_mb = max(128, (int) ($spec['disk_quota_mb'] ?? 128));
 
         $extensions = [];
         foreach ($spec['extensions'] ?? [] as $ext) {
@@ -699,6 +825,9 @@ class Runtime {
             $ext_lines[] = 'extension=' . $ext . '.so';
         }
         $this->write($jail_root . '/etc/tc/php.d/extensions.ini', implode("\n", $ext_lines) . "\n", 0644);
+
+        $this->write($jail_root . '/var/log/php-fpm.log', '', 0640);
+        $this->grant_www($jail_root . '/var/log/php-fpm.log', 0640, writable: true);
 
         // Write jail-local php-fpm.conf with ondemand PM, socket bindings, and secrets.
         $php_fpm_conf = $this->render_php_fpm_conf($memory_mb, $secrets, $valkey);
@@ -823,6 +952,12 @@ class Runtime {
         if ($staged && ($staged['operation'] ?? '') !== $operation) {
             throw new RuntimeException('Finish the staged deployment before starting another one');
         }
+        if (!empty($state['canary'])) {
+            throw new RuntimeException('Promote or abort the active canary before starting another deployment');
+        }
+        if (!empty($request['canary']) && $request['action'] === 'deploy' && empty($state['active'])) {
+            throw new RuntimeException('Cannot start a canary before the app has an active release');
+        }
 
         $journal = [
             'operation' => $operation,
@@ -872,7 +1007,9 @@ class Runtime {
                     $merged['cpu_percent'] = max(10, (int) round((float) $allocation['cpus'] * 100));
                 }
                 if (isset($allocation['disk_quota_mb'])) {
-                    $merged['disk_quota_mb'] = (int) $allocation['disk_quota_mb'];
+                    if (($allocation['mode'] ?? '') === 'manual' || !isset($spec['disk_quota_mb'])) {
+                        $merged['disk_quota_mb'] = (int) $allocation['disk_quota_mb'];
+                    }
                 }
                 $spec = array_replace($spec, $merged);
 
@@ -934,6 +1071,50 @@ class Runtime {
             throw new RuntimeException('Candidate health check failed');
         }
 
+        if (!empty($request['canary']) && $previous !== null) {
+            $weight = max(0, min(90, (int) ($request['canary_weight'] ?? 10)));
+            $this->checkpoint('routing-canary');
+            $this->route($app, $previous, $candidate, $weight);
+            if (!$this->healthy($candidate)) {
+                throw new RuntimeException('Health check failed after traffic switch');
+            }
+
+            $this->checkpoint('checking-public');
+            if (($request['public_check'] ?? true) && !$this->health('https://' . $candidate['domain'] . $candidate['health'], 30, ['X-Canary: 1'])) {
+                throw new RuntimeException('Public health check failed');
+            }
+
+            self::remove($this->root . '/apps/' . $app . '/staged.json');
+            $started_at = time();
+            $this->write($state_path, [
+                'active' => $previous,
+                'previous' => $journal['before']['previous'] ?? null,
+                'canary' => [
+                    'release' => $candidate,
+                    'weight' => $weight,
+                    'started_at' => $started_at,
+                ],
+            ]);
+            unset($journal['message']);
+
+            $journal = array_replace($journal, [
+                'status' => 'succeeded',
+                'phase' => 'canary-active',
+                'active' => $previous['operation'],
+                'canary' => [
+                    'operation' => $candidate['operation'],
+                    'slot' => $candidate['slot'],
+                    'weight' => $weight,
+                    'commit' => $candidate['commit'] ?? null,
+                    'started_at' => $started_at,
+                ],
+            ]);
+            $journal['events'][] = ['step' => 'canary-active', 'at' => $started_at];
+            $this->write($journal_path, $journal);
+
+            return $journal;
+        }
+
         if (!empty($request['defer_public']) && ($request['public_check'] ?? true) && !$previous && empty($request['go_live'])) {
             return $this->waiting($app, $journal_path, $journal);
         }
@@ -957,7 +1138,7 @@ class Runtime {
         }
 
         self::remove($this->root . '/apps/' . $app . '/staged.json');
-        $this->write($state_path, ['active' => $candidate, 'previous' => $previous]);
+        $this->write($state_path, ['active' => $candidate, 'previous' => $previous, 'canary' => null]);
         unset($journal['message']);
 
         try {
@@ -1030,6 +1211,159 @@ class Runtime {
         return $journal;
     }
 
+    public function canary_operation(array $request): array {
+        $action = (string) ($request['action'] ?? '');
+        $operation = self::match($request['operation'] ?? null, '[a-f0-9]{32}');
+        $app = self::match($request['app'] ?? null, '[a-z][a-z0-9-]{0,39}');
+        $journal_path = $this->root . '/jobs/' . $operation . '.json';
+        $state_path = $this->root . '/apps/' . $app . '/state.json';
+
+        $recorded = $this->read($journal_path);
+        if (is_array($recorded) && in_array($recorded['status'] ?? '', ['succeeded', 'failed'], true)) {
+            return $recorded;
+        }
+
+        $state = $this->read($state_path, ['active' => null, 'previous' => null, 'canary' => null]);
+        $active = is_array($state['active'] ?? null) ? $state['active'] : null;
+        $canary_entry = is_array($state['canary'] ?? null) ? $state['canary'] : null;
+        $canary = is_array($canary_entry['release'] ?? null) ? $canary_entry['release'] : null;
+
+        $journal = [
+            'operation' => $operation,
+            'app' => $app,
+            'action' => $action,
+            'status' => 'running',
+            'phase' => 'intent',
+            'before' => $state,
+            'events' => [],
+        ];
+        $this->write($journal_path, $journal);
+
+        $this->progress = function (string $phase) use (&$journal, $journal_path): void {
+            $journal['phase'] = $phase;
+            $journal['events'][] = ['step' => $phase, 'at' => time()];
+            $this->write($journal_path, $journal);
+        };
+
+        try {
+            if ($active === null || $canary === null) {
+                throw new RuntimeException('No active canary deployment for this application');
+            }
+
+            if ($action === 'canary-weight') {
+                $weight = max(0, min(90, (int) ($request['weight'] ?? 10)));
+                $this->checkpoint('checking-local');
+                if (!$this->healthy($canary)) {
+                    throw new RuntimeException('Canary health check failed');
+                }
+                $this->checkpoint('routing-canary');
+                $this->route($app, $active, $canary, $weight);
+                $canary_entry['weight'] = $weight;
+                $state['canary'] = $canary_entry;
+                $this->write($state_path, $state);
+
+                $journal = array_replace($journal, [
+                    'status' => 'succeeded',
+                    'phase' => 'canary-updated',
+                    'active' => $active['operation'],
+                    'weight' => $weight,
+                    'canary' => [
+                        'operation' => $canary['operation'],
+                        'slot' => $canary['slot'],
+                        'weight' => $weight,
+                        'commit' => $canary['commit'] ?? null,
+                        'started_at' => $canary_entry['started_at'] ?? time(),
+                    ],
+                ]);
+                $journal['events'][] = ['step' => 'canary-updated', 'at' => time()];
+                $this->write($journal_path, $journal);
+                return $journal;
+            }
+
+            if ($action === 'canary-promote') {
+                $this->checkpoint('checking-local');
+                if (!$this->healthy($canary)) {
+                    throw new RuntimeException('Canary health check failed');
+                }
+                $this->checkpoint('switching');
+                $this->route($app, $canary);
+                if (!$this->healthy($canary)) {
+                    $this->route($app, $active, $canary, (int) ($canary_entry['weight'] ?? 10));
+                    throw new RuntimeException('Health check failed after traffic switch');
+                }
+                $this->checkpoint('checking-public');
+                if (($request['public_check'] ?? true) && !$this->health('https://' . $canary['domain'] . $canary['health'], 30)) {
+                    $this->route($app, $active, $canary, (int) ($canary_entry['weight'] ?? 10));
+                    throw new RuntimeException('Public health check failed');
+                }
+
+                $this->write($state_path, [
+                    'active' => $canary,
+                    'previous' => $active,
+                    'canary' => null,
+                ]);
+
+                try {
+                    if (($active['operation'] ?? '') !== ($canary['operation'] ?? '')) {
+                        $this->checkpoint('retiring-previous');
+                        $this->drain();
+                        $this->stop($active);
+                    }
+                } catch (Throwable) {
+                    $journal['retirement'] = 'previous jail still running; safe to retire later';
+                }
+
+                $journal = array_replace($journal, [
+                    'status' => 'succeeded',
+                    'phase' => 'accepted',
+                    'active' => $canary['operation'],
+                    'candidate' => $canary,
+                ]);
+                $journal['events'][] = ['step' => 'accepted', 'at' => time()];
+                $this->write($journal_path, $journal);
+                return $journal;
+            }
+
+            if ($action === 'canary-abort') {
+                $this->checkpoint('switching');
+                $this->route($app, $active);
+                $this->write($state_path, [
+                    'active' => $active,
+                    'previous' => $state['previous'] ?? null,
+                    'canary' => null,
+                ]);
+
+                try {
+                    if (($canary['operation'] ?? '') !== ($active['operation'] ?? '')) {
+                        $this->checkpoint('retiring-canary');
+                        $this->drain();
+                        $this->stop($canary);
+                    }
+                } catch (Throwable) {
+                    $journal['retirement'] = 'canary jail still running; safe to retire later';
+                }
+
+                $journal = array_replace($journal, [
+                    'status' => 'succeeded',
+                    'phase' => 'canary-aborted',
+                    'active' => $active['operation'],
+                ]);
+                $journal['events'][] = ['step' => 'canary-aborted', 'at' => time()];
+                $this->write($journal_path, $journal);
+                return $journal;
+            }
+
+            throw new InvalidArgumentException('Unknown canary action');
+        } catch (Throwable $error) {
+            $journal['status'] = 'failed';
+            $journal['error'] = $error instanceof RuntimeException || $error instanceof InvalidArgumentException
+                ? $error->getMessage()
+                : get_class($error);
+            $this->write($journal_path, $journal);
+            return $journal;
+        }
+    }
+
     public function destroy_app(array $request): array {
         $operation = self::match($request['operation'] ?? null, '[a-f0-9]{32}');
         $app = self::match($request['app'] ?? null, '[a-z][a-z0-9-]{0,39}');
@@ -1087,7 +1421,7 @@ class Runtime {
             );
             self::remove($this->root . '/apps/' . $app . '/valkey.json');
             self::remove($this->root . '/apps/' . $app . '/staged.json');
-            $this->write($this->root . '/apps/' . $app . '/state.json', ['active' => null, 'previous' => null]);
+            $this->write($this->root . '/apps/' . $app . '/state.json', ['active' => null, 'previous' => null, 'canary' => null]);
 
             if ($purge_data) {
                 $db_name = 'tc_' . $app_sql;
@@ -1159,8 +1493,18 @@ class Runtime {
             if (is_array($recorded) && ($recorded['status'] ?? '') === 'succeeded') {
                 return $recorded;
             }
-            $result = $this->builder()->build($request);
-            if (($result['status'] ?? '') === 'succeeded') {
+            try {
+                $result = $this->builder()->build($request);
+            } catch (RuntimeException|InvalidArgumentException $error) {
+                $reason = self::safe_error($error->getMessage());
+                $result = [
+                    'status' => 'failed',
+                    'operation' => $operation,
+                    'reason' => $reason !== '' ? $reason : get_class($error),
+                    'error' => $reason !== '' ? $reason : get_class($error),
+                ];
+            }
+            if (in_array($result['status'] ?? '', ['succeeded', 'failed'], true)) {
                 $this->write($journal_path, $result);
             }
             return $result;
@@ -1178,9 +1522,12 @@ class Runtime {
         foreach (glob($this->root . '/apps/*', GLOB_ONLYDIR) ?: [] as $directory) {
             $app = basename($directory);
             $keep = [];
-            foreach ($this->read($directory . '/state.json', []) as $release) {
+            $app_state = $this->read($directory . '/state.json', []);
+            foreach ($app_state as $release) {
                 if (is_array($release) && isset($release['operation'])) {
                     $keep[] = $release['operation'];
+                } elseif (is_array($release) && isset($release['release']['operation'])) {
+                    $keep[] = $release['release']['operation'];
                 }
             }
             $staged = $this->read($directory . '/staged.json', []);
@@ -1234,6 +1581,18 @@ class Runtime {
             require_once __DIR__ . '/metrics.php';
             return Metrics::collect($this->root, $this);
         }
+        if ($action === 'app-logs') {
+            return $this->app_logs($request);
+        }
+        if ($action === 'app-traffic') {
+            return $this->app_traffic($request);
+        }
+        if ($action === 'app-db-inspect') {
+            return $this->app_db_inspect($request);
+        }
+        if ($action === 'app-db-query') {
+            return $this->app_db_query($request);
+        }
         if ($action === 'status') {
             $operation = self::match($request['operation'] ?? null, '[a-f0-9]{32}');
             return array_intersect_key(
@@ -1265,6 +1624,9 @@ class Runtime {
             if ($action === 'boot') {
                 return $this->boot_active();
             }
+            if ($action === 'refresh-routes') {
+                return $this->refresh_routes();
+            }
             if ($action === 'cleanup') {
                 return $this->cleanup();
             }
@@ -1279,6 +1641,15 @@ class Runtime {
             }
             if ($action === 'destroy-app') {
                 return $this->destroy_app($request);
+            }
+            if ($action === 'deploy-service') {
+                return $this->deploy_service($request);
+            }
+            if ($action === 'destroy-service') {
+                return $this->destroy_service($request);
+            }
+            if (in_array($action, ['canary-weight', 'canary-promote', 'canary-abort'], true)) {
+                return $this->canary_operation($request);
             }
             if (!in_array($action, ['deploy', 'rollback'], true)) {
                 throw new InvalidArgumentException('Unknown operation');
@@ -1315,31 +1686,828 @@ class Runtime {
         return $this->bases_root . '/current';
     }
 
+    public function allocate_service_ip(string $name): string {
+        $name = self::match($name, '[a-z][a-z0-9_]{0,39}');
+        $path = $this->root . '/ips.json';
+        $ips = $this->read($path, []);
+        $key = 'svc:' . $name;
+        if (isset($ips[$key]) && is_string($ips[$key])) {
+            return $ips[$key];
+        }
+
+        $used = array_flip(array_values(array_filter($ips, 'is_string')));
+        for ($fourth = 1; $fourth <= 250; $fourth++) {
+            $candidate = "10.99.251.{$fourth}";
+            if (!isset($used[$candidate])) {
+                $ips[$key] = $candidate;
+                $this->write($path, $ips);
+                return $candidate;
+            }
+        }
+
+        throw new RuntimeException('No free loopback service IP addresses remaining in 10.99.251.1-10.99.251.250');
+    }
+
+    public function deploy_service(array $request): array {
+        $operation = self::match($request['operation'] ?? null, '[a-f0-9]{32}');
+        $spec = is_array($request['service'] ?? null) ? $request['service'] : [];
+        $name = self::match($spec['name'] ?? null, '[a-z][a-z0-9_]{0,39}');
+        $port = (int) ($spec['port'] ?? 8080);
+        if ($port < 1024 || $port > 65535) {
+            throw new InvalidArgumentException('Service port must be between 1024 and 65535');
+        }
+        $memory_mb = (int) ($spec['memory_mb'] ?? 512);
+        if ($memory_mb < 64 || $memory_mb > 8192) {
+            throw new InvalidArgumentException('Service memory must be between 64 and 8192 MiB');
+        }
+        $command = trim((string) ($spec['command'] ?? ''));
+        if ($command === '' || strlen($command) > 500 || preg_match('/[\x00-\x1F\x7F]/', $command)) {
+            throw new InvalidArgumentException('Service start command must be a single line up to 500 characters');
+        }
+        $setup = trim(str_replace(["\r\n", "\r"], "\n", (string) ($spec['setup'] ?? '')));
+        if (strlen($setup) > 4000 || preg_match('/[\x00-\x08\x0B-\x1F\x7F]/', $setup)) {
+            throw new InvalidArgumentException('Service setup commands are invalid or too long');
+        }
+        $raw_packages = $spec['packages'] ?? [];
+        if (!is_array($raw_packages) || count($raw_packages) > 30) {
+            throw new InvalidArgumentException('Service packages must be a list of at most 30 package names');
+        }
+        $packages = [];
+        foreach ($raw_packages as $pkg) {
+            if (!is_string($pkg)) {
+                throw new InvalidArgumentException('Invalid package name');
+            }
+            $packages[] = self::match(trim($pkg), '[a-zA-Z0-9][a-zA-Z0-9._+-]{0,63}');
+        }
+        $packages = array_values(array_unique($packages));
+
+        $env = is_array($request['env'] ?? null) ? $request['env'] : [];
+        $clean_env = [];
+        foreach ($env as $k => $v) {
+            $key = self::match((string) $k, '[A-Z_][A-Z0-9_]*');
+            $val = (string) $v;
+            if (strlen($val) > 8192 || str_contains($val, "\0") || str_contains($val, "\n") || str_contains($val, "\r")) {
+                throw new InvalidArgumentException('Invalid service environment variable: ' . $key);
+            }
+            $clean_env[$key] = $val;
+        }
+
+        $journal_path = $this->root . '/jobs/' . $operation . '.json';
+        $journal = [
+            'operation' => $operation,
+            'status' => 'running',
+            'phase' => 'staging-service',
+            'service' => $name,
+            'events' => [['step' => 'staging-service', 'at' => time()]],
+        ];
+        $this->write($journal_path, $journal);
+
+        $jail_name = 'tc_svc_' . $name;
+        $ip = $this->allocate_service_ip($name);
+        $jail_dataset = $this->pool . '/tc/jails/svc-' . $name;
+        $data_dataset = $this->pool . '/tc/services/custom/' . $name;
+        $jail_root = $this->jails_root . '/svc-' . $name;
+        $data_root = '/' . $data_dataset;
+        if ($this->root !== '/var/db/tc/runtime') {
+            $data_root = $this->root . '/services/' . $name . '/data';
+        }
+        $base_dir = $this->resolve_base_dir();
+        $conf_path = $this->jail_conf_dir . '/' . $jail_name . '.conf';
+        $fstab_path = $this->jail_conf_dir . '/' . $jail_name . '.fstab';
+
+        try {
+            if ($this->jail_running($jail_name)) {
+                $this->run(['jail', '-r', $jail_name], 60);
+            }
+            $this->remove_service_rctl($jail_name);
+            if ($this->root === '/var/db/tc/runtime') {
+                foreach ([$jail_root . '/dev', $jail_root . '/.base', $jail_root . '/var/db/service'] as $mnt) {
+                    $this->probe(['umount', '-f', $mnt], 15);
+                }
+            }
+
+            if (!$this->dataset_exists($jail_dataset)) {
+                $this->run(['zfs', 'clone', $this->pool . '/tc/skeleton@v1', $jail_dataset], 60);
+            }
+            $this->ensure_zfs_dataset($data_dataset, ['atime' => 'off', 'compression' => 'lz4']);
+
+            foreach ([$jail_root . '/.base', $jail_root . '/dev', $jail_root . '/etc/tc', $jail_root . '/var/db/service', $jail_root . '/var/log', $jail_root . '/var/run', $data_root] as $dir) {
+                self::directory($dir, 0755);
+            }
+            $this->grant_www($data_root, 0750, true);
+            $this->grant_www($jail_root . '/var/log', 0755, true);
+
+            if ($packages !== []) {
+                $journal['phase'] = 'installing-packages';
+                $this->write($journal_path, $journal);
+                $ports_repo = $this->detect_ports_repo();
+                $mounted_base = false;
+                $mounted_dev = false;
+                try {
+                    if ($this->root === '/var/db/tc/runtime') {
+                        $this->run(['mount', '-t', 'nullfs', '-o', 'ro', $base_dir, $jail_root . '/.base'], 30);
+                        $mounted_base = true;
+                        $this->run(['mount', '-t', 'devfs', 'devfs', $jail_root . '/dev'], 30);
+                        $mounted_dev = true;
+                    }
+                    $this->run(['env', 'ASSUME_ALWAYS_YES=yes', 'pkg', '-r', $jail_root, 'update', '-r', $ports_repo], 300);
+                    $this->run(array_merge(['env', 'ASSUME_ALWAYS_YES=yes', 'pkg', '-r', $jail_root, 'install', '-r', $ports_repo, '-y'], $packages), 900);
+                } finally {
+                    if ($mounted_dev) {
+                        $this->probe(['umount', $jail_root . '/dev'], 30);
+                    }
+                    if ($mounted_base) {
+                        $this->probe(['umount', $jail_root . '/.base'], 30);
+                    }
+                }
+            }
+
+            $all_env = array_merge([
+                'PATH' => '/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin',
+                'HOME' => '/var/db/service',
+                'TMPDIR' => '/tmp',
+                'PORT' => (string) $port,
+                'HOST' => '0.0.0.0',
+            ], $clean_env);
+            $env_lines = [];
+            foreach ($all_env as $k => $v) {
+                $escaped = str_replace("'", "'\"'\"'", $v);
+                $env_lines[] = "export {$k}='{$escaped}'";
+            }
+            $this->write($jail_root . '/etc/tc/service.env', implode("\n", $env_lines) . "\n", 0600);
+            $this->grant_www($jail_root . '/etc/tc/service.env', 0600, true);
+
+            $start_script = "#!/bin/sh\nset -eu\n. /etc/tc/service.env\ncd /var/db/service\nexec /bin/sh -c '"
+                . str_replace("'", "'\"'\"'", $command) . "'\n";
+            $this->write($jail_root . '/etc/tc/start.sh', $start_script, 0755);
+
+            if ($setup !== '') {
+                $setup_script = "#!/bin/sh\nset -eu\nexec >/var/log/setup.log 2>&1\n. /etc/tc/service.env\ncd /var/db/service\n{$setup}\n";
+                $this->write($jail_root . '/etc/tc/setup.sh', $setup_script, 0755);
+            } else {
+                self::remove($jail_root . '/etc/tc/setup.sh');
+            }
+
+            $fstab = "{$base_dir} {$jail_root}/.base nullfs ro 0 0\n"
+                . "{$data_root} {$jail_root}/var/db/service nullfs rw 0 0\n";
+            $this->write($fstab_path, $fstab, 0644);
+
+            $conf = $this->render_service_jail_conf($jail_name, $name, $jail_root, $ip, $fstab_path, $memory_mb);
+            $this->write($conf_path, $conf, 0644);
+
+            $this->run(['pfctl', '-t', 'tc_services', '-T', 'add', $ip], 30);
+
+            if ($setup !== '') {
+                $journal['phase'] = 'running-setup';
+                $this->write($journal_path, $journal);
+                // Give one-time setup 2x memory headroom (capped at 8192M) so fork()
+                // after large downloads/model loads does not hit rctl ENOMEM.
+                $setup_memory_mb = min(8192, max($memory_mb * 2, 2048));
+                $setup_conf = $this->render_service_jail_conf($jail_name, $name, $jail_root, $ip, $fstab_path, $setup_memory_mb, true);
+                $setup_conf_path = $this->jail_conf_dir . '/' . $jail_name . '.setup.conf';
+                $this->write($setup_conf_path, $setup_conf, 0644);
+                try {
+                    $this->run(['jail', '-c', '-f', $setup_conf_path, $jail_name], 60);
+                    $this->run(['jexec', $jail_name, '/sbin/ldconfig', '/lib', '/usr/lib', '/usr/local/lib'], 30);
+                    $this->run(['jexec', $jail_name, '/bin/sh', '/etc/tc/setup.sh'], 1800);
+                    $this->run(['jexec', $jail_name, 'chown', '-R', 'www:www', '/var/db/service'], 120);
+                } finally {
+                    if ($this->jail_running($jail_name)) {
+                        $this->probe(['jail', '-r', $jail_name], 60);
+                    }
+                    $this->remove_service_rctl($jail_name);
+                    self::remove($setup_conf_path);
+                }
+            }
+
+            $journal['phase'] = 'starting-service';
+            $this->write($journal_path, $journal);
+            $this->run(['jail', '-c', '-f', $conf_path, $jail_name], 60);
+            $this->apply_service_rctl($jail_name, $memory_mb);
+
+            $journal['phase'] = 'checking-service';
+            $this->write($journal_path, $journal);
+            $ready = $this->tcp_ready($ip, $port, 90);
+            if (!$ready) {
+                throw new RuntimeException("Service {$name} did not begin listening on {$ip}:{$port}");
+            }
+
+            $state = [
+                'name' => $name,
+                'jail' => $jail_name,
+                'ip' => $ip,
+                'port' => $port,
+                'url' => "http://{$ip}:{$port}",
+                'memory_mb' => $memory_mb,
+                'jail_conf' => $conf_path,
+                'packages' => $packages,
+                'command' => $command,
+                'deployed_at' => time(),
+            ];
+            $this->write($this->root . '/services/' . $name . '/state.json', $state, 0600);
+
+            $journal = array_replace($journal, [
+                'status' => 'succeeded',
+                'phase' => 'running',
+                'name' => $name,
+                'jail' => $jail_name,
+                'ip' => $ip,
+                'port' => $port,
+                'url' => $state['url'],
+                'memory_mb' => $memory_mb,
+            ]);
+            $journal['events'][] = ['step' => 'running', 'at' => time()];
+            $this->write($journal_path, $journal);
+            return $journal;
+        } catch (Throwable $error) {
+            if ($this->jail_running($jail_name)) {
+                $this->probe(['jail', '-r', $jail_name], 60);
+            }
+            $this->remove_service_rctl($jail_name);
+            $journal['status'] = 'failed';
+            $journal['error'] = $error instanceof RuntimeException || $error instanceof InvalidArgumentException
+                ? $error->getMessage()
+                : get_class($error);
+            $this->write($journal_path, $journal);
+            return $journal;
+        }
+    }
+
+    public function destroy_service(array $request): array {
+        $operation = self::match($request['operation'] ?? null, '[a-f0-9]{32}');
+        $name = self::match($request['name'] ?? null, '[a-z][a-z0-9_]{0,39}');
+        $journal_path = $this->root . '/jobs/' . $operation . '.json';
+        $journal = [
+            'operation' => $operation,
+            'status' => 'running',
+            'phase' => 'destroying-service',
+            'service' => $name,
+            'events' => [['step' => 'destroying-service', 'at' => time()]],
+        ];
+        $this->write($journal_path, $journal);
+
+        try {
+            $jail_name = 'tc_svc_' . $name;
+            $ips_path = $this->root . '/ips.json';
+            $ips = $this->read($ips_path, []);
+            $ip = $ips['svc:' . $name] ?? null;
+
+            if ($this->jail_running($jail_name)) {
+                $this->run(['jail', '-r', $jail_name], 60);
+            }
+            if (is_string($ip) && $ip !== '') {
+                $this->probe(['pfctl', '-t', 'tc_services', '-T', 'delete', $ip], 30);
+            }
+            unset($ips['svc:' . $name]);
+            $this->write($ips_path, $ips);
+            $this->remove_service_rctl($jail_name);
+
+            self::remove($this->jail_conf_dir . '/' . $jail_name . '.conf');
+            self::remove($this->jail_conf_dir . '/' . $jail_name . '.fstab');
+            self::remove($this->jail_conf_dir . '/' . $jail_name . '.setup.conf');
+
+            foreach ([$this->pool . '/tc/jails/svc-' . $name, $this->pool . '/tc/services/custom/' . $name] as $ds) {
+                if ($this->dataset_exists($ds)) {
+                    $this->run(['zfs', 'destroy', '-r', $ds], 60);
+                }
+            }
+
+            $meta = $this->root . '/services/' . $name;
+            if (is_dir($meta)) {
+                self::remove_tree($meta);
+            }
+
+            $journal['status'] = 'succeeded';
+            $journal['phase'] = 'destroyed';
+            $journal['events'][] = ['step' => 'destroyed', 'at' => time()];
+            $this->write($journal_path, $journal);
+            return $journal;
+        } catch (Throwable $error) {
+            $journal['status'] = 'failed';
+            $journal['error'] = $error instanceof RuntimeException || $error instanceof InvalidArgumentException
+                ? $error->getMessage()
+                : get_class($error);
+            $this->write($journal_path, $journal);
+            return $journal;
+        }
+    }
+
+    public function apply_service_rctl(string $jail, int $memory_mb): void {
+        $jail = self::match($jail, 'tc_svc_[a-z][a-z0-9_]{0,39}');
+        $memory_mb = max(64, min(8192, $memory_mb));
+        foreach ([
+            "jail:{$jail}:memoryuse:deny={$memory_mb}M",
+            "jail:{$jail}:swapuse:deny={$memory_mb}M",
+            "jail:{$jail}:pcpu:deny=200",
+            "jail:{$jail}:maxproc:deny=256",
+            "jail:{$jail}:openfiles:deny=4096",
+        ] as $rule) {
+            $this->run(['rctl', '-a', $rule], 30);
+        }
+    }
+
+    public function remove_service_rctl(string $jail): void {
+        $jail = self::match($jail, 'tc_svc_[a-z][a-z0-9_]{0,39}');
+        $rules = $this->probe(['rctl', "jail:{$jail}"], 15);
+        if ($rules !== null && trim($rules) !== '') {
+            $this->run(['rctl', '-r', "jail:{$jail}"], 30);
+        }
+    }
+
+    public function tcp_ready(string $ip, int $port, int $attempts = 90): bool {
+        $context = $this->root === '/var/db/tc/runtime'
+            ? stream_context_create(['socket' => ['bindto' => '10.99.0.1:0']])
+            : null;
+        for ($i = 0; $i < $attempts; $i++) {
+            $conn = $context !== null
+                ? @stream_socket_client("tcp://{$ip}:{$port}", $errno, $errstr, 1.0, STREAM_CLIENT_CONNECT, $context)
+                : @fsockopen($ip, $port, $errno, $errstr, 1);
+            if (is_resource($conn)) {
+                fclose($conn);
+                return true;
+            }
+            if ($i + 1 < $attempts) {
+                sleep(1);
+            }
+        }
+        return false;
+    }
+
+    private function detect_ports_repo(): string {
+        $raw = $this->probe(['pkg', '-vv'], 15) ?? '';
+        if (preg_match('/^\s*FreeBSD-ports\s*:/m', $raw) === 1) {
+            return 'FreeBSD-ports';
+        }
+        return 'FreeBSD';
+    }
+
+    private function render_service_jail_conf(
+        string $jail_name,
+        string $name,
+        string $jail_root,
+        string $ip,
+        string $fstab_path,
+        int $memory_mb,
+        bool $setup_only = false,
+    ): string {
+        $maxproc = $setup_only ? 512 : 256;
+        $poststart = "if [ \\$(sysctl -n kern.racct.enable 2>/dev/null || echo 0) = 1 ]; then "
+            . "/usr/bin/rctl -a jail:{$jail_name}:memoryuse:deny={$memory_mb}M; "
+            . "/usr/bin/rctl -a jail:{$jail_name}:swapuse:deny={$memory_mb}M; "
+            . "/usr/bin/rctl -a jail:{$jail_name}:pcpu:deny=200; "
+            . "/usr/bin/rctl -a jail:{$jail_name}:maxproc:deny={$maxproc}; "
+            . "/usr/bin/rctl -a jail:{$jail_name}:openfiles:deny=4096; fi";
+
+        $start_cmd = $setup_only
+            ? '/sbin/ldconfig /lib /usr/lib /usr/local/lib'
+            : "/bin/sh -c '/sbin/ldconfig /lib /usr/lib /usr/local/lib && /usr/sbin/daemon -f -r -P /var/run/tc_service.pid -o /var/log/service.log -u www /bin/sh /etc/tc/start.sh'";
+
+        $stop_cmd = $setup_only
+            ? '/usr/bin/true'
+            : "/bin/sh -c 'test -f /var/run/tc_service.pid && kill -TERM $(cat /var/run/tc_service.pid) || true'";
+
+        return "{$jail_name} {\n"
+            . "    host.hostname = \"{$name}.svc.tc.internal\";\n"
+            . "    path = \"{$jail_root}\";\n"
+            . "    ip4.addr = \"lo1|{$ip}/32\";\n"
+            . "    mount.fstab = \"{$fstab_path}\";\n"
+            . "    mount.devfs;\n"
+            . "    devfs_ruleset = 4;\n"
+            . "    allow.raw_sockets = 0;\n"
+            . "    allow.mount = 0;\n"
+            . "    allow.chflags = 0;\n"
+            . "    enforce_statfs = 2;\n"
+            . "    exec.clean;\n"
+            . "    exec.start = \"{$start_cmd}\";\n"
+            . "    exec.stop = \"{$stop_cmd}\";\n"
+            . "    exec.poststart = \"{$poststart}\";\n"
+            . "    exec.poststop = \"/usr/bin/rctl -r jail:{$jail_name} || true\";\n"
+            . "    persist;\n"
+            . "}\n";
+    }
+
+    public function refresh_routes(): array {
+        $refreshed = [];
+        $reloaded_fpm = [];
+        foreach (glob($this->root . '/apps/*/state.json') ?: [] as $state_path) {
+            $app = basename(dirname($state_path));
+            $state = $this->read($state_path, []);
+            $active = is_array($state['active'] ?? null) ? $state['active'] : null;
+            if ($active === null) {
+                continue;
+            }
+            $canary = is_array($state['canary']['release'] ?? null) ? $state['canary']['release'] : null;
+            $weight = (int) ($state['canary']['weight'] ?? 0);
+            $this->route($app, $active, $canary, $weight);
+            $refreshed[] = $app;
+
+            foreach (array_filter([$active, $canary]) as $slot_release) {
+                if ($this->ensure_slot_logging($app, $slot_release)) {
+                    $reloaded_fpm[] = $app . ':' . (string) ($slot_release['slot'] ?? '');
+                }
+            }
+        }
+        return ['status' => 'succeeded', 'refreshed' => $refreshed, 'reloaded_fpm' => $reloaded_fpm];
+    }
+
+    private function ensure_slot_logging(string $app, array $release): bool {
+        $slot = (string) ($release['slot'] ?? '');
+        if ($slot !== 'blue' && $slot !== 'green') {
+            return false;
+        }
+        $jail_root = $this->jails_root . '/' . $app . '-' . $slot;
+        $fpm_conf_path = $jail_root . '/etc/tc/php-fpm.conf';
+        if (!is_file($fpm_conf_path)) {
+            return false;
+        }
+
+        $log_file = $jail_root . '/var/log/php-fpm.log';
+        if (!is_file($log_file)) {
+            $this->write($log_file, '', 0640);
+        }
+        $this->grant_www($log_file, 0640, writable: true);
+
+        $conf = (string) file_get_contents($fpm_conf_path);
+        $additions = [];
+        if (!str_contains($conf, 'catch_workers_output')) {
+            $additions[] = 'catch_workers_output = yes';
+        }
+        if (!str_contains($conf, 'decorate_workers_output')) {
+            $additions[] = 'decorate_workers_output = no';
+        }
+        if (!str_contains($conf, 'php_admin_flag[log_errors]')) {
+            $additions[] = 'php_admin_flag[log_errors] = on';
+        }
+        if (!str_contains($conf, 'php_admin_value[error_log]')) {
+            $additions[] = 'php_admin_value[error_log] = /var/log/php-fpm.log';
+        }
+        if ($additions === []) {
+            return false;
+        }
+
+        $updated = rtrim($conf) . "\n" . implode("\n", $additions) . "\n";
+        $this->write($fpm_conf_path, $updated, 0600);
+
+        $jail = (string) ($release['jail'] ?? '');
+        if ($jail !== '' && $this->jail_running($jail)) {
+            $this->probe(['jexec', $jail, '/bin/sh', '-c', 'test -f /var/run/php-fpm/php-fpm.pid && kill -USR2 $(cat /var/run/php-fpm/php-fpm.pid)'], 15);
+            return true;
+        }
+        return false;
+    }
+
+    public function app_logs(array $request): array {
+        $app = self::match($request['app'] ?? null, '[a-z][a-z0-9-]{0,39}');
+        $limit = max(1, min(500, (int) ($request['limit'] ?? 250)));
+        $since = is_string($request['since'] ?? null) ? trim($request['since']) : '';
+        $state = $this->read($this->root . '/apps/' . $app . '/state.json', []);
+
+        $sources = [];
+        if (is_array($state['active'] ?? null) && !empty($state['active']['slot'])) {
+            $slot = self::match((string) $state['active']['slot'], 'blue|green');
+            $sources['stable'] = $this->jails_root . '/' . $app . '-' . $slot . '/var/log/php-fpm.log';
+        }
+        if (is_array($state['canary']['release'] ?? null) && !empty($state['canary']['release']['slot'])) {
+            $slot = self::match((string) $state['canary']['release']['slot'], 'blue|green');
+            $sources['canary'] = $this->jails_root . '/' . $app . '-' . $slot . '/var/log/php-fpm.log';
+        }
+
+        // Build 24 hourly buckets ending at the current UTC hour.
+        $now_hour = (int) floor(time() / 3600) * 3600;
+        $rates_map = [];
+        for ($i = 23; $i >= 0; $i--) {
+            $h = gmdate('Y-m-d\TH:00:00\Z', $now_hour - $i * 3600);
+            $rates_map[$h] = ['hour' => $h, 'errors' => 0, 'warnings' => 0, 'total' => 0];
+        }
+
+        $entries = [];
+        $seq = 0;
+        foreach ($sources as $label => $log_file) {
+            if (!is_file($log_file) || !is_readable($log_file)) {
+                continue;
+            }
+            $raw = self::read_tail($log_file, 524288);
+            if ($raw === '') {
+                continue;
+            }
+            $file_mtime = (int) (@filemtime($log_file) ?: time());
+            $last_ts = $file_mtime;
+            foreach (preg_split('/\r?\n/', $raw) ?: [] as $line) {
+                $line = rtrim($line);
+                if ($line === '') {
+                    continue;
+                }
+                $parsed = self::parse_log_line($line, $last_ts);
+                $last_ts = $parsed['ts'];
+                $hour_key = gmdate('Y-m-d\TH:00:00\Z', $parsed['ts']);
+                if (isset($rates_map[$hour_key])) {
+                    $rates_map[$hour_key]['total']++;
+                    if ($parsed['level'] === 'error') {
+                        $rates_map[$hour_key]['errors']++;
+                    } elseif ($parsed['level'] === 'warn') {
+                        $rates_map[$hour_key]['warnings']++;
+                    }
+                }
+                $seq++;
+                $key = sprintf('%012d:%06d:%s', $parsed['ts'], $seq, substr(hash('sha256', $label . '|' . $parsed['text']), 0, 8));
+                $entries[] = [
+                    'key' => $key,
+                    'ts' => $parsed['ts'],
+                    'time' => gmdate('Y-m-d\TH:i:s\Z', $parsed['ts']),
+                    'level' => $parsed['level'],
+                    'text' => $parsed['text'],
+                    'source' => $label,
+                ];
+            }
+        }
+
+        usort($entries, static fn(array $a, array $b): int => $a['ts'] <=> $b['ts'] ?: strcmp($a['key'], $b['key']));
+
+        if ($since !== '') {
+            $idx = null;
+            foreach ($entries as $i => $entry) {
+                if ($entry['key'] === $since) {
+                    $idx = $i;
+                    break;
+                }
+            }
+            if ($idx !== null) {
+                $entries = array_slice($entries, $idx + 1);
+            } else {
+                $since_ts = (int) strtok($since, ':');
+                if ($since_ts > 0) {
+                    $entries = array_values(array_filter($entries, static fn(array $e): bool => $e['ts'] > $since_ts));
+                }
+            }
+        }
+
+        if (count($entries) > $limit) {
+            $entries = array_slice($entries, -$limit);
+        }
+
+        $cursor = $entries !== [] ? $entries[count($entries) - 1]['key'] : $since;
+        $lines = array_map(static fn(array $e): array => [
+            'time' => $e['time'],
+            'level' => $e['level'],
+            'text' => $e['text'],
+            'source' => $e['source'],
+        ], $entries);
+
+        return [
+            'ok' => true,
+            'lines' => $lines,
+            'cursor' => $cursor,
+            'rates' => array_values($rates_map),
+        ];
+    }
+
+    public function app_traffic(array $request): array {
+        $app = self::match($request['app'] ?? null, '[a-z][a-z0-9-]{0,39}');
+        $since_raw = is_string($request['since'] ?? null) ? trim($request['since']) : '';
+        $since_ts = is_numeric($since_raw) ? (float) $since_raw : 0.0;
+        $cutoff = $since_ts > 0.0 ? $since_ts : (float) (time() - 300);
+
+        $log_file = $this->root . '/logs/' . $app . '-access.log';
+        $requests = [];
+        $max_ts = $since_ts;
+
+        if (is_file($log_file) && is_readable($log_file)) {
+            $raw = self::read_tail($log_file, 2097152);
+            foreach (preg_split('/\r?\n/', $raw) ?: [] as $line) {
+                $line = trim($line);
+                if ($line === '' || $line[0] !== '{') {
+                    continue;
+                }
+                $row = json_decode($line, true);
+                if (!is_array($row) || !isset($row['ts'])) {
+                    continue;
+                }
+                $ts = (float) $row['ts'];
+                if ($since_ts > 0.0 ? $ts <= $since_ts : $ts < $cutoff) {
+                    continue;
+                }
+                if ($ts > $max_ts) {
+                    $max_ts = $ts;
+                }
+                $req = is_array($row['request'] ?? null) ? $row['request'] : [];
+                $sec = (int) floor($ts);
+                $msec = (int) round(($ts - $sec) * 1000);
+                if ($msec >= 1000) {
+                    $sec++;
+                    $msec = 0;
+                }
+                $requests[] = [
+                    'time' => gmdate('Y-m-d\TH:i:s', $sec) . sprintf('.%03dZ', $msec),
+                    'method' => (string) ($req['method'] ?? 'GET'),
+                    'host' => (string) ($req['host'] ?? ''),
+                    'path' => (string) ($req['uri'] ?? '/'),
+                    'status' => (int) ($row['status'] ?? 0),
+                    'ms' => round((float) ($row['duration'] ?? 0) * 1000, 1),
+                    'bytes' => (int) ($row['size'] ?? 0),
+                ];
+            }
+        }
+
+        if (count($requests) > 2000) {
+            $requests = array_slice($requests, -2000);
+        }
+
+        return [
+            'ok' => true,
+            'cursor' => $max_ts > 0.0 ? sprintf('%.6f', $max_ts) : $since_raw,
+            'requests' => $requests,
+        ];
+    }
+
+    public function app_db_inspect(array $request): array {
+        require_once __DIR__ . '/app_database.php';
+        $app = self::match($request['app'] ?? null, '[a-z][a-z0-9-]{0,39}');
+        $ctx = $this->app_db_context($app);
+        if (isset($ctx['error'])) {
+            return ['ok' => false, 'error' => $ctx['error']];
+        }
+
+        $table = isset($request['table']) && is_string($request['table']) && $request['table'] !== '' ? $request['table'] : null;
+        $view = ($request['view'] ?? 'data') === 'structure' ? 'structure' : 'data';
+        $page = max(1, (int) ($request['page'] ?? 1));
+        $sql_files = App_database::discover_sql_files($ctx['release_dir']);
+
+        try {
+            $pdo = App_database::open($this->mariadb_socket, $ctx['database'], $ctx['user'], $ctx['password']);
+            return App_database::inspect($pdo, $ctx['database'], $table, $view, $page, $sql_files);
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => self::safe_error($e->getMessage(), 300)];
+        }
+    }
+
+    public function app_db_query(array $request): array {
+        require_once __DIR__ . '/app_database.php';
+        $app = self::match($request['app'] ?? null, '[a-z][a-z0-9-]{0,39}');
+        $ctx = $this->app_db_context($app);
+        if (isset($ctx['error'])) {
+            return ['ok' => false, 'error' => $ctx['error']];
+        }
+
+        $mode = ($request['mode'] ?? 'query') === 'import' ? 'import' : 'query';
+        $allow_changes = !empty($request['allow_changes']) || $mode === 'import';
+        $sql = is_string($request['sql'] ?? null) ? $request['sql'] : '';
+
+        if (!empty($request['release_sql_file']) && is_string($request['release_sql_file'])) {
+            $rel = ltrim(str_replace('\\', '/', trim($request['release_sql_file'])), '/');
+            if (!App_database::is_offered_sql_path($rel)) {
+                return ['ok' => false, 'error' => 'Invalid repository SQL file path.'];
+            }
+            $release_real = realpath($ctx['release_dir']);
+            $target_real = $release_real !== false ? realpath($release_real . '/' . $rel) : false;
+            if ($release_real === false || $target_real === false || !str_starts_with($target_real, $release_real . DIRECTORY_SEPARATOR) || !is_file($target_real)) {
+                return ['ok' => false, 'error' => 'SQL file not found in the active release.'];
+            }
+            $size = (int) (@filesize($target_real) ?: 0);
+            if ($size > App_database::MAX_IMPORT_BYTES) {
+                return ['ok' => false, 'error' => 'SQL file exceeds the 512 KB import limit.'];
+            }
+            $sql = (string) file_get_contents($target_real);
+            $mode = 'import';
+            $allow_changes = true;
+        }
+
+        try {
+            $pdo = App_database::open($this->mariadb_socket, $ctx['database'], $ctx['user'], $ctx['password']);
+            return App_database::execute($pdo, $sql, $allow_changes, $mode);
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => self::safe_error($e->getMessage(), 300)];
+        }
+    }
+
+    /** @return array{database?: string, user?: string, password?: string, release_dir?: string, error?: string} */
+    private function app_db_context(string $app): array {
+        $state = $this->read($this->root . '/apps/' . $app . '/state.json', []);
+        $active = is_array($state['active'] ?? null) ? $state['active'] : null;
+        if ($active === null) {
+            return ['error' => 'Deploy this app first to provision its database.'];
+        }
+        $op = (string) ($active['operation'] ?? '');
+        $overlay_db = $this->root . '/apps/' . $app . '/releases/' . $op . '/config/database.php';
+        $creds = App_database::credentials_from_overlay($overlay_db);
+        if ($creds === null) {
+            return ['error' => 'Database credentials are not ready yet. Redeploy the app to provision them.'];
+        }
+        $release_dir = (string) ($active['release_path'] ?? ($this->releases_root . '/' . $app . '/releases/' . $op));
+        return $creds + ['release_dir' => $release_dir];
+    }
+
+    private static function read_tail(string $path, int $max_bytes): string {
+        $size = @filesize($path);
+        if (!is_int($size) || $size <= 0) {
+            return '';
+        }
+        $fp = @fopen($path, 'rb');
+        if ($fp === false) {
+            return '';
+        }
+        try {
+            if ($size > $max_bytes) {
+                fseek($fp, -$max_bytes, SEEK_END);
+                fgets($fp); // discard partial first line
+            }
+            return (string) stream_get_contents($fp);
+        } finally {
+            fclose($fp);
+        }
+    }
+
+    /** @return array{ts: int, level: string, text: string} */
+    private static function parse_log_line(string $line, int $fallback_ts): array {
+        $ts = $fallback_ts;
+        $text = $line;
+
+        if (preg_match('/^\[(\d{2}-[A-Za-z]{3}-\d{4}\s+\d{2}:\d{2}:\d{2}(?:\s+[A-Za-z0-9_\/+-]+)?)\]\s*(.*)$/', $line, $m) === 1) {
+            $parsed_ts = strtotime($m[1]);
+            if ($parsed_ts !== false) {
+                $ts = $parsed_ts;
+            }
+            $text = $m[2];
+        } elseif (preg_match('/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s+(.*)$/', $line, $m) === 1) {
+            $parsed_ts = strtotime($m[1]);
+            if ($parsed_ts !== false) {
+                $ts = $parsed_ts;
+            }
+            $text = $m[2];
+        }
+
+        $text = self::safe_error($text, 1000);
+        $level = '';
+        if (preg_match('/^NOTICE:\s/', $text) === 1) {
+            // PHP-FPM daemon lifecycle notices (fpm is running, ready to handle connections, etc.).
+            $level = '';
+        } elseif (preg_match('/\b(Fatal error|Parse error|Core error|Uncaught|CRITICAL|ALERT|EMERGENCY|ERROR)\b/i', $text) === 1) {
+            $level = 'error';
+        } elseif (preg_match('/\b(PHP Notice|Warning|Deprecated|WARNING)\b/i', $text) === 1) {
+            $level = 'warn';
+        }
+
+        return ['ts' => $ts, 'level' => $level, 'text' => $text];
+    }
+
     public function boot_active(): array {
         $started = [];
         $already_running = [];
         $failed = [];
+        foreach (glob($this->root . '/services/*/state.json') ?: [] as $svc_path) {
+            $svc_name = basename(dirname($svc_path));
+            $svc = $this->read($svc_path, []);
+            if (!is_array($svc) || empty($svc['jail']) || empty($svc['ip'])) {
+                continue;
+            }
+            $jail = (string) $svc['jail'];
+            $ip = (string) $svc['ip'];
+            $conf = (string) ($svc['jail_conf'] ?? ($this->jail_conf_dir . '/' . $jail . '.conf'));
+            $memory_mb = max(64, (int) ($svc['memory_mb'] ?? 512));
+            try {
+                if ($this->jail_running($jail)) {
+                    $this->run(['pfctl', '-t', 'tc_services', '-T', 'add', $ip], 30);
+                    $already_running[] = 'service:' . $svc_name;
+                } else {
+                    $this->run(['pfctl', '-t', 'tc_services', '-T', 'add', $ip], 30);
+                    $this->run(['jail', '-c', '-f', $conf, $jail], 60);
+                    $this->apply_service_rctl($jail, $memory_mb);
+                    $started[] = 'service:' . $svc_name;
+                }
+            } catch (Throwable $error) {
+                $failed['service:' . $svc_name] = $error instanceof RuntimeException || $error instanceof InvalidArgumentException
+                    ? $error->getMessage()
+                    : get_class($error);
+            }
+        }
         foreach (glob($this->root . '/apps/*/state.json') ?: [] as $state_path) {
             $app = basename(dirname($state_path));
             $state = $this->read($state_path, []);
-            $active = is_array($state) ? ($state['active'] ?? null) : null;
-            if (!is_array($active) || empty($active['jail']) || empty($active['ip'])) {
-                continue;
+            $slots = [];
+            if (is_array($state) && is_array($state['active'] ?? null)) {
+                $slots[$app] = $state['active'];
             }
-            $jail = (string) $active['jail'];
-            $ip = (string) $active['ip'];
-            try {
-                if ($this->jail_running($jail)) {
-                    $this->run(['pfctl', '-t', 'tc_jails', '-T', 'add', $ip], 30);
-                    $already_running[] = $app;
-                } else {
-                    $this->start($active);
-                    $started[] = $app;
+            if (is_array($state) && is_array($state['canary']['release'] ?? null)) {
+                $slots[$app . ':canary'] = $state['canary']['release'];
+            }
+            foreach ($slots as $label => $slot_release) {
+                if (empty($slot_release['jail']) || empty($slot_release['ip'])) {
+                    continue;
                 }
-            } catch (Throwable $error) {
-                $failed[$app] = $error instanceof RuntimeException || $error instanceof InvalidArgumentException
-                    ? $error->getMessage()
-                    : get_class($error);
+                $jail = (string) $slot_release['jail'];
+                $ip = (string) $slot_release['ip'];
+                try {
+                    if ($this->jail_running($jail)) {
+                        $this->run(['pfctl', '-t', 'tc_jails', '-T', 'add', $ip], 30);
+                        $already_running[] = $label;
+                    } else {
+                        $this->start($slot_release);
+                        $started[] = $label;
+                    }
+                } catch (Throwable $error) {
+                    $failed[$label] = $error instanceof RuntimeException || $error instanceof InvalidArgumentException
+                        ? $error->getMessage()
+                        : get_class($error);
+                }
             }
         }
         return [
@@ -1439,13 +2607,26 @@ class Runtime {
 
     private function render_database_config(array $db): string {
         $export = static fn(string $value): string => var_export($value, true);
+        $user = $export((string) $db['username']);
+        $pass = $export((string) $db['password']);
+        $database = $export((string) $db['database']);
         return "<?php\n"
             . "// Managed by trongate.cloud runtime\n"
+            . "\$databases = [\n"
+            . "    'default' => [\n"
+            . "        'host' => 'localhost',\n"
+            . "        'port' => '3306',\n"
+            . "        'user' => " . $user . ",\n"
+            . "        'password' => " . $pass . ",\n"
+            . "        'database' => " . $database . ",\n"
+            . "    ],\n"
+            . "];\n"
+            . "\$GLOBALS['databases'] = \$databases;\n"
             . "define('HOST', 'localhost');\n"
             . "define('PORT', '3306');\n"
-            . "define('USER', " . $export((string) $db['username']) . ");\n"
-            . "define('PASSWORD', " . $export((string) $db['password']) . ");\n"
-            . "define('DATABASE', " . $export((string) $db['database']) . ");\n";
+            . "define('USER', " . $user . ");\n"
+            . "define('PASSWORD', " . $pass . ");\n"
+            . "define('DATABASE', " . $database . ");\n";
     }
 
     private function render_php_fpm_conf(int $memory_mb, array $secrets, ?array $valkey): string {
@@ -1470,9 +2651,13 @@ class Runtime {
             'pm.process_idle_timeout = 10s',
             'pm.max_requests = 500',
             'clear_env = yes',
+            'catch_workers_output = yes',
+            'decorate_workers_output = no',
             'env[PHP_INI_SCAN_DIR] = /usr/local/etc/php-base:/etc/tc/php.d',
             'env[PATH] = /usr/local/bin:/usr/bin:/bin',
             'env[TMPDIR] = /tmp',
+            'php_admin_flag[log_errors] = on',
+            'php_admin_value[error_log] = /var/log/php-fpm.log',
             'php_admin_value[memory_limit] = ' . $worker_memory . 'M',
             'php_admin_value[pdo_mysql.default_socket] = /var/run/tc/mariadb/mysqld.sock',
             'php_admin_value[mysqli.default_socket] = /var/run/tc/mariadb/mysqld.sock',
@@ -1588,6 +2773,53 @@ class Runtime {
         return $this->probe(['jls', '-j', $jail, 'name'], 10) !== null;
     }
 
+    private static function configured_pool(string $config_path = '/etc/tc-resources.json'): string {
+        $env_pool = getenv('TC_POOL');
+        if (is_string($env_pool) && $env_pool !== '' && preg_match('/\A[A-Za-z][A-Za-z0-9_.:-]{0,63}\z/', $env_pool) === 1) {
+            return $env_pool;
+        }
+        if (is_file($config_path)) {
+            $raw = @file_get_contents($config_path);
+            if (is_string($raw) && $raw !== '') {
+                $decoded = json_decode($raw, true);
+                $pool = is_array($decoded) ? ($decoded['zfs_pool'] ?? null) : null;
+                if (is_string($pool) && $pool !== '' && preg_match('/\A[A-Za-z][A-Za-z0-9_.:-]{0,63}\z/', $pool) === 1) {
+                    return $pool;
+                }
+            }
+        }
+        return self::DEFAULT_POOL;
+    }
+
+    public static function safe_error(string $raw, int $max_chars = 500): string {
+        $text = preg_replace('/\x1b\[[0-9;]*[a-zA-Z]/', '', $raw) ?? $raw;
+        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text) ?? $text;
+        $text = preg_replace('~(https?://)[^\s/@]+:[^\s/@]+@~i', '$1[redacted]@', $text) ?? $text;
+        $text = preg_replace('/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*/i', '$1 [redacted]', $text) ?? $text;
+        $text = trim(preg_replace('/\s+/', ' ', $text) ?? $text);
+        if (strlen($text) > $max_chars) {
+            $text = substr($text, 0, $max_chars - 1) . '…';
+        }
+        return $text;
+    }
+
+    private static function configured_behind_tunnel(string $config_path = '/etc/tc-resources.json'): bool {
+        $env_flag = getenv('TC_BEHIND_TUNNEL');
+        if ($env_flag !== false && $env_flag !== '') {
+            return in_array(strtolower($env_flag), ['1', 'true', 'yes'], true);
+        }
+        if (is_file($config_path)) {
+            $raw = @file_get_contents($config_path);
+            if (is_string($raw) && $raw !== '') {
+                $decoded = json_decode($raw, true);
+                if (is_array($decoded) && isset($decoded['behind_tunnel'])) {
+                    return (bool) $decoded['behind_tunnel'];
+                }
+            }
+        }
+        return false;
+    }
+
     private static function encode_json(mixed $value): string {
         return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     }
@@ -1607,7 +2839,14 @@ if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
         $result = (new Runtime())->dispatch(json_decode($data, true, 512, JSON_THROW_ON_ERROR));
         echo json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
     } catch (Throwable $error) {
-        // Never disclose request bodies, credentials, or stderr output.
-        echo json_encode(['status' => 'uncertain', 'error' => get_class($error)], JSON_UNESCAPED_SLASHES) . "\n";
+        // Never disclose request bodies or credentials, while surfacing safe failure reasons.
+        $payload = ['status' => 'uncertain', 'error' => get_class($error)];
+        if ($error instanceof RuntimeException || $error instanceof InvalidArgumentException) {
+            $reason = Runtime::safe_error($error->getMessage());
+            if ($reason !== '') {
+                $payload['reason'] = $reason;
+            }
+        }
+        echo json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n";
     }
 }

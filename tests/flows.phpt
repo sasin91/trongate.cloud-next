@@ -36,17 +36,13 @@ try {
     ];
     $p = [
         'label' => 'demo',
-        'server' => 'web',
         'repository' => 'owner/repo',
         'branch' => 'main',
         'domain' => 'demo.example.com',
         'php_version' => '8.4',
-        'database' => '1',
         'php_extensions' => 'imagick, gmp, mbstring',
         'build_commands' => "npm ci\nnpm run build",
-        'disk_quota_mb' => '2048',
         'environment' => "DB_PASSWORD=fixture-private-value\nAPP_ENV=production",
-        'persistent_paths' => 'public/uploads',
     ];
 
     $job = $flow->_plan_launch($p, 'request-one', $source);
@@ -54,13 +50,14 @@ try {
     check((int) $s->db->query_bind('SELECT COUNT(*) FROM jobs', [], 'statement')->fetchColumn() === 1, 'Duplicate job queued');
 
     $payload = json_decode($s->job($job)['payload'], true);
-    check($payload['builder'] === 'web', 'Build must target the FreeBSD host');
+    check($payload['builder'] === 'web', 'Build must auto-select the ready FreeBSD host');
+    check($payload['launch']['server'] === 'web', 'Launch must auto-select the ready FreeBSD host');
     check($payload['plan']['extensions'] === ['imagick', 'gmp'], 'Base extensions must be stripped and optional extensions kept');
     $release = $payload['launch']['release'];
     check($release['artifact'] === 'pending', 'Launch release must start with pending artifact');
-    check($release['database'] === true, 'Auto-MariaDB flag must be preserved');
-    check($release['disk_quota_mb'] === 2048, 'ZFS disk quota must be preserved');
-    check($release['mounts']['data-0'] === '/app/public/uploads', 'Mount was not mapped');
+    check($release['database'] === true, 'Auto-MariaDB must always be enabled');
+    check($release['disk_quota_mb'] === 128, 'Default disk quota must start at 128 MiB');
+    check($release['mounts'] === [], 'Mounts start empty before repository inspection');
     check($s->secret($release['secrets']['DB_PASSWORD']) === 'fixture-private-value', 'Encrypted environment missing');
     check(($release['file_secrets'] ?? []) === [], 'Git launch must not overwrite repo config.php with stock defaults');
     check(!str_contains(json_encode($s->job($job), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), 'fixture-private-value'), 'Secret leaked to job payload');
@@ -92,14 +89,23 @@ try {
 
     $artifact = 'sha256:' . str_repeat('b', 64);
     $releasePath = '/zroot/tc/apps/demo/releases/' . str_repeat('d', 32);
-    $deployment = $flow->_deploy_built($job, $payload['launch'], ['artifact' => $artifact, 'release_path' => $releasePath]);
-    check($deployment === $flow->_deploy_built($job, $payload['launch'], ['artifact' => $artifact, 'release_path' => $releasePath]), 'Build retry created duplicate deployment');
+    $buildResult = [
+        'artifact' => $artifact,
+        'release_path' => $releasePath,
+        'disk_quota_mb' => 384,
+        'persistent_paths' => ['public/uploads'],
+    ];
+    $deployment = $flow->_deploy_built($job, $payload['launch'], $buildResult);
+    check($deployment === $flow->_deploy_built($job, $payload['launch'], $buildResult), 'Build retry created duplicate deployment');
     check((int) $s->db->query_bind('SELECT COUNT(*) FROM jobs', [], 'statement')->fetchColumn() === 2, 'Build handoff not idempotent');
 
     $builtPayload = json_decode($s->job($deployment)['payload'], true);
     $builtRelease = $s->get('release', $builtPayload['release']);
     check($builtRelease['spec']['artifact'] === $artifact, 'Release artifact digest missing');
     check($builtRelease['spec']['release_path'] === $releasePath, 'Release ZFS path missing');
+    check($builtRelease['spec']['disk_quota_mb'] === 384, 'Inspected disk quota must be applied on build handoff');
+    check(array_values($builtRelease['spec']['mounts']) === ['/app/public/uploads'], 'Inspected upload mount missing');
+    check(str_starts_with((string) array_key_first($builtRelease['spec']['mounts']), 'upload-'), 'Inspected upload volume name must be deterministic');
     check($builtRelease['metadata']['message'] === 'Ship the dashboard', 'Release lost source metadata');
     check($builtRelease['created'] > 0, 'Release timestamp missing');
 
@@ -116,11 +122,23 @@ try {
     $s->apps->model->_release(['app' => 'demo', 'release' => $builtRelease['spec']]);
     check($s->get('release', $builtPayload['release'])['metadata'] === $builtRelease['metadata'], 'Repeated release erased metadata');
     check(Apps::_repository('https://github.com/owner/repo.git') === 'owner/repo', 'Repository URL conversion');
+    check(Apps::_repository('https://www.github.com/owner/repo/') === 'owner/repo', 'www GitHub URL conversion');
+    check(Apps::_repository('github.com/owner/repo') === 'owner/repo', 'Schemeless GitHub URL conversion');
+    check(Apps::_repository_and_branch('https://github.com/owner/repo/tree/develop') === ['repository' => 'owner/repo', 'branch' => 'develop'], 'GitHub tree URL branch extraction');
+    check(Apps::_suggest_label('owner/My_Cool.App') === 'my-cool-app', 'App label suggestion');
+    check(Apps::_suggest_label('owner/123app') === 'app-123app', 'Numeric-leading label suggestion');
     try {
         Apps::_repository('https://evil.example/repo');
         throw new LogicException('Foreign URL accepted');
     } catch (RuntimeException) {
     }
+    $autoDomainJob = $flow->_plan_launch([
+        'label' => 'auto-sub',
+        'repository' => 'owner/repo',
+        'branch' => 'main',
+    ], 'request-auto-domain', $source);
+    $autoPayload = json_decode($s->job($autoDomainJob)['payload'], true);
+    check($autoPayload['launch']['release']['domain'] === 'auto-sub.trongate.dev', 'Launch without domain must default to <label>.trongate.dev');
 
     $local = $flow->_build_target('web', 'demo');
     check($local === ['builder' => 'web', 'app' => 'demo'], 'FreeBSD local build target mismatch');
@@ -129,6 +147,15 @@ try {
         throw new LogicException('Server without local_builder_ready accepted');
     } catch (RuntimeException) {
     }
+
+    $redeployJob = $flow->_queue_redeploy_latest('demo', $source);
+    check($s->job($redeployJob)['kind'] === 'deploy', 'Same-commit redeploy should reuse built release');
+    $newCommitSource = $source;
+    $newCommitSource['commit'] = str_repeat('d', 40);
+    $rebuildJob = $flow->_queue_redeploy_latest('demo', $newCommitSource);
+    check($s->job($rebuildJob)['kind'] === 'build', 'New-commit Deploy now should queue a build job');
+    $firstRetryJob = $flow->_queue_redeploy_latest('auto-sub', $source);
+    check($s->job($firstRetryJob)['kind'] === 'build', 'Deploy now on app with no prior built release should queue a build job');
 
     $rollbackJob = $deployments->_queue('rollback', ['app' => 'demo']);
     check($s->job($rollbackJob)['kind'] === 'rollback', 'Rollback job not queued');
@@ -141,7 +168,7 @@ try {
     $timeline = $deployments->_timeline($deployment);
     check($timeline !== null && count($timeline['stages']) === 4, 'Deployment timeline missing stages');
     check(str_contains(Deployments_model::_phase_label('preparing-database'), 'MariaDB'), 'Phase label missing MariaDB');
-    check(str_contains(Deployments_model::_phase_label('preparing-sessions'), 'Valkey'), 'Phase label missing Valkey');
+    check(str_contains(Deployments_model::_phase_label('preparing-sessions'), 'session'), 'Phase label missing session');
 
     $monitor = new Monitoring_model('monitoring', $s->db->connection());
     foreach ([600, 300, 0] as $ago) {

@@ -11,7 +11,7 @@ class Resources {
     public const DEFAULT_CPU_PERCENT = 100;
     public const MAX_CPU_PERCENT = 1600;
     public const MIN_DISK_QUOTA_MB = 128;
-    public const DEFAULT_DISK_QUOTA_MB = 1024;
+    public const DEFAULT_DISK_QUOTA_MB = 128;
     public const OVERCOMMIT_RATIO = 3.0;
     public const DEFAULT_MAXPROC = 64;
     public const DEFAULT_OPENFILES = 1024;
@@ -739,6 +739,10 @@ class Resources {
         $before = [];
         foreach ($jails as $item) {
             $target = $plan['allocations'][$item['app']];
+            if ($target['mode'] === 'automatic' && $item['disk_quota_mb'] > $target['disk_quota_mb']) {
+                $target['disk_quota_mb'] = (int) $item['disk_quota_mb'];
+                $plan['allocations'][$item['app']]['disk_quota_mb'] = $target['disk_quota_mb'];
+            }
             if (
                 !empty($item['running'])
                 && $target['memory_mb'] < $item['memory_mb']

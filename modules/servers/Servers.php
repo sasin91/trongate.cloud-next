@@ -4,6 +4,7 @@ declare(strict_types=1);
 class Servers extends Trongate {
     function details(): void {
         $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         $message = null;
         $details = null;
         $saved = false;
@@ -36,6 +37,7 @@ class Servers extends Trongate {
 
     function index(): void {
         $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->action();
             return;
@@ -51,11 +53,13 @@ class Servers extends Trongate {
 
     function builds(): void {
         $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         $this->templates->_render('servers', 'builds', 'build-servers');
     }
 
     function connect(): void {
         $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->action();
             return;
@@ -65,6 +69,7 @@ class Servers extends Trongate {
 
     function confirm(): void {
         $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->action();
             return;
@@ -75,6 +80,7 @@ class Servers extends Trongate {
     function action(): void {
         $this->trongate_security->make_sure_allowed();
         $this->trongate_security->_csrf();
+        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         $model = $this->model;
         $inline = ($_POST['inline'] ?? '') === 'server';
         $command = (string) ($_POST['command'] ?? '');
@@ -219,6 +225,7 @@ class Servers extends Trongate {
     function scan(): void {
         $this->trongate_security->make_sure_allowed();
         $this->trongate_security->_csrf();
+        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         $this->trongate_security->_json($this->_scan_server($_POST));
     }
 }

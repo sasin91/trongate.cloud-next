@@ -66,7 +66,10 @@ if [ "$TC_SKIP_PKG" != "1" ]; then
         php84-curl \
         php84-filter \
         php84-mbstring \
+        php84-pdo \
+        php84-pdo_mysql \
         php84-posix \
+        php84-tokenizer \
         fcgi-devkit \
         mariadb114-client \
         valkey \
@@ -160,6 +163,7 @@ if [ ! -f /etc/pf.conf ] || [ "$TC_FORCE_CONFIG" = "1" ]; then
     sed "s|@EXT_IF@|${DETECTED_IF}|g" "$CONFIG_DIR/pf.conf" > /etc/pf.conf
     chown root:wheel /etc/pf.conf
     chmod 0644 /etc/pf.conf
+    kldstat -q -m pf || kldload pf
     pfctl -nf /etc/pf.conf || die "/etc/pf.conf syntax check failed"
 else
     info "Keeping existing /etc/pf.conf (set TC_FORCE_CONFIG=1 to overwrite)"
@@ -221,6 +225,7 @@ install_runtime_file "$RUNTIME_SRC_DIR/runtime.php" "/usr/local/libexec/tc/runti
 install_runtime_file "$RUNTIME_SRC_DIR/builder.php" "/usr/local/libexec/tc/builder.php" 0644
 install_runtime_file "$RUNTIME_SRC_DIR/resources.php" "/usr/local/libexec/tc/resources.php" 0644
 install_runtime_file "$RUNTIME_SRC_DIR/metrics.php" "/usr/local/libexec/tc/metrics.php" 0644
+install_runtime_file "$RUNTIME_SRC_DIR/app_database.php" "/usr/local/libexec/tc/app_database.php" 0644
 
 cat <<'EOF' > /usr/local/libexec/tc-runtime
 #!/bin/sh

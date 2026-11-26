@@ -56,7 +56,69 @@ class Jobs_model extends Model {
         } catch (Throwable $e) { $this->db->connection()->rollBack(); throw $e; }
     }
     function _recent(): array {
-        return $this->db->query_bind('SELECT id,resource,kind,status,attempts,created,result FROM jobs ORDER BY created DESC LIMIT 100', [], 'statement')->fetchAll();
+        $rows = $this->db->query_bind('SELECT id,resource,kind,payload,status,attempts,created,result FROM jobs ORDER BY created DESC LIMIT 100', [], 'statement')->fetchAll();
+        foreach ($rows as &$row) {
+            $payload = json_decode((string) ($row['payload'] ?? ''), true) ?: [];
+            $result = json_decode((string) ($row['result'] ?? ''), true) ?: [];
+            $summary = self::_summarize($row, $payload, $result);
+            unset($row['payload']);
+            $row += $summary;
+        }
+        unset($row);
+        return $rows;
+    }
+
+    private static function _summarize(array $row, array $payload, array $result): array {
+        $kind = (string) ($row['kind'] ?? '');
+        $app = (string) ($payload['app'] ?? $payload['launch']['app'] ?? $payload['plan']['app'] ?? '');
+        $service = (string) (
+            $payload['service_name']
+            ?? (is_string($payload['service'] ?? null)
+                ? $payload['service']
+                : ($payload['service']['name'] ?? $payload['name'] ?? ''))
+        );
+        $target = $app !== '' ? $app : ($service !== '' ? $service : (string) ($payload['plan']['repository'] ?? $kind));
+        $target_kind = $app !== '' ? 'app' : ($service !== '' ? 'service' : 'other');
+        $commit = (string) (
+            $result['candidate']['commit']
+            ?? $result['canary']['commit']
+            ?? $payload['plan']['commit']
+            ?? $payload['launch']['release']['commit']
+            ?? ''
+        );
+        $slot = (string) ($result['candidate']['slot'] ?? $result['canary']['slot'] ?? '');
+        $weight = isset($payload['canary_weight'])
+            ? (int) $payload['canary_weight']
+            : (isset($payload['weight']) ? (int) $payload['weight'] : null);
+        $is_canary = !empty($payload['canary']);
+        $service_label = $service !== '' ? $service : $target;
+        $title = match ($kind) {
+            'build' => 'Built ' . $target,
+            'deploy' => $is_canary
+                ? 'Started ' . ($weight === 0 ? 'preview' : ($weight ?? 10) . '%') . ' canary on ' . $target
+                : 'Deployed ' . $target,
+            'rollback' => 'Rolled back ' . $target,
+            'canary-weight' => 'Updated canary split to ' . ($weight ?? 0) . '% on ' . $target,
+            'canary-promote' => 'Promoted canary on ' . $target,
+            'canary-abort' => 'Aborted canary on ' . $target,
+            'destroy-app' => 'Deleted app ' . $target,
+            'deploy-service' => 'Deployed service ' . $service_label . ($app !== '' ? ' on ' . $app : ''),
+            'destroy-service' => 'Removed service ' . $service_label . ($app !== '' ? ' from ' . $app : ''),
+            default => ucfirst(str_replace('-', ' ', $kind)) . ($target !== $kind ? ' · ' . $target : ''),
+        };
+        $error = (string) ($result['reason'] ?? $result['error'] ?? '');
+
+        return [
+            'target' => $target,
+            'target_kind' => $target_kind,
+            'title' => $title,
+            'commit' => $commit,
+            'slot' => $slot,
+            'weight' => $weight,
+            'is_canary' => $is_canary,
+            'error' => $error,
+            'started_at' => (int) floor(((int) ($row['created'] ?? 0)) / 1000000),
+        ];
     }
 
     function _details(string $id): array {

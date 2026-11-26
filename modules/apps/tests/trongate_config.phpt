@@ -62,6 +62,16 @@ define('ENV', 'staging');
 lint=ok
 <?php
 // Managed by trongate.cloud (v1)
+$databases = [
+    'default' => [
+        'host' => 'localhost',
+        'port' => '3306',
+        'user' => 'tc_demo',
+        'password' => 'p\'w\\$1"2',
+        'database' => 'tc_demo',
+    ],
+];
+$GLOBALS['databases'] = $databases;
 define('HOST', 'localhost');
 define('PORT', '3306');
 define('USER', 'tc_demo');

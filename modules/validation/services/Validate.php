@@ -79,7 +79,7 @@ final class Validate {
 
         $p['memory_mb'] = self::number($p['memory_mb'] ?? 128, 64, 32768);
         $p['cpu_percent'] = self::number($p['cpu_percent'] ?? 100, 10, 1600);
-        $p['disk_quota_mb'] = self::number($p['disk_quota_mb'] ?? 1024, 128, 1048576);
+        $p['disk_quota_mb'] = self::number($p['disk_quota_mb'] ?? 128, 128, 1048576);
 
         $p['secrets'] = $p['secrets'] ?? [];
         if (!is_array($p['secrets'])) {

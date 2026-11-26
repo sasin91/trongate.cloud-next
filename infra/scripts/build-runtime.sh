@@ -99,7 +99,7 @@ else
         case "$BASE_RELEASE" in
             *-RELEASE)
                 info "Applying security patches via freebsd-update"
-                PAGER=cat freebsd-update -b "$BASE_DIR" --not-running-from-cron fetch install || true
+                PAGER=cat freebsd-update -b "$BASE_DIR" --currently-running "$BASE_RELEASE" --not-running-from-cron fetch install || true
                 ;;
             *)
                 info "Skipping freebsd-update for non-RELEASE branch ($BASE_RELEASE)"

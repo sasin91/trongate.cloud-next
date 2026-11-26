@@ -1,0 +1,137 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * News and blog posts: Markdown files in modules/news/posts, named YYYY-MM-DD-slug.md.
+ *
+ * Each file starts with front matter between --- lines:
+ *   title:    the headline
+ *   kind:     changelog or writing
+ *   summary:  one or two sentences for the list and the feed
+ *   draft:    true to hide the post outside ENV=dev (optional)
+ *   replaces: old-slug=section-id, ... for posts merged into this one (optional);
+ *             their old addresses lead to that section of this post
+ */
+class Posts {
+
+    /** Kinds a post can be, with the label the site shows */
+    public const KINDS = [
+        'changelog' => 'Changelog',
+        'writing' => 'Writing',
+    ];
+
+    /** Where the post files live */
+    public const DIRECTORY = __DIR__ . '/../posts';
+
+    /**
+     * Every published post, newest first.
+     *
+     * @param string|null $kind Only posts of this kind (a key of KINDS)
+     * @return array<int, object> Posts without their rendered body
+     */
+    public static function all(?string $kind = null): array {
+        $posts = [];
+        $env = defined('ENV') ? (string) ENV : 'prod';
+
+        foreach (glob(self::DIRECTORY . '/*.md') ?: [] as $path) {
+            $post = self::parse($path);
+            if ($post === null || ($post->draft && $env !== 'dev')) {
+                continue;
+            }
+            if ($kind === null || $post->kind === $kind) {
+                $posts[] = $post;
+            }
+        }
+
+        usort($posts, static fn(object $a, object $b): int => [$b->date, $b->slug] <=> [$a->date, $a->slug]);
+
+        return $posts;
+    }
+
+    /**
+     * One published post with its body rendered, or null when there is none by that slug.
+     *
+     * @param string $slug The URL slug (filename without the date and .md)
+     * @param string $base_path Route prefix for heading self-links (e.g. 'news' or 'blog')
+     * @return object|null
+     */
+    public static function find(string $slug, string $base_path = 'news'): ?object {
+        foreach (self::all() as $post) {
+            if ($post->slug === $slug) {
+                $post->html = Markdown::render($post->body, $base_path . '/' . $post->slug);
+                $post->sections = Markdown::headings($post->body);
+                return $post;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Where a post that was merged into another one went, or null when no post replaces it.
+     *
+     * @param string $slug The old post's slug
+     * @param string $base_path Route prefix (e.g. 'news' or 'blog')
+     * @return string|null A path like news/{slug}#{section}
+     */
+    public static function moved(string $slug, string $base_path = 'news'): ?string {
+        foreach (self::all() as $post) {
+            if (isset($post->replaces[$slug])) {
+                $section = $post->replaces[$slug];
+                return $base_path . '/' . $post->slug . ($section !== '' ? '#' . $section : '');
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Read one post file.
+     *
+     * @param string $path Path to a .md file
+     * @return object|null Null when the name or front matter is not valid
+     */
+    private static function parse(string $path): ?object {
+        if (!preg_match('/^(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md$/', basename($path), $name)) {
+            return null;
+        }
+
+        $source = str_replace("\r\n", "\n", (string) file_get_contents($path));
+        if (!preg_match('/^---\n(.*?)\n---\n(.*)$/s', $source, $parts)) {
+            return null;
+        }
+
+        $meta = [];
+        foreach (explode("\n", $parts[1]) as $line) {
+            if (preg_match('/^(\w+):\s*(.*)$/', $line, $match)) {
+                $meta[$match[1]] = trim($match[2]);
+            }
+        }
+
+        $replaces = [];
+        foreach (array_filter(array_map('trim', explode(',', $meta['replaces'] ?? ''))) as $pair) {
+            [$old, $section] = array_pad(explode('=', $pair, 2), 2, '');
+            if (preg_match('/^[a-z0-9-]+$/', $old) && preg_match('/^[a-z0-9-]*$/', $section)) {
+                $replaces[$old] = $section;
+            }
+        }
+
+        $kind = $meta['kind'] ?? '';
+        if (empty($meta['title']) || !isset(self::KINDS[$kind])) {
+            return null;
+        }
+
+        return (object) [
+            'slug' => $name[2],
+            'date' => $name[1],
+            'title' => $meta['title'],
+            'kind' => $kind,
+            'kind_label' => self::KINDS[$kind],
+            'summary' => $meta['summary'] ?? '',
+            'draft' => ($meta['draft'] ?? '') === 'true',
+            'body' => trim($parts[2]),
+            'replaces' => $replaces,
+        ];
+    }
+
+}

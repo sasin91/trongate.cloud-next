@@ -23,6 +23,9 @@ PHP);
     $res = $runtime->dispatch($req);
     echo "stage=", $res['status'], "\n";
     echo file_get_contents($runtime->root . '/apps/demo/releases/' . $op . '/config/config.php'), "\n";
+    $db_php = (string) file_get_contents($runtime->root . '/apps/demo/releases/' . $op . '/config/database.php');
+    echo 'db_v2=', (str_contains($db_php, "\$databases = [") && str_contains($db_php, "\$GLOBALS['databases'] = \$databases;") ? 'yes' : 'no'),
+        '|db_v1=', (str_contains($db_php, "define('HOST', 'localhost');") ? 'yes' : 'no'), "\n";
 });
 
 // 2. boot starts only active app jails and restores pf table entries.
@@ -49,5 +52,6 @@ define('BASE_URL', 'https://demo.test/');
 define('ENV', 'production');
 define('DEFAULT_MODULE', 'store');
 define('SITE_NAME', 'Acme Shop');
+db_v2=yes|db_v1=yes
 active_slot=green
 boot=succeeded|started=demo|green=up|blue=down|pf=yes

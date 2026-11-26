@@ -38,7 +38,10 @@ class Worker {
         $action = match ($context->kind) {
             'build' => 'apps/_build',
             'deploy', 'rollback' => 'deployments/_run',
+            'canary-weight', 'canary-promote', 'canary-abort' => 'deployments/_canary',
             'destroy-app' => 'deployments/_destroy',
+            'deploy-service' => 'services/_deploy',
+            'destroy-service' => 'services/_destroy',
             default => throw new RuntimeException('Unsupported job kind'),
         };
         return Modules::run($action, $context);

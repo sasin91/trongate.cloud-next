@@ -126,10 +126,14 @@ try {
     $model->db->query_bind('DELETE FROM jobs WHERE id=?', [$retry], 'statement');
     $model->db->query_bind('DELETE FROM resource_locks WHERE operation=?', [$retry], 'statement');
 
-    foreach (['/servers/scan', '/deployments/change', '/apps/destroy'] as $route) {
+    foreach (['/servers/scan', '/deployments/change', '/apps/deploy', '/apps/save_settings', '/apps/save_env', '/apps/delete_env', '/apps/database_query', '/apps/database_import', '/apps/destroy', '/services/add', '/services/redeploy', '/services/remove'] as $route) {
         if (request(['csrf_token' => 'bad'], $route)[0] !== 403) {
             throw new RuntimeException('Feature action bypassed CSRF: ' . $route);
         }
+    }
+    [$code, $svcPage] = request(null, '/services');
+    if ($code !== 200 || !str_contains($svcPage, 'Add a service') || !str_contains($svcPage, 'Laya (AI verdict model)')) {
+        throw new RuntimeException('Services page missing expected content');
     }
 
     $model->put('server', 'web', [
@@ -147,16 +151,51 @@ try {
     if (
         str_contains($page, 'name="builder"')
         || str_contains($page, 'name="tag"')
+        || str_contains($page, 'name="server"')
+        || str_contains($page, 'name="database"')
+        || str_contains($page, 'name="domain"')
+        || str_contains($page, 'name="disk_quota_mb"')
+        || str_contains($page, 'name="persistent_paths"')
+        || str_contains($page, 'ZFS')
+        || str_contains($page, 'Where should it run?')
+        || str_contains($page, 'Does your app need a database?')
+        || !str_contains($page, 'mx-post="/apps/validate_step"')
+        || !str_contains($page, '.trongate.dev')
         || !str_contains($page, 'Build commands')
         || !str_contains($page, 'Extra PHP extensions')
-        || !str_contains($page, 'Auto-provision a shared MariaDB database')
-        || !str_contains($page, 'Shared Valkey sessions included')
-        || !str_contains($page, 'ZFS disk quota')
+        || !str_contains($page, 'Health check path')
     ) {
-        throw new RuntimeException('Wizard missing expected FreeBSD fields or exposing retired options');
+        throw new RuntimeException('Wizard missing expected fields or exposing server/database/domain/quota/persistent-path internals');
     }
-    if (str_contains($page, 'id="server-dialog"') || !str_contains($page, 'href="/servers"')) {
-        throw new RuntimeException('Wizard must link to server pages');
+    if (request(['csrf_token' => 'bad', 'wizard_step' => '0'], '/apps/validate_step', true)[0] !== 403) {
+        throw new RuntimeException('Wizard step validation bypassed CSRF');
+    }
+    [$code, $stepErr] = request(['csrf_token' => $csrf, 'wizard_step' => '0', 'repository' => 'https://evil.example/repo'], '/apps/validate_step', true);
+    if ($code !== 422 || !isset(json_decode($stepErr, true)['repository'])) {
+        throw new RuntimeException('Step 0 must reject non-GitHub URLs with 422 field error');
+    }
+    [$code, $stepErr] = request(['csrf_token' => $csrf, 'wizard_step' => '2', 'environment' => 'NOT_A_PAIR'], '/apps/validate_step', true);
+    if ($code !== 422 || !isset(json_decode($stepErr, true)['environment'])) {
+        throw new RuntimeException('Step 2 must reject malformed environment lines with 422');
+    }
+    [$code, $stepErr] = request(['csrf_token' => $csrf, 'wizard_step' => '3', 'label' => 'Bad_Name'], '/apps/validate_step', true);
+    if ($code !== 422 || !isset(json_decode($stepErr, true)['label'])) {
+        throw new RuntimeException('Step 3 must reject invalid app label with 422');
+    }
+    [$code, $stepOk] = request(['csrf_token' => $csrf, 'wizard_step' => '3', 'label' => 'my-demo'], '/apps/validate_step', true);
+    if ($code !== 200 || !str_contains($stepOk, 'data-ok="1"') || !str_contains($stepOk, 'data-domain="my-demo.trongate.dev"')) {
+        throw new RuntimeException('Step 3 valid label must return MX step state with *.trongate.dev domain');
+    }
+    [$code, $stepErr] = request(['csrf_token' => $csrf, 'wizard_step' => '4', 'php_extensions' => 'xdebug'], '/apps/validate_step', true);
+    if ($code !== 422 || !isset(json_decode($stepErr, true)['php_extensions'])) {
+        throw new RuntimeException('Step 4 must reject unsupported PHP extensions with 422');
+    }
+    [$code, $stepErr] = request(['csrf_token' => $csrf, 'wizard_step' => '5', 'repository' => 'owner/repo', 'branch' => 'main', 'label' => 'my-demo', 'health' => 'no-slash'], '/apps/validate_step', true);
+    if ($code !== 422 || !isset(json_decode($stepErr, true)['health'])) {
+        throw new RuntimeException('Step 5 must reject invalid health path with 422');
+    }
+    if (str_contains($page, 'id="server-dialog"') || str_contains($page, 'href="/servers"')) {
+        throw new RuntimeException('Wizard must not expose server links or dialogs');
     }
     preg_match('/name="request" value="([a-f0-9]+)"/', $page, $launch);
     if (request(['csrf_token' => 'bad', 'label' => 'draft'], '/apps/draft')[0] !== 403) {
@@ -281,8 +320,112 @@ try {
     ]);
 
     [$code, $page] = request(null, '/apps');
-    if ($code !== 200 || !str_contains($page, 'web-demo') || !str_contains($page, 'Delete app') || str_contains($page, 'web-fixture-secret')) {
-        throw new RuntimeException('App dashboard failed or exposed secret');
+    if (
+        $code !== 200
+        || !str_contains($page, 'web-demo')
+        || !str_contains($page, '/apps/show/web-demo')
+        || str_contains($page, 'web-fixture-secret')
+        || str_contains($page, 'href="/servers"')
+    ) {
+        throw new RuntimeException('App dashboard failed, exposed secret, or exposed server links');
+    }
+
+    [$code, $overviewPage] = request(null, '/apps/show/web-demo');
+    if (
+        $code !== 200
+        || !str_contains($overviewPage, 'Environment')
+        || !str_contains($overviewPage, 'Deploy now')
+        || !str_contains($overviewPage, 'Canary rollout')
+        || !str_contains($overviewPage, 'tc_web_demo')
+        || !str_contains($overviewPage, 'Delete app')
+        || !str_contains($overviewPage, 'href="/apps/deployments/web-demo"')
+        || !str_contains($overviewPage, 'href="/apps/services/web-demo"')
+        || !str_contains($overviewPage, 'href="/apps/settings/web-demo"')
+        || !str_contains($overviewPage, 'name="app" value="web-demo"')
+        || str_contains($overviewPage, 'web-fixture-secret')
+    ) {
+        throw new RuntimeException('App overview page missing expected sections, app ID links/forms, or exposed secret');
+    }
+
+    [$code, $appSvcPage] = request(null, '/apps/services/web-demo');
+    if (
+        $code !== 200
+        || !str_contains($appSvcPage, 'private services web-demo can call')
+        || !str_contains($appSvcPage, 'name="app" value="web-demo"')
+        || !str_contains($appSvcPage, 'Laya (AI verdict model)')
+        || !str_contains($appSvcPage, 'href="/apps/services/web-demo" aria-current="page"')
+    ) {
+        throw new RuntimeException('App services tab missing expected app-scoped content');
+    }
+
+    // Add a service scoped to web-demo and ensure another app does not see it
+    $model->put('app', 'other-demo', ['server' => 'web', 'label' => 'other-demo', 'domain' => 'other-demo.trongate.dev']);
+    [$code] = request([
+        'csrf_token' => $csrf,
+        'app' => 'web-demo',
+        'service_name' => 'worker',
+        'service_command' => 'python3.12 -m http.server 8080',
+        'service_port' => '8080',
+        'service_memory_mb' => '256',
+    ], '/services/add');
+    if ($code !== 303) {
+        throw new RuntimeException('App-scoped service add failed with status ' . $code);
+    }
+    [$code, $appSvcAfter] = request(null, '/apps/services/web-demo');
+    [$code2, $otherSvcPage] = request(null, '/apps/services/other-demo');
+    if ($code !== 200 || !str_contains($appSvcAfter, 'WORKER_URL') || $code2 !== 200 || str_contains($otherSvcPage, 'WORKER_URL')) {
+        throw new RuntimeException('App-scoped service leaked to another app or missing from owning app');
+    }
+    $svcJobId = (string) $model->db->query_bind("SELECT id FROM jobs WHERE kind='deploy-service' ORDER BY created DESC LIMIT 1", [], 'statement')->fetchColumn();
+    [$code, $svcTimelinePage] = request(null, '/deployments?operation=' . $svcJobId);
+    if (
+        $code !== 200
+        || !str_contains($svcTimelinePage, 'deployment-timeline')
+        || !str_contains($svcTimelinePage, 'Service deployment')
+        || !str_contains($svcTimelinePage, 'WORKER_URL')
+        || !str_contains($svcTimelinePage, '/apps/services/web-demo')
+        || str_contains($svcTimelinePage, '"jail"')
+    ) {
+        throw new RuntimeException('Service deployment page must render customer timeline without internal jail JSON');
+    }
+    $model->db->query_bind("DELETE FROM records WHERE kind='app' AND id='other-demo'", [], 'statement');
+    $model->db->query_bind("DELETE FROM records WHERE kind='service'", [], 'statement');
+    $model->db->query_bind("DELETE FROM jobs WHERE kind='deploy-service'", [], 'statement');
+
+    [$code, $depsPage] = request(null, '/apps/deployments/web-demo');
+    if ($code !== 200 || !str_contains($depsPage, 'Deployment history') || !str_contains($depsPage, 'Built releases') || str_contains($depsPage, 'web-fixture-secret')) {
+        throw new RuntimeException('App deployments tab failed or exposed secret');
+    }
+
+    [$code, $settingsPage] = request(null, '/apps/settings/web-demo');
+    if (
+        $code !== 200
+        || !str_contains($settingsPage, 'Application settings')
+        || !str_contains($settingsPage, 'Migration command')
+        || !str_contains($settingsPage, 'Environment variables')
+        || !str_contains($settingsPage, 'PASSWORD')
+        || str_contains($settingsPage, 'web-fixture-secret')
+    ) {
+        throw new RuntimeException('App settings tab failed or exposed secret');
+    }
+
+    [$code, $dbPage] = request(null, '/apps/database/web-demo');
+    if ($code !== 200 || !str_contains($dbPage, 'href="/apps/database/web-demo"') || str_contains($dbPage, 'web-fixture-secret')) {
+        throw new RuntimeException('App database tab failed');
+    }
+
+    [$code, $logsPage] = request(null, '/apps/logs/web-demo');
+    if ($code !== 200 || !str_contains($logsPage, 'Warnings and errors only') || !str_contains($logsPage, 'app-log-box')) {
+        throw new RuntimeException('App logs tab failed');
+    }
+    [$code, $logsPoll] = request(null, '/apps/logs_poll/web-demo?since=abc', true);
+    if ($code !== 200 || !str_contains($logsPoll, '<div id="log-cursor">abc</div>')) {
+        throw new RuntimeException('App logs poll must return #log-cursor div for MX value swap');
+    }
+
+    [$code, $trafficPage] = request(null, '/apps/traffic/web-demo');
+    if ($code !== 200 || !str_contains($trafficPage, 'Live traffic') || !str_contains($trafficPage, 'Start recording') || !str_contains($trafficPage, '/apps/traffic_poll/web-demo')) {
+        throw new RuntimeException('App traffic tab failed');
     }
 
     [$code, $page] = request(null, '/deployments?operation=' . $id);
@@ -322,6 +465,8 @@ try {
 
     foreach ([
         '/apps_module/js/flows.js',
+        '/apps_module/js/app_logs.js',
+        '/apps_module/js/app_traffic.js',
         '/templates_module/css/wizard.css',
         '/templates_module/css/panel.css',
         '/templates_module/js/mx.js',

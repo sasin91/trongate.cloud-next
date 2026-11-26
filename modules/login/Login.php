@@ -12,6 +12,8 @@
  */
 class Login extends Trongate {
 
+    private ?int $resolved_login_level = null;
+
     /**
      * Constructor
      *
@@ -113,7 +115,7 @@ class Login extends Trongate {
         $user_level_id = $this->resolve_level();
 
         // Redirect if already logged in
-        $token = $this->trongate_tokens->attempt_get_valid_token($user_level_id);
+        $token = $this->trongate_tokens->attempt_get_valid_token($user_level_id === 1 ? [1, 2] : $user_level_id);
 
         if ($token !== false) {
             $config = $this->model->get_level_config($user_level_id);
@@ -176,18 +178,29 @@ class Login extends Trongate {
             // Credentials are valid — log the user in
             $identifier = post('identifier', true);
             $remember = (int) (bool) post('remember');
-            $token = $this->model->log_user_in($identifier, $user_level_id, $remember);
+            $target_level = $this->resolved_login_level ?? $user_level_id;
+            $login_identifier = $target_level === 2 ? strtolower(trim($identifier)) : $identifier;
+            $target_config = $this->model->get_level_config($target_level);
+            $token = $this->model->log_user_in($login_identifier, $target_level, $remember);
 
             if ($token === false) {
                 http_response_code(500);
                 $msg = 'Authentication succeeded but token generation failed. ';
-                $msg .= 'Ensure the target table has a valid ' . $config['user_ref_field'] . '.';
+                $msg .= 'Ensure the target table has a valid ' . $target_config['user_ref_field'] . '.';
                 echo (ENV === 'dev') ? $msg : 'An internal error occurred.';
                 die();
             }
 
+            if ($target_level === 2) {
+                $user_id = $this->trongate_tokens->get_user_id($token);
+                if (is_int($user_id) && $user_id > 0) {
+                    $this->module('team');
+                    $this->team->model->_touch_last_login($user_id);
+                }
+            }
+
             $this->model->clear_failed_attempts($identifier, $user_level_id);
-            redirect($config['redirect_on_success']);
+            redirect($target_config['redirect_on_success']);
         }
 
         // Validation failed — record the attempt
@@ -273,6 +286,8 @@ class Login extends Trongate {
 
                 if (!empty($config['secret_login_word'])) {
                     $redirect_target = 'login/login/' . $config['secret_login_word'];
+                } elseif ($level_id === 2) {
+                    $redirect_target = 'login/login/1';
                 } else {
                     $redirect_target = 'login/login/' . $level_id;
                 }
@@ -442,10 +457,22 @@ class Login extends Trongate {
         $user_level_id = $this->resolve_level();
         $password = post('password');  // Raw value — do not clean or trim
 
-        $valid = $this->model->validate_credentials($identifier, $password, $user_level_id);
+        $this->resolved_login_level = null;
+        $lookup = $user_level_id === 2 ? strtolower(trim($identifier)) : $identifier;
+        $valid = $this->model->validate_credentials($lookup, $password, $user_level_id);
 
         if ($valid === true) {
+            $this->resolved_login_level = $user_level_id;
             return true;
+        }
+
+        // Unified control-plane login: accept team member emails on the main login route.
+        if ($user_level_id === 1) {
+            $levels = $this->model->get_configured_level_configs();
+            if (isset($levels[2]) && $this->model->validate_credentials(strtolower(trim($identifier)), $password, 2)) {
+                $this->resolved_login_level = 2;
+                return true;
+            }
         }
 
         return 'The {label} and/or password you entered is incorrect.';

@@ -6,6 +6,7 @@
 name="tc_worker"
 rcvar="tc_worker_enable"
 pidfile="/var/run/tc_worker.pid"
+procname="/usr/sbin/daemon"
 start_cmd="tc_worker_start"
 
 tc_worker_start() {

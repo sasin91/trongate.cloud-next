@@ -37,3 +37,42 @@ jobs:
           TC_DSN: mysql:host=127.0.0.1;dbname=tc
           TC_DB_USER: root
           TC_DB_PASSWORD: test-only
+
+  deploy:
+    name: deploy to tc-host1
+    needs: php
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: deploy-tc-host1
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Connect to Tailscale (ephemeral CI node)
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Deploy verified commit via forced-command SSH
+        env:
+          TC_DEPLOY_HOST: ${{ secrets.TC_DEPLOY_HOST }}
+          TC_DEPLOY_SSH_KEY: ${{ secrets.TC_DEPLOY_SSH_KEY }}
+          TC_DEPLOY_KNOWN_HOSTS: ${{ secrets.TC_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$TC_DEPLOY_SSH_KEY" > "$HOME/.ssh/tc_deploy_key"
+          printf '%s\n' "$TC_DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/tc_deploy_key" "$HOME/.ssh/known_hosts"
+          RESULT="$(git archive --format=tar.gz HEAD | ssh -T \
+            -i "$HOME/.ssh/tc_deploy_key" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ConnectTimeout=20 \
+            "tc-deploy@${TC_DEPLOY_HOST}")"
+          printf '%s\n' "$RESULT"
+          printf '%s' "$RESULT" | grep -q '"status":"succeeded"'

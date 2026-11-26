@@ -6,6 +6,7 @@
 name="tc_monitor"
 rcvar="tc_monitor_enable"
 pidfile="/var/run/tc_monitor.pid"
+procname="/usr/sbin/daemon"
 start_cmd="tc_monitor_start"
 
 tc_monitor_start() {

@@ -175,12 +175,14 @@ ALTER USER 'tc_panel'@'localhost' IDENTIFIED BY '${PANEL_DB_PASS}' WITH MAX_USER
 GRANT ALL PRIVILEGES ON \`tc_panel\`.* TO 'tc_panel'@'localhost';
 FLUSH PRIVILEGES;
 SQL
-    umask 077
-    cat <<EOF > /var/db/tc/runtime/panel-db.env
-TC_DSN=mysql:unix_socket=/var/run/tc/mariadb/mysqld.sock;dbname=tc_panel;charset=utf8mb4
-TC_DB_USER=tc_panel
-TC_DB_PASSWORD=${PANEL_DB_PASS}
+    (
+        umask 077
+        cat <<EOF > /var/db/tc/runtime/panel-db.env
+TC_DSN="mysql:unix_socket=/var/run/tc/mariadb/mysqld.sock;dbname=tc_panel;charset=utf8mb4"
+TC_DB_USER="tc_panel"
+TC_DB_PASSWORD="${PANEL_DB_PASS}"
 EOF
+    )
     chown root:wheel /var/db/tc/runtime/panel-db.env
     chmod 0600 /var/db/tc/runtime/panel-db.env
     info "Created tc_panel database and saved credentials to /var/db/tc/runtime/panel-db.env"
@@ -245,8 +247,10 @@ chown -R "${VALKEY_UID}:${VALKEY_UID}" "$VALKEY_DATA_DIR" "$VALKEY_JAIL_DIR/var/
 
 if [ ! -f /var/db/tc/runtime/valkey-admin.pass ]; then
     VALKEY_ADMIN_PASS="$(gen_secret)"
-    umask 077
-    printf '%s\n' "$VALKEY_ADMIN_PASS" > /var/db/tc/runtime/valkey-admin.pass
+    (
+        umask 077
+        printf '%s\n' "$VALKEY_ADMIN_PASS" > /var/db/tc/runtime/valkey-admin.pass
+    )
     chown root:wheel /var/db/tc/runtime/valkey-admin.pass
     chmod 0600 /var/db/tc/runtime/valkey-admin.pass
 else
@@ -254,11 +258,13 @@ else
 fi
 
 if [ ! -f "$VALKEY_DATA_DIR/users.acl" ]; then
-    umask 077
-    cat <<EOF > "$VALKEY_DATA_DIR/users.acl"
+    (
+        umask 077
+        cat <<EOF > "$VALKEY_DATA_DIR/users.acl"
 user default off
 user tc_admin on >${VALKEY_ADMIN_PASS} ~* &* +@all
 EOF
+    )
     chown "${VALKEY_UID}:${VALKEY_UID}" "$VALKEY_DATA_DIR/users.acl"
     chmod 0600 "$VALKEY_DATA_DIR/users.acl"
 fi
@@ -301,6 +307,7 @@ fi
 CADDY_GID="$(pw groupshow tc-caddy | cut -d: -f3)"
 install -d -o www -g "$CADDY_GID" -m 0750 "$PANEL_SOCK_DIR"
 mkdir -p "$PANEL_JAIL_DIR/var/db/tc/panel" "$PANEL_JAIL_DIR/app" "$PANEL_JAIL_DIR/etc/rc.d" "$PANEL_JAIL_DIR/etc/tc"
+chmod 0755 "$PANEL_JAIL_DIR/var/db" "$PANEL_JAIL_DIR/var/db/tc" "$PANEL_JAIL_DIR/app" "$PANEL_JAIL_DIR/etc/rc.d" "$PANEL_JAIL_DIR/etc/tc"
 chown 80:80 "$PANEL_STATE_DIR"
 chmod 0700 "$PANEL_STATE_DIR"
 
@@ -342,11 +349,21 @@ env[TC_STATE] = /var/db/tc/panel
 EOF
 
 if [ -n "$PANEL_DOMAIN" ]; then
-    printf 'env[TC_BASE_URL] = "https://%s"\n' "$PANEL_DOMAIN" >> "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"
+    case "$PANEL_DOMAIN" in
+        http://*|https://*)
+            PANEL_BASE_URL="$PANEL_DOMAIN"
+            ;;
+        *)
+            PANEL_BASE_URL="https://$PANEL_DOMAIN"
+            ;;
+    esac
+    printf 'env[TC_BASE_URL] = "%s"\n' "$PANEL_BASE_URL" >> "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"
 fi
 
 while IFS='=' read -r k v; do
     [ -n "$k" ] || continue
+    v="${v#\"}"
+    v="${v%\"}"
     printf 'env[%s] = "%s"\n' "$k" "$v" >> "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"
 done < /var/db/tc/runtime/panel-db.env
 chmod 0600 "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"

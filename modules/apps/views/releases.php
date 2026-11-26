@@ -6,11 +6,10 @@ foreach ($releases as $r):
     $spec = $r['spec'] ?? [];
     $sha = (string) ($meta['commit'] ?? $spec['commit'] ?? '');
     $message = trim((string) ($meta['message'] ?? ''));
-    $title = $meta['pull_request']['title'] ?? (strtok($message, "\n") ?: ($sha !== '' ? 'Commit ' . substr($sha, 0, 7) : 'FreeBSD release'));
+    $title = $meta['pull_request']['title'] ?? (strtok($message, "\n") ?: ($sha !== '' ? 'Commit ' . substr($sha, 0, 7) : 'Release'));
     $repository = (string) ($meta['repository'] ?? '');
     $github = preg_match('~^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$~D', $repository) ? 'https://github.com/' . $repository : '';
     $php_version = (string) ($spec['php_version'] ?? '8.4');
-    $has_database = array_key_exists('database', $spec) ? (bool) $spec['database'] : true;
     $extensions = is_array($spec['extensions'] ?? null) ? $spec['extensions'] : [];
     $disk_quota_mb = (int) ($spec['disk_quota_mb'] ?? 1024);
     $artifact = (string) ($spec['artifact'] ?? '');
@@ -24,7 +23,6 @@ foreach ($releases as $r):
                 <small>
                     <?= $e($meta['branch'] ?? '') ?><?= !empty($meta['branch']) ? ' · ' : '' ?><?= $e($sha !== '' ? substr($sha, 0, 7) : substr($r['id'], 0, 7)) ?>
                     · PHP <?= $e($php_version) ?>
-                    · <?= $has_database ? 'MariaDB' : 'No database' ?>
                 </small>
                 <small>
                     <?php if (!empty($r['created'])): ?>
@@ -51,7 +49,7 @@ foreach ($releases as $r):
                 <p class="release-message"><?= $e($message) ?></p>
             <?php endif ?>
             <p>
-                Runtime: PHP <?= $e($php_version) ?> · <?= $has_database ? 'MariaDB enabled' : 'No database' ?> · ZFS quota <?= $e((string) $disk_quota_mb) ?> MiB
+                Runtime: PHP <?= $e($php_version) ?>
                 <?php if ($extensions !== []): ?>
                     · Extensions: <code><?= $e(implode(', ', $extensions)) ?></code>
                 <?php endif ?>

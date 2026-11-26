@@ -146,8 +146,11 @@ class Freebsd_simulated_runtime extends Runtime {
         return $release !== null && ($release['operation'] ?? null) !== $this->bad;
     }
 
-    public function health(string $url, int $attempts = 20): bool {
+    public array $public_headers = [];
+
+    public function health(string $url, int $attempts = 20, array $headers = []): bool {
         $this->public_attempts[] = $attempts;
+        $this->public_headers[] = $headers;
         if ($this->public_bad) {
             $this->public_bad = false;
             return false;

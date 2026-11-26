@@ -12,8 +12,15 @@ declare(strict_types=1);
  */
 class Builder {
     public const DEFAULT_POOL = 'zroot';
+    public const DEFAULT_DISK_QUOTA_MB = 128;
+    public const UPLOAD_HEADROOM_MB = 256;
+    public const RELEASE_HEADROOM_MB = 32;
+    public const MAX_DISK_QUOTA_MB = 1048576;
+    public const MAX_INSPECT_FILE_BYTES = 524288;
+    public const MAX_PERSISTENT_PATHS = 10;
     public const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
     public const BUILD_MEMORY_LIMIT = '1536M';
+    public const BUILD_SWAP_LIMIT = '16384M';
     public const BUILD_CPU_PERCENT = 200;
     public const BUILD_MAXPROC = 256;
     public const BUILD_OPENFILES = 2048;
@@ -92,7 +99,13 @@ class Builder {
                 usleep(20000);
             } while (true);
             if ($status['exitcode'] !== 0) {
-                throw new RuntimeException('builder step failed: ' . basename((string) $args[0]));
+                rewind($errors);
+                $stderr = self::sanitize_error((string) stream_get_contents($errors));
+                $detail = 'builder step failed: ' . basename((string) $args[0]) . ' (exit ' . $status['exitcode'] . ')';
+                if ($stderr !== '') {
+                    $detail .= ': ' . $stderr;
+                }
+                throw new RuntimeException($detail);
             }
             rewind($output);
             return trim((string) stream_get_contents($output));
@@ -165,7 +178,7 @@ class Builder {
             $this->write_raw($fstab_path, $fstab, 0600);
 
             $poststart = "/usr/bin/rctl -a jail:{$jail_name}:memoryuse:deny=" . self::BUILD_MEMORY_LIMIT
-                . " && /usr/bin/rctl -a jail:{$jail_name}:swapuse:deny=" . self::BUILD_MEMORY_LIMIT
+                . " && /usr/bin/rctl -a jail:{$jail_name}:swapuse:deny=" . self::BUILD_SWAP_LIMIT
                 . " && /usr/bin/rctl -a jail:{$jail_name}:pcpu:deny=" . self::BUILD_CPU_PERCENT
                 . " && /usr/bin/rctl -a jail:{$jail_name}:maxproc:deny=" . self::BUILD_MAXPROC
                 . " && /usr/bin/rctl -a jail:{$jail_name}:openfiles:deny=" . self::BUILD_OPENFILES;
@@ -198,7 +211,7 @@ class Builder {
 
             foreach ([
                 "jail:{$jail_name}:memoryuse:deny=" . self::BUILD_MEMORY_LIMIT,
-                "jail:{$jail_name}:swapuse:deny=" . self::BUILD_MEMORY_LIMIT,
+                "jail:{$jail_name}:swapuse:deny=" . self::BUILD_SWAP_LIMIT,
                 "jail:{$jail_name}:pcpu:deny=" . self::BUILD_CPU_PERCENT,
                 "jail:{$jail_name}:maxproc:deny=" . self::BUILD_MAXPROC,
                 "jail:{$jail_name}:openfiles:deny=" . self::BUILD_OPENFILES,
@@ -216,6 +229,7 @@ class Builder {
                     'HOME=/tmp',
                     'PATH=/usr/local/bin:/usr/bin:/bin',
                     'PHP_INI_SCAN_DIR=/usr/local/etc/php-base:/etc/tc/php.d',
+                    'SSL_CERT_FILE=/usr/local/share/certs/ca-root-nss.crt',
                     'COMPOSER_HOME=/tmp/.composer',
                     'COMPOSER_NO_INTERACTION=1',
                     'composer',
@@ -248,8 +262,12 @@ class Builder {
                     'HOME=/tmp',
                     'PATH=/usr/local/bin:/usr/bin:/bin',
                     'PHP_INI_SCAN_DIR=/usr/local/etc/php-base:/etc/tc/php.d',
+                    'SSL_CERT_FILE=/usr/local/share/certs/ca-root-nss.crt',
+                    'NODE_EXTRA_CA_CERTS=/usr/local/share/certs/ca-root-nss.crt',
                     'CI=true',
                     'COREPACK_ENABLE_DOWNLOAD_PROMPT=0',
+                    'RAYON_NUM_THREADS=2',
+                    'UV_THREADPOOL_SIZE=4',
                     '/bin/sh',
                     '-e',
                     '/tmp/tc-build-cmd.sh',
@@ -260,18 +278,29 @@ class Builder {
             $primary_error = $error;
         } finally {
             $cleanup = function () use ($started, $pf_added, $rctl_applied, $jail_name, $jail_dataset, $conf_path, $fstab_path): void {
+                $errors = [];
+                $step = static function (callable $fn) use (&$errors): void {
+                    try {
+                        $fn();
+                    } catch (Throwable $e) {
+                        $errors[] = $e;
+                    }
+                };
                 if ($started) {
-                    $this->run(['jail', '-r', $jail_name], 60);
+                    $step(fn() => $this->run(['jail', '-r', '-f', $conf_path, $jail_name], 60));
                 }
                 if ($pf_added) {
-                    $this->run(['pfctl', '-t', 'tc_jails', '-T', 'delete', self::BUILD_JAIL_IP], 30);
+                    $step(fn() => $this->run(['pfctl', '-t', 'tc_jails', '-T', 'delete', self::BUILD_JAIL_IP], 30));
                 }
                 if ($rctl_applied && $this->has_rctl_rules($jail_name)) {
-                    $this->run(['rctl', '-r', "jail:{$jail_name}"], 30);
+                    $step(fn() => $this->run(['rctl', '-r', "jail:{$jail_name}"], 30));
                 }
-                $this->run(['zfs', 'destroy', '-r', $jail_dataset], 60);
+                $step(fn() => $this->run(['zfs', 'destroy', '-rf', $jail_dataset], 60));
                 self::remove_file($conf_path);
                 self::remove_file($fstab_path);
+                if ($errors !== []) {
+                    throw $errors[0];
+                }
             };
             if ($primary_error !== null) {
                 try {
@@ -352,6 +381,7 @@ class Builder {
 
                 $release_path = $this->stage_release($app, $operation, $source);
                 $artifact = $this->manifest_digest($release_path);
+                $inspection = self::inspect_release($release_path);
 
                 $output = [
                     'status' => 'succeeded',
@@ -360,6 +390,10 @@ class Builder {
                     'artifact' => $artifact,
                     'release_path' => $release_path,
                     'commit' => $commit,
+                    'release_bytes' => $inspection['release_bytes'],
+                    'detected_uploads' => $inspection['detected_uploads'],
+                    'persistent_paths' => $inspection['persistent_paths'],
+                    'disk_quota_mb' => $inspection['disk_quota_mb'],
                 ];
                 $this->write($result_path, $output);
                 return $output;
@@ -462,6 +496,214 @@ class Builder {
         ksort($entries, SORT_STRING);
         $manifest = implode("\n", $entries) . "\n";
         return 'sha256:' . hash('sha256', $manifest);
+    }
+
+    /**
+     * Inspects a staged release to compute an appropriate disk quota (default 128 MiB,
+     * scaled upward for larger releases or apps with uploads) and auto-detect persistent
+     * upload directories by scanning the repository for upload functionality.
+     *
+     * @return array{release_bytes: int, detected_uploads: bool, persistent_paths: list<string>, disk_quota_mb: int}
+     */
+    public static function inspect_release(string $release_path): array {
+        $root = realpath($release_path);
+        if ($root === false) {
+            throw new RuntimeException('Cannot inspect staged release');
+        }
+
+        $release_bytes = 0;
+        $detected_uploads = false;
+        $candidate_paths = [];
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            if ($item->isLink()) {
+                continue;
+            }
+            $full = $item->getPathname();
+            $relative = str_replace('\\', '/', substr($full, strlen($root) + 1));
+
+            if ($item->isDir()) {
+                if (self::is_upload_directory($relative)) {
+                    $detected_uploads = true;
+                    $candidate_paths[] = $relative;
+                }
+                continue;
+            }
+
+            $size = (int) $item->getSize();
+            $release_bytes += max(0, $size);
+
+            if (
+                $size === 0
+                || $size > self::MAX_INSPECT_FILE_BYTES
+                || !str_ends_with(strtolower($relative), '.php')
+                || self::skip_source_scan($relative)
+            ) {
+                continue;
+            }
+
+            $contents = file_get_contents($full);
+            if (!is_string($contents) || $contents === '') {
+                continue;
+            }
+
+            $scan = self::scan_php_uploads($contents, $relative, $root);
+            if ($scan['detected']) {
+                $detected_uploads = true;
+                foreach ($scan['paths'] as $path) {
+                    $candidate_paths[] = $path;
+                }
+            }
+        }
+
+        if ($detected_uploads && $candidate_paths === []) {
+            $candidate_paths[] = 'public/uploads';
+        }
+
+        $persistent_paths = self::normalize_persistent_paths($candidate_paths);
+        $disk_quota_mb = self::recommended_disk_quota_mb($release_bytes, $detected_uploads);
+
+        return [
+            'release_bytes' => $release_bytes,
+            'detected_uploads' => $detected_uploads,
+            'persistent_paths' => $persistent_paths,
+            'disk_quota_mb' => $disk_quota_mb,
+        ];
+    }
+
+    public static function recommended_disk_quota_mb(int $release_bytes, bool $detected_uploads): int {
+        $release_mb = $release_bytes > 0 ? (int) ceil($release_bytes / 1048576) : 1;
+        $needed_mb = ($release_mb * 3) + self::RELEASE_HEADROOM_MB + ($detected_uploads ? self::UPLOAD_HEADROOM_MB : 0);
+        $rounded = (int) (ceil($needed_mb / 128) * 128);
+        return max(self::DEFAULT_DISK_QUOTA_MB, min(self::MAX_DISK_QUOTA_MB, $rounded));
+    }
+
+    private static function skip_source_scan(string $relative): bool {
+        foreach (['vendor/', 'node_modules/', 'engine/', '.git/'] as $prefix) {
+            if (str_starts_with($relative, $prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function is_upload_directory(string $relative): bool {
+        if (in_array($relative, ['public/uploads', 'uploads', 'storage/uploads'], true)) {
+            return true;
+        }
+        return preg_match('~^(?:public|modules/[a-zA-Z0-9_-]+(?:/assets)?)/[a-zA-Z0-9_-]+(?:_pics|_pics_thumbnails|_uploads)$~D', $relative) === 1;
+    }
+
+    /**
+     * @return array{detected: bool, paths: list<string>}
+     */
+    private static function scan_php_uploads(string $contents, string $relative, string $root): array {
+        $has_upload = preg_match(
+            '/(?:\$_FILES\b|move_uploaded_file\s*\(|->(?:upload_picture|upload_file|do_upload|init_picture_uploader|picture_uploader)\s*\(|->file->upload\s*\(|->image_uploader->|module\s*\(\s*[\'"](?:image_uploader|trongate_filezone)[\'"]\s*\)|form_file_select\s*\(|form_open_upload\s*\(|enctype\s*=\s*[\'"]multipart\/form-data[\'"])/i',
+            $contents
+        ) === 1;
+
+        if (!$has_upload) {
+            return ['detected' => false, 'paths' => []];
+        }
+
+        $upload_to_module = preg_match(
+            '/(?:[\'"]upload_to_module[\'"]\s*(?:=>|\]\s*=)|->upload_to_module\s*=)\s*true\b/i',
+            $contents
+        ) === 1;
+        $module_name = null;
+        if (preg_match('~^modules/([a-zA-Z0-9_-]+)/~', $relative, $module_match) === 1) {
+            $module_name = $module_match[1];
+        }
+
+        $paths = [];
+        $patterns = [
+            '/[\'"](?:destination|target_directory|thumbnail_dir|upload_dir|target_dir|upload_path)[\'"]\s*=>\s*[\'"]([a-zA-Z0-9_\/-]+)[\'"]/i',
+            '/(?:\[\s*[\'"](?:destination|target_directory|thumbnail_dir|upload_dir|target_dir|upload_path)[\'"]\s*\]|->(?:destination|target_directory|thumbnail_dir|upload_dir|target_dir|upload_path))\s*=\s*[\'"]([a-zA-Z0-9_\/-]+)[\'"]/i',
+        ];
+        foreach ($patterns as $pattern) {
+            if (preg_match_all($pattern, $contents, $matches)) {
+                foreach ($matches[1] as $raw_path) {
+                    $resolved = self::resolve_upload_path($raw_path, $module_name, $upload_to_module, $root);
+                    if ($resolved !== null) {
+                        $paths[] = $resolved;
+                    }
+                }
+            }
+        }
+
+        return ['detected' => true, 'paths' => $paths];
+    }
+
+    private static function resolve_upload_path(
+        string $raw,
+        ?string $module_name,
+        bool $upload_to_module,
+        string $root,
+    ): ?string {
+        $clean = trim($raw, '/');
+        if ($clean === '' || preg_match('~^(?:[a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+$~D', $clean) !== 1) {
+            return null;
+        }
+        $top = explode('/', $clean, 2)[0];
+        if (in_array($top, ['config', 'engine', 'vendor', 'node_modules', 'templates'], true)) {
+            return null;
+        }
+        if (in_array($top, ['public', 'modules', 'storage', 'uploads'], true)) {
+            return $clean;
+        }
+        if ($upload_to_module && $module_name !== null) {
+            $assets_dir = $root . '/modules/' . $module_name . '/assets';
+            return is_dir($assets_dir)
+                ? 'modules/' . $module_name . '/assets/' . $clean
+                : 'modules/' . $module_name . '/' . $clean;
+        }
+        return 'public/' . $clean;
+    }
+
+    /**
+     * @param list<string> $candidates
+     * @return list<string>
+     */
+    private static function normalize_persistent_paths(array $candidates): array {
+        $valid = [];
+        foreach ($candidates as $path) {
+            $clean = trim($path, '/');
+            if ($clean === '' || preg_match('~^(?:[a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+$~D', $clean) !== 1) {
+                continue;
+            }
+            $top = explode('/', $clean, 2)[0];
+            if (in_array($top, ['config', 'engine', 'vendor', 'node_modules', 'templates'], true)) {
+                continue;
+            }
+            $valid[$clean] = true;
+        }
+
+        $sorted = array_keys($valid);
+        sort($sorted, SORT_STRING);
+
+        // Collapse nested paths so a parent mount covers its children cleanly.
+        $collapsed = [];
+        foreach ($sorted as $path) {
+            $covered = false;
+            foreach ($collapsed as $parent) {
+                if (str_starts_with($path, $parent . '/')) {
+                    $covered = true;
+                    break;
+                }
+            }
+            if (!$covered) {
+                $collapsed[] = $path;
+                if (count($collapsed) >= self::MAX_PERSISTENT_PATHS) {
+                    break;
+                }
+            }
+        }
+        return $collapsed;
     }
 
     private function validate_commands(mixed $raw): string {
@@ -588,6 +830,22 @@ class Builder {
         }
     }
 
+    public static function sanitize_error(string $raw, int $max_chars = 500): string {
+        $text = preg_replace('/\x1b\[[0-9;]*[a-zA-Z]/', '', $raw) ?? $raw;
+        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text) ?? $text;
+        $text = preg_replace('~(https?://)[^\s/@]+:[^\s/@]+@~i', '$1[redacted]@', $text) ?? $text;
+        $text = preg_replace('/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*/i', '$1 [redacted]', $text) ?? $text;
+        $lines = array_values(array_filter(array_map('trim', preg_split('/\r?\n/', $text) ?: []), static fn(string $l): bool => $l !== ''));
+        if ($lines === []) {
+            return '';
+        }
+        $tail = implode(' | ', array_slice($lines, -5));
+        if (strlen($tail) > $max_chars) {
+            $tail = '…' . substr($tail, -($max_chars - 1));
+        }
+        return $tail;
+    }
+
     private static function match(mixed $value, string $expression): string {
         if (!is_string($value) || preg_match('~\A(?:' . str_replace('~', '\\~', $expression) . ')\z~D', $value) !== 1) {
             throw new InvalidArgumentException('invalid builder input');
@@ -614,7 +872,14 @@ if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
         }
         echo json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
     } catch (Throwable $error) {
-        // Never disclose request bodies, credentials or customer process output.
-        echo json_encode(['status' => 'uncertain', 'error' => get_class($error)], JSON_UNESCAPED_SLASHES) . "\n";
+        // Never disclose request bodies or credentials, while surfacing safe failure reasons.
+        $payload = ['status' => 'uncertain', 'error' => get_class($error)];
+        if ($error instanceof RuntimeException || $error instanceof InvalidArgumentException) {
+            $reason = Builder::sanitize_error($error->getMessage());
+            if ($reason !== '') {
+                $payload['reason'] = $reason;
+            }
+        }
+        echo json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n";
     }
 }
