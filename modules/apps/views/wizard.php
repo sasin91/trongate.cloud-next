@@ -17,7 +17,6 @@ $gh_repos = is_array($gh['repositories'] ?? null) ? $gh['repositories'] : [];
 $auto_deploy_checked = array_key_exists('auto_deploy', $_POST)
     ? (!empty($_POST['auto_deploy']) && (string) $_POST['auto_deploy'] !== '0')
     : !empty($gh['connected']);
-$keys = range('A', 'Z');
 ?>
 <div class="wz-wrap">
     <main class="wz-main">
@@ -72,13 +71,12 @@ $keys = range('A', 'Z');
                                 </label>
                             <?php endif ?>
                             <div class="wz-choices" data-repositories>
-                                <?php foreach (array_values($gh_repos) as $i => $repo):
+                                <?php foreach (array_values($gh_repos) as $repo):
                                     $full_name = (string) ($repo['full_name'] ?? '');
                                     $default_branch = (string) ($repo['default_branch'] ?? 'main');
                                 ?>
                                     <label class="wz-choice" data-name="<?= $e(strtolower($full_name)) ?>">
                                         <input type="radio" name="github_repo_pick" value="<?= $e($full_name) ?>" data-repo-choice data-default-branch="<?= $e($default_branch) ?>"<?= strcasecmp($initial_repo, $full_name) === 0 ? ' checked' : '' ?>>
-                                        <span class="wz-key"><?= $e($keys[$i] ?? '') ?></span>
                                         <span class="wz-choice-text">
                                             <strong><?= $e($full_name) ?></strong>
                                             <small><?= !empty($repo['private']) ? 'Private' : 'Public' ?> · <?= $e($default_branch) ?></small>

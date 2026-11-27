@@ -397,28 +397,6 @@ textarea.wz-sql {
     outline-offset: 2px;
 }
 
-.wz-key {
-    flex: 0 0 auto;
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-family: var(--wz-mono);
-    font-size: 13px;
-    font-weight: 500;
-    background: #fff;
-    color: #3a3d5c;
-    border: 1px solid var(--wz-line);
-}
-
-.wz-choice:has(input:checked) .wz-key {
-    background: var(--wz-ink);
-    color: #fff;
-    border-color: var(--wz-ink);
-}
-
 .wz-choice-text {
     flex: 1;
     display: flex;
