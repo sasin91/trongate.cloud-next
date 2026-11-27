@@ -48,6 +48,16 @@ Local developers can vendor any public module directly via `git subtree` or immu
 git subtree add --prefix=modules/error_pages https://registry.trongate.cloud/git/sasin91/error_pages.git v1.0.0 --squash
 ```
 
+### Upload a module package
+
+Publish a small module without setting up Git from **Registry → Manage & Publish → Upload a module**. Enter its namespace, module name, and a new semantic version, then upload a `.tar.gz` archive of the module directory's contents (the module files should be at the archive root):
+
+```sh
+tar -czf error_pages.tar.gz -C modules/error_pages .
+```
+
+Uploads are limited to 512 KiB compressed. The host checks archive paths, file types, and expanded size before publishing the version as an immutable ZFS snapshot. The uploaded version appears in the shared Marketplace and can be installed from any app's **Modules** tab. Versions remain immutable; upload a new version to publish changes.
+
 ---
 
 ## Bandwidth & CDN / Object Storage Offloading

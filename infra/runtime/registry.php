@@ -19,6 +19,7 @@ final class Registry_runtime {
     public const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
     public const MAX_README_BYTES = 65536;
     public const MAX_MANIFEST_BYTES = 65536;
+    public const MAX_UPLOAD_BYTES = 524288;
     public const NAMESPACE_REGEX = '[a-z][a-z0-9-]{1,38}';
     public const MODULE_REGEX = '[a-z][a-z0-9_]{0,39}';
     public const VERSION_REGEX = '[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?';
@@ -104,46 +105,62 @@ final class Registry_runtime {
         try {
             $staging = $work . '/module';
             Runtime::directory($staging, 0755);
-
-            $source_dir = isset($request['source_dir']) && is_string($request['source_dir']) && trim($request['source_dir']) !== ''
-                ? trim($request['source_dir'])
-                : null;
             $commit = '';
+            $repo_ready = false;
 
-            if ($source_dir !== null) {
-                $real_src = realpath($source_dir);
-                if ($real_src === false || !is_dir($real_src)) {
-                    throw new RuntimeException('Publish source directory does not exist');
-                }
-                $this->copy_tree($real_src, $staging);
-                if (isset($request['commit']) && is_string($request['commit']) && preg_match('/\A[a-f0-9]{40}\z/', $request['commit']) === 1) {
-                    $commit = $request['commit'];
-                }
-            } else {
-                $repo_path = $this->repos_root . '/' . $namespace . '/' . $name . '.git';
-                if (!is_dir($repo_path . '/objects')) {
-                    throw new RuntimeException('Module Git repository does not exist on host: ' . $namespace . '/' . $name);
-                }
-                $commit = $this->resolve_git_commit($repo_path, $ref, $version);
-                $tar_file = $work . '/export.tar';
-                $archive_cmd = ['git', '--git-dir=' . $repo_path, 'archive', '--format=tar', '--output=' . $tar_file, $commit];
-                if ($subdir !== '') {
-                    $archive_cmd[] = $subdir;
-                }
-                $this->runtime->run($archive_cmd, 120);
+            try {
+                if (isset($request['archive_b64'])) {
+                    if (!is_string($request['archive_b64']) || strlen($request['archive_b64']) > 4 * (int) ceil(self::MAX_UPLOAD_BYTES / 3)) {
+                        throw new RuntimeException('Uploaded module archive exceeds the 512 KiB limit');
+                    }
+                    $archive = base64_decode($request['archive_b64'], true);
+                    if (!is_string($archive) || $archive === '' || strlen($archive) > self::MAX_UPLOAD_BYTES || !str_starts_with($archive, "\x1f\x8b")) {
+                        throw new RuntimeException('Uploaded module archive is invalid');
+                    }
+                    $archive_path = $work . '/upload.tar.gz';
+                    if (file_put_contents($archive_path, $archive, LOCK_EX) !== strlen($archive)) {
+                        throw new RuntimeException('Cannot stage uploaded module archive');
+                    }
+                    $extract_dir = $work . '/extract';
+                    Runtime::directory($extract_dir, 0755);
+                    $this->extract_uploaded_archive($archive_path, $extract_dir);
+                    $this->copy_tree($extract_dir, $staging);
+                } else {
+                    $repo_path = $this->repos_root . '/' . $namespace . '/' . $name . '.git';
+                    if (!is_dir($repo_path . '/objects')) {
+                        throw new RuntimeException('Module Git repository does not exist on host: ' . $namespace . '/' . $name);
+                    }
+                    $repo_ready = true;
+                    $commit = $this->resolve_git_commit($repo_path, $ref, $version);
+                    $tar_file = $work . '/export.tar';
+                    $archive_cmd = ['git', '--git-dir=' . $repo_path, 'archive', '--format=tar', '--output=' . $tar_file, $commit];
+                    if ($subdir !== '') {
+                        $archive_cmd[] = $subdir;
+                    }
+                    $this->runtime->run($archive_cmd, 120);
 
-                $extract_dir = $work . '/extract';
-                Runtime::directory($extract_dir, 0755);
-                $this->extract_tar($tar_file, $extract_dir);
-                $picked = $subdir !== '' ? $extract_dir . '/' . $subdir : $extract_dir;
-                if (!is_dir($picked)) {
-                    throw new RuntimeException('Requested module subdirectory not found in Git tree');
+                    $extract_dir = $work . '/extract';
+                    Runtime::directory($extract_dir, 0755);
+                    $this->extract_tar($tar_file, $extract_dir);
+                    $picked = $subdir !== '' ? $extract_dir . '/' . $subdir : $extract_dir;
+                    if (!is_dir($picked)) {
+                        throw new RuntimeException('Requested module subdirectory not found in Git tree');
+                    }
+                    $this->copy_tree($picked, $staging);
                 }
-                $this->copy_tree($picked, $staging);
+
+                $inspection = $this->verify_module_tree($staging, $name);
+                $metadata = $this->extract_metadata($staging, $namespace, $name, $version);
+            } catch (Throwable $error) {
+                if (isset($request['archive_b64'])) {
+                    $reason = Runtime::safe_error($error->getMessage());
+                    return [
+                        'status' => 'failed',
+                        'error' => $reason !== '' ? 'Uploaded module package rejected: ' . $reason : 'Uploaded module package could not be validated.',
+                    ];
+                }
+                throw $error;
             }
-
-            $inspection = $this->verify_module_tree($staging, $name);
-            $metadata = $this->extract_metadata($staging, $namespace, $name, $version);
 
             $parent_ds = $this->runtime->pool . '/tc/registry/modules/' . $namespace . '/' . $name;
             $this->ensure_dataset($parent_ds, ['atime=off', 'compression=lz4']);
@@ -172,6 +189,7 @@ final class Registry_runtime {
                 'version' => $version,
                 'ref' => $ref,
                 'commit' => $commit,
+                'repo_ready' => $repo_ready,
                 'digest' => $digest,
                 'dataset' => $dataset,
                 'snapshot' => $snapshot,
@@ -360,6 +378,86 @@ final class Registry_runtime {
             return;
         }
         $this->runtime->run(['tar', '-xf', $tar_file, '-C', $dest], 120);
+    }
+
+    private function extract_uploaded_archive(string $archive_path, string $dest): void {
+        $tar_path = substr($archive_path, 0, -3);
+        $input = gzopen($archive_path, 'rb');
+        $output = fopen($tar_path, 'wb');
+        if ($input === false || $output === false) {
+            if (is_resource($input)) {
+                gzclose($input);
+            }
+            if (is_resource($output)) {
+                fclose($output);
+            }
+            throw new RuntimeException('Cannot read uploaded module archive');
+        }
+
+        $expanded_bytes = 0;
+        try {
+            while (!gzeof($input)) {
+                $chunk = gzread($input, 8192);
+                if (!is_string($chunk) || $chunk === '') {
+                    if (!gzeof($input)) {
+                        throw new RuntimeException('Uploaded module archive is corrupt');
+                    }
+                    break;
+                }
+                $expanded_bytes += strlen($chunk);
+                if ($expanded_bytes > self::MAX_TOTAL_BYTES + 1048576) {
+                    throw new RuntimeException('Uploaded module archive expands beyond the 64 MiB limit');
+                }
+                if (fwrite($output, $chunk) !== strlen($chunk)) {
+                    throw new RuntimeException('Cannot stage uploaded module archive');
+                }
+            }
+        } finally {
+            gzclose($input);
+            fclose($output);
+        }
+
+        if ($expanded_bytes === 0) {
+            throw new RuntimeException('Uploaded module archive is empty');
+        }
+
+        $archive = new PharData($tar_path);
+        $iterator = new RecursiveIteratorIterator($archive, RecursiveIteratorIterator::SELF_FIRST);
+        $file_count = 0;
+        $total_bytes = 0;
+        foreach ($iterator as $key => $entry) {
+            if (!$entry instanceof PharFileInfo) {
+                throw new RuntimeException('Uploaded module archive contains an invalid entry');
+            }
+            $path = str_replace('\\', '/', (string) $key);
+            $prefix = 'phar://' . str_replace('\\', '/', $tar_path) . '/';
+            if (str_starts_with($path, $prefix)) {
+                $path = substr($path, strlen($prefix));
+            } elseif (str_starts_with($path, str_replace('\\', '/', $tar_path) . '/')) {
+                $path = substr($path, strlen(str_replace('\\', '/', $tar_path)) + 1);
+            }
+            $parts = explode('/', trim($path, '/'));
+            if ($path === '' || str_starts_with($path, '/') || preg_match('/^[a-zA-Z]:/', $path) === 1 || in_array('..', $parts, true)) {
+                throw new RuntimeException('Uploaded module archive contains an unsafe path');
+            }
+            if ($entry->isLink() || (!$entry->isDir() && !$entry->isFile())) {
+                throw new RuntimeException('Uploaded module archive may contain only regular files and directories');
+            }
+            if ($entry->isFile()) {
+                $size = (int) $entry->getSize();
+                if ($size > self::MAX_FILE_BYTES) {
+                    throw new RuntimeException('Module file exceeds 20 MiB limit');
+                }
+                $total_bytes += $size;
+                $file_count++;
+                if ($total_bytes > self::MAX_TOTAL_BYTES || $file_count > 10000) {
+                    throw new RuntimeException('Module archive exceeds the file or 64 MiB limit');
+                }
+            }
+        }
+        unset($iterator, $archive);
+
+        $this->extract_tar($tar_path, $dest);
     }
 
     private function build_archive(string $module_path, string $name, string $archive_path): void {

@@ -16,6 +16,12 @@ $attached_by_name = [];
 foreach ($attached as $item) {
     $attached_by_name[(string) ($item['name'] ?? '')] = $item;
 }
+$live_modules_by_name = [];
+foreach (is_array($live_app_modules ?? null) ? $live_app_modules : [] as $item) {
+    if (is_array($item) && !empty($item['name'])) {
+        $live_modules_by_name[(string) $item['name']] = $item;
+    }
+}
 ?>
 <link rel="stylesheet" href="/registry_module/css/registry.css">
 <main class="panel tc-panel">
@@ -40,11 +46,11 @@ foreach ($attached as $item) {
         <section class="ov-card">
             <div class="ov-card-head">
                 <h2>Installed modules</h2>
-                <span class="muted"><?= count($attached) ?> mounted via ZFS RO nullfs</span>
+                <span class="muted"><?= count($attached) ?> installed</span>
             </div>
             <div class="ov-pad">
                 <?php if ($attached === []): ?>
-                    <p class="muted" style="font-size:14px">No registry modules attached to this app yet. Insert a module below or commit a <code>trongate-modules.json</code> manifest in your repository.</p>
+                    <p class="muted" style="font-size:14px">No modules installed yet. Browse the Marketplace below, or add modules with a <code>trongate-modules.json</code> manifest in your repository.</p>
                 <?php else: ?>
                     <div class="mod-list">
                         <?php foreach ($attached as $mod): ?>
@@ -73,7 +79,7 @@ foreach ($attached as $item) {
                             }
                             $can_autowire = Module_spec::can_autowire($name);
                             ?>
-                            <article class="mod-item">
+                            <article class="mod-item" id="module-<?= $e($name) ?>">
                                 <div class="mod-item-head">
                                     <div>
                                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -226,7 +232,7 @@ foreach ($attached as $item) {
         <?php if ($can_edit): ?>
             <section class="ov-card">
                 <div class="ov-card-head">
-                    <h2>Insert module from ZFS Registry</h2>
+                    <h2>Browse Marketplace</h2>
                     <a href="/registry" class="btn-link" style="font-size:13px">Open full Marketplace &rarr;</a>
                 </div>
                 <div class="ov-pad">
@@ -253,7 +259,7 @@ foreach ($attached as $item) {
 
                     <?php if ($catalog_results === []): ?>
                         <p class="muted" style="font-size:14px">
-                            No published modules matched. <a href="/registry/manage">Register and publish modules</a> in the ZFS registry first.
+                            No modules matched. Try another search or <a href="/registry/manage">publish your own module</a>.
                         </p>
                     <?php else: ?>
                         <div class="mod-browser-grid">
@@ -263,7 +269,10 @@ foreach ($attached as $item) {
                                 $mname = (string) ($mod['name'] ?? '');
                                 $mslug = $mns . '/' . $mname;
                                 $mvers = $catalog_versions[$mslug] ?? [];
-                                $already = isset($attached_by_name[$mname]);
+                                $selected_module = $attached_by_name[$mname] ?? null;
+                                $selected = is_array($selected_module) && (string) ($selected_module['namespace'] ?? '') === $mns;
+                                $live_module = $live_modules_by_name[$mname] ?? null;
+                                $already = is_array($live_module) && (string) ($live_module['namespace'] ?? '') === $mns;
                                 $match = $mod['match'] ?? null;
                                 $m_autowire = Module_spec::can_autowire($mname);
                                 ?>
@@ -286,7 +295,21 @@ foreach ($attached as $item) {
                                         <?php if ($mvers === []): ?>
                                             <span class="muted" style="font-size:12px">No versions published yet</span>
                                         <?php elseif ($already): ?>
-                                            <span class="status-pill live-running" style="align-self:flex-start">Installed</span>
+                                            <?php
+                                            $installed_version = (string) ($live_module['version'] ?? '');
+                                            $catalog_latest = (string) ($mvers[0]['version'] ?? '');
+                                            $update_available = $catalog_latest !== '' && $installed_version !== '' && version_compare($catalog_latest, $installed_version) > 0;
+                                            ?>
+                                            <div class="mod-browser-row">
+                                                <span class="status-pill live-running">Installed · v<?= $e($installed_version) ?></span>
+                                                <?php if ($update_available): ?>
+                                                    <a class="btn-link" href="#module-<?= $e($mname) ?>">Update to v<?= $e($catalog_latest) ?></a>
+                                                <?php endif ?>
+                                            </div>
+                                        <?php elseif ($selected): ?>
+                                            <span class="status-pill live-not_live" style="align-self:flex-start">Added · deploy pending</span>
+                                        <?php elseif (is_array($selected_module)): ?>
+                                            <span class="status-pill live-not_live" style="align-self:flex-start">Another module uses this name</span>
                                         <?php else: ?>
                                             <form method="post" action="/apps/insert_module">
                                                 <?= $csrf() ?>
@@ -305,7 +328,7 @@ foreach ($attached as $item) {
                                                             <span>Auto-wire</span>
                                                         </label>
                                                     <?php endif ?>
-                                                    <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:13px;margin-left:auto">Insert</button>
+                                                    <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:13px;margin-left:auto">Install</button>
                                                 </div>
                                             </form>
                                         <?php endif ?>

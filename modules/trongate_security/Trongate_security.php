@@ -41,6 +41,9 @@ class Trongate_security extends Trongate {
             case 'services':
                 $this->services->make_sure_allowed();
                 break;
+            case 'registry':
+                $this->apps->make_sure_allowed();
+                break;
             case 'team':
                 $this->team->make_sure_allowed();
                 break;

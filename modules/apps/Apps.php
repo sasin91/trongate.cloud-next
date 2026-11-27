@@ -748,6 +748,7 @@ class Apps extends Trongate {
         $this->workspace->_render_panel('apps', 'modules', 'app-modules', [
             'overview' => $overview,
             'app_modules' => $attached,
+            'live_app_modules' => $live_mods,
             'registry_results' => $search['results'],
             'registry_versions' => $versions_map,
             'registry_schemas' => $schemas_map,
