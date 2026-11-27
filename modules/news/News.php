@@ -5,6 +5,9 @@ declare(strict_types=1);
  * Public news: the changelog and longer writing, from Markdown files in posts/.
  * To publish, add posts/YYYY-MM-DD-slug.md (see services/Posts.php for the front matter).
  */
+require_once APPPATH . 'modules/news/services/Posts.php';
+require_once APPPATH . 'modules/news/services/Markdown.php';
+
 class News extends Trongate {
 
     /**

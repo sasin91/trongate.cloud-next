@@ -1,0 +1,13 @@
+#!/bin/sh
+# PROVIDE: tc_registry_fpm
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+. /etc/rc.subr
+name="tc_registry_fpm"
+rcvar="tc_registry_fpm_enable"
+pidfile="/var/run/php-fpm/php-fpm.pid"
+command="/usr/local/sbin/php-fpm"
+command_args="-y /etc/tc/php-fpm.conf"
+export PHP_INI_SCAN_DIR="/usr/local/etc/php-base:/etc/tc/php.d"
+load_rc_config "$name"
+run_rc_command "$1"

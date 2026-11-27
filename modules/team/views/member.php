@@ -1,9 +1,9 @@
 <?php
 $member = $member ?? [];
 $all_apps = $all_apps ?? [];
-$presets = Access_policy::APP_PRESETS;
-$app_perms_meta = Access_policy::APP_PERMISSIONS;
-$ws_perms_meta = Access_policy::WORKSPACE_PERMISSIONS;
+$presets = Team::APP_PRESETS;
+$app_perms_meta = Team::APP_PERMISSIONS;
+$ws_perms_meta = Team::WORKSPACE_PERMISSIONS;
 $mode = $member['role'] === 'admin' ? 'admin' : ($member['scope'] === 'all' ? 'all' : 'scoped');
 $ws_checked = $member['permissions']['workspace'] ?? [];
 $all_checked = $member['permissions']['all_apps'] ?? [];

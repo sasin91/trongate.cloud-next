@@ -1,12 +1,11 @@
 <?php
-$administrators = $administrators ?? [];
 $members = $members ?? [];
 $invitations = $invitations ?? [];
 $all_apps = $all_apps ?? [];
 $invite_link = is_array($invite_link ?? null) ? $invite_link : null;
-$presets = Access_policy::APP_PRESETS;
-$app_perms_meta = Access_policy::APP_PERMISSIONS;
-$ws_perms_meta = Access_policy::WORKSPACE_PERMISSIONS;
+$presets = Team::APP_PRESETS;
+$app_perms_meta = Team::APP_PERMISSIONS;
+$ws_perms_meta = Team::WORKSPACE_PERMISSIONS;
 ?>
 <main class="panel tc-panel">
     <div class="section-header">
@@ -51,7 +50,7 @@ $ws_perms_meta = Access_policy::WORKSPACE_PERMISSIONS;
             <section class="ov-card" aria-labelledby="members-h">
                 <div class="ov-card-head">
                     <h2 id="members-h">Members</h2>
-                    <span class="muted"><?= count($administrators) + count($members) ?> total</span>
+                    <span class="muted"><?= count($members) ?> total</span>
                 </div>
                 <div class="ov-table-wrap">
                     <table class="deployments-table">
@@ -64,17 +63,6 @@ $ws_perms_meta = Access_policy::WORKSPACE_PERMISSIONS;
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($administrators as $admin): ?>
-                                <tr>
-                                    <td>
-                                        <strong><?= $e($admin['username']) ?></strong>
-                                        <div class="muted" style="font-size:12px">Primary administrator</div>
-                                    </td>
-                                    <td><span class="ov-badge ok">Workspace owner</span></td>
-                                    <td><span class="status-pill live-running">Active</span></td>
-                                    <td></td>
-                                </tr>
-                            <?php endforeach ?>
                             <?php foreach ($members as $m): ?>
                                 <tr>
                                     <td>

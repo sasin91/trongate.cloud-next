@@ -4,6 +4,10 @@
  * 
  * The foundation class that all application controllers extend.
  * Provides core functionality for views, modules, and file uploads.
+ * 
+ * @property Validation $validation
+ * @property Model $model
+ * @property Http_client $http
  */
 class Trongate {
 

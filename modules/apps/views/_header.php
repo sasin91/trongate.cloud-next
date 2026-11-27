@@ -12,16 +12,15 @@ $can_rollback = (bool) $overview['can_rollback'];
 $php_version = (string) ($latest['spec']['php_version'] ?? $app['php_version'] ?? '8.4');
 $active_tab = $active_tab ?? 'overview';
 
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
-$can_deploy = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'deploy');
-$can_deployments = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'deployments');
-$can_database = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'database_read');
-$can_logs = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'logs');
-$can_traffic = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'traffic');
-$can_services = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'services_view');
-$can_settings = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'settings');
-$can_team = $actor_ctx === null || Access_policy::can_workspace($actor_ctx, 'team.manage');
-$can_jobs = $actor_ctx === null || Access_policy::can_access_jobs_page($actor_ctx);
+$can_deploy = !empty($can_deploy);
+$can_deployments = !empty($can_deployments);
+$can_database = !empty($can_database);
+$can_logs = !empty($can_logs);
+$can_traffic = !empty($can_traffic);
+$can_services = !empty($can_services);
+$can_settings = !empty($can_settings);
+$can_team = !empty($can_team);
+$can_jobs = !empty($can_jobs);
 
 $tabs = [
     ['/apps/show/' . rawurlencode($app_id), 'Overview', $active_tab === 'overview'],

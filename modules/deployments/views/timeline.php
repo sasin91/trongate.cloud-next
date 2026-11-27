@@ -5,11 +5,8 @@ $timeline_kind = (string) ($timeline['kind'] ?? 'deploy');
 $back_href = (string) ($timeline['back_href'] ?? ($app_id !== '' ? '/apps/show/' . rawurlencode($app_id) : '/apps'));
 $back_label = (string) ($timeline['back_label'] ?? ($app_id !== '' ? 'Back to ' . $timeline['app'] : 'Back to your apps'));
 $heading = (string) ($timeline['heading'] ?? ($timeline['app'] . ' · Deployment'));
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
-$can_deploy = $actor_ctx === null || ($app_id !== '' && Access_policy::can_app($actor_ctx, $app_id, 'deploy'));
-$can_manage_service = $actor_ctx === null || ($app_id !== ''
-    ? Access_policy::can_app($actor_ctx, $app_id, 'services_manage')
-    : Access_policy::can_workspace($actor_ctx, 'services.manage'));
+$can_deploy = !empty($can_deploy);
+$can_manage_service = !empty($can_manage_service);
 $now_step = '';
 foreach ($timeline['stages'] as $idx => $st) {
     if (($st['status'] ?? '') === 'running') {

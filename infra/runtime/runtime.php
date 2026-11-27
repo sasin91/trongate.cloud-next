@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/../../modules/error_pages/Error_report.php';
 
 /**
  * Root-owned FreeBSD host runtime (protocol v2).
@@ -270,6 +271,7 @@ class Runtime {
         $builder_snap = $this->probe(['zfs', 'list', '-H', '-t', 'snapshot', '-o', 'name', $this->pool . '/tc/runtimes/builder@v1'], 15);
         $git_ok = $this->probe(['git', '--version'], 10) !== null;
         $builder_ready = $builder_snap !== null && $git_ok;
+        $registry_ready = $this->dataset_exists($this->pool . '/tc/registry');
 
         $checks = [
             'zfs' => $zfs_ok,
@@ -283,6 +285,7 @@ class Runtime {
             'base_dataset' => $base_ok,
             'runtime_dataset' => $runtime_ok,
             'builder_ready' => $builder_ready,
+            'registry_dataset' => $registry_ready,
             'protocol' => true,
         ];
 
@@ -308,6 +311,7 @@ class Runtime {
             'optional_extensions' => self::OPTIONAL_EXTENSIONS,
             'application_ready' => $missing === [],
             'local_builder_ready' => $builder_ready,
+            'registry_ready' => $registry_ready,
             'missing' => $missing,
         ];
     }
@@ -740,7 +744,34 @@ class Runtime {
         self::directory($data_root, 0755);
         $this->ensure_mode($data_root, 0755);
 
-        // Patch only BASE_URL and ENV in the release's config/config.php so custom defines stay intact.
+        // Resolve and verify ZFS-backed registry modules for zero-copy read-only nullfs mounting.
+        $resolved_modules = [];
+        $autowire_error_pages = false;
+        $autowire_log = false;
+        if (!empty($spec['modules']) && is_array($spec['modules'])) {
+            require_once __DIR__ . '/registry.php';
+            $registry = new Registry_runtime($this);
+            $seen_mod_names = [];
+            foreach ($spec['modules'] as $mod_entry) {
+                if (!is_array($mod_entry)) {
+                    throw new InvalidArgumentException('Invalid registry module entry');
+                }
+                $mod = $registry->resolve_mount($mod_entry);
+                if (isset($seen_mod_names[$mod['name']])) {
+                    throw new InvalidArgumentException('Duplicate registry module mount: ' . $mod['name']);
+                }
+                $seen_mod_names[$mod['name']] = true;
+                $resolved_modules[] = $mod;
+                if ($mod['autowire'] && $mod['name'] === 'error_pages') {
+                    $autowire_error_pages = true;
+                }
+                if ($mod['autowire'] && $mod['name'] === 'log') {
+                    $autowire_log = true;
+                }
+            }
+        }
+
+        // Patch only BASE_URL, ENV (and ERROR_404 when error_pages is auto-wired) in config/config.php.
         if (!array_key_exists('/app/config/config.php', $files)) {
             $source_config = $release_dir . '/config/config.php';
             if (is_file($source_config)) {
@@ -749,7 +780,13 @@ class Runtime {
                     throw new RuntimeException('Cannot read release config/config.php');
                 }
                 $trongate_env = (string) ($secrets['ENV'] ?? $secrets['APP_ENV'] ?? ($spec['env'] ?? 'production'));
-                $files['/app/config/config.php'] = self::patch_config_php($raw_config, $domain, $trongate_env);
+                $files['/app/config/config.php'] = self::patch_config_php(
+                    $raw_config,
+                    $domain,
+                    $trongate_env,
+                    true,
+                    $autowire_error_pages ? 'error_pages/not_found' : null
+                );
             }
         }
 
@@ -829,8 +866,16 @@ class Runtime {
         $this->write($jail_root . '/var/log/php-fpm.log', '', 0640);
         $this->grant_www($jail_root . '/var/log/php-fpm.log', 0640, writable: true);
 
+        // Optional auto-prepend bootstrap for auto-wired registry modules (error_pages, log).
+        $auto_prepend = null;
+        if ($autowire_error_pages || $autowire_log) {
+            $boot_code = self::render_modules_boot_php($autowire_error_pages, $autowire_log);
+            $this->write($jail_root . '/etc/tc/tc_modules_boot.php', $boot_code, 0444);
+            $auto_prepend = '/etc/tc/tc_modules_boot.php';
+        }
+
         // Write jail-local php-fpm.conf with ondemand PM, socket bindings, and secrets.
-        $php_fpm_conf = $this->render_php_fpm_conf($memory_mb, $secrets, $valkey);
+        $php_fpm_conf = $this->render_php_fpm_conf($memory_mb, $secrets, $valkey, $auto_prepend);
         $this->write($jail_root . '/etc/tc/php-fpm.conf', $php_fpm_conf, 0600);
 
         // Build nullfs fstab for the jail.
@@ -847,6 +892,23 @@ class Runtime {
                 self::directory($release_dir . '/config', 0755);
             }
             $fstab_lines[] = $overlay_dir . ' ' . $jail_root . '/app/config nullfs ro 0 0';
+        }
+        foreach ($resolved_modules as $mod) {
+            $mod_target = '/app/modules/' . $mod['name'];
+            self::directory($jail_root . $mod_target, 0755);
+            if (is_dir($release_dir)) {
+                $release_mod_dir = $release_dir . '/modules/' . $mod['name'];
+                if (is_dir($release_mod_dir)) {
+                    $has_entries = (new FilesystemIterator($release_mod_dir, FilesystemIterator::SKIP_DOTS))->valid();
+                    if ($has_entries) {
+                        throw new RuntimeException('Cannot mount registry module "' . $mod['name'] . '": release already contains modules/' . $mod['name']);
+                    }
+                } else {
+                    self::directory($release_mod_dir, 0755);
+                    $this->ensure_mode($release_mod_dir, 0755);
+                }
+            }
+            $fstab_lines[] = $mod['path'] . ' ' . $jail_root . $mod_target . ' nullfs ro 0 0';
         }
         foreach (($spec['mounts'] ?? []) as $volume => $target) {
             self::match($volume, '[a-z][a-z0-9-]{0,39}');
@@ -890,6 +952,16 @@ class Runtime {
             'health' => $health,
             'php_version' => $php_version,
             'extensions' => $extensions,
+            'modules' => array_map(
+                static fn(array $m): array => [
+                    'namespace' => $m['namespace'],
+                    'name' => $m['name'],
+                    'version' => $m['version'],
+                    'digest' => $m['digest'],
+                    'autowire' => $m['autowire'],
+                ],
+                $resolved_modules
+            ),
             'release_path' => $release_dir,
             'memory_mb' => $memory_mb,
             'cpu_percent' => $cpu_percent,
@@ -1593,6 +1665,14 @@ class Runtime {
         if ($action === 'app-db-query') {
             return $this->app_db_query($request);
         }
+        if ($action === 'registry-list') {
+            require_once __DIR__ . '/registry.php';
+            return (new Registry_runtime($this))->list_modules();
+        }
+        if ($action === 'registry-inspect') {
+            require_once __DIR__ . '/registry.php';
+            return (new Registry_runtime($this))->inspect_module($request);
+        }
         if ($action === 'status') {
             $operation = self::match($request['operation'] ?? null, '[a-f0-9]{32}');
             return array_intersect_key(
@@ -1647,6 +1727,18 @@ class Runtime {
             }
             if ($action === 'destroy-service') {
                 return $this->destroy_service($request);
+            }
+            if ($action === 'registry-init-repo') {
+                require_once __DIR__ . '/registry.php';
+                return (new Registry_runtime($this))->init_repo($request);
+            }
+            if ($action === 'registry-publish') {
+                require_once __DIR__ . '/registry.php';
+                return (new Registry_runtime($this))->publish($request);
+            }
+            if ($action === 'registry-yank') {
+                require_once __DIR__ . '/registry.php';
+                return (new Registry_runtime($this))->yank($request);
             }
             if (in_array($action, ['canary-weight', 'canary-promote', 'canary-abort'], true)) {
                 return $this->canary_operation($request);
@@ -1800,9 +1892,10 @@ class Runtime {
             if ($packages !== []) {
                 $journal['phase'] = 'installing-packages';
                 $this->write($journal_path, $journal);
-                $ports_repo = $this->detect_ports_repo();
+                $ports_repos = $this->detect_ports_repos();
                 $mounted_base = false;
                 $mounted_dev = false;
+                $repos_dir = null;
                 try {
                     if ($this->root === '/var/db/tc/runtime') {
                         $this->run(['mount', '-t', 'nullfs', '-o', 'ro', $base_dir, $jail_root . '/.base'], 30);
@@ -1810,9 +1903,18 @@ class Runtime {
                         $this->run(['mount', '-t', 'devfs', 'devfs', $jail_root . '/dev'], 30);
                         $mounted_dev = true;
                     }
-                    $this->run(['env', 'ASSUME_ALWAYS_YES=yes', 'pkg', '-r', $jail_root, 'update', '-r', $ports_repo], 300);
-                    $this->run(array_merge(['env', 'ASSUME_ALWAYS_YES=yes', 'pkg', '-r', $jail_root, 'install', '-r', $ports_repo, '-y'], $packages), 900);
+                    if (count($ports_repos) === 1) {
+                        $this->run(['env', 'ASSUME_ALWAYS_YES=yes', 'pkg', '-r', $jail_root, 'update', '-r', $ports_repos[0]], 300);
+                        $this->run(array_merge(['env', 'ASSUME_ALWAYS_YES=yes', 'pkg', '-r', $jail_root, 'install', '-r', $ports_repos[0], '-y'], $packages), 900);
+                    } else {
+                        $repos_dir = $this->prepare_service_pkg_repos($jail_root);
+                        $this->run(['env', 'ASSUME_ALWAYS_YES=yes', 'pkg', '-r', $jail_root, '-o', 'REPOS_DIR=' . $repos_dir, 'update'], 300);
+                        $this->run(array_merge(['env', 'ASSUME_ALWAYS_YES=yes', 'pkg', '-r', $jail_root, '-o', 'REPOS_DIR=' . $repos_dir, 'install', '-y'], $packages), 900);
+                    }
                 } finally {
+                    if ($repos_dir !== null && is_dir($repos_dir)) {
+                        self::remove_tree($repos_dir);
+                    }
                     if ($mounted_dev) {
                         $this->probe(['umount', $jail_root . '/dev'], 30);
                     }
@@ -2033,12 +2135,76 @@ class Runtime {
         return false;
     }
 
-    private function detect_ports_repo(): string {
+    /**
+     * Returns enabled package repositories excluding FreeBSD base/kmod repos so
+     * local Poudriere repos take priority alongside FreeBSD-ports without
+     * pulling pkgbase packages into service jails.
+     *
+     * @return list<string>
+     */
+    private function detect_ports_repos(): array {
         $raw = $this->probe(['pkg', '-vv'], 15) ?? '';
-        if (preg_match('/^\s*FreeBSD-ports\s*:/m', $raw) === 1) {
-            return 'FreeBSD-ports';
+        $repos = [];
+        $current = null;
+        $enabled = true;
+        $flush = static function () use (&$repos, &$current, &$enabled): void {
+            if ($current !== null && $enabled && !in_array($current, ['FreeBSD-base', 'FreeBSD-ports-kmods'], true)) {
+                $repos[] = $current;
+            }
+            $current = null;
+            $enabled = true;
+        };
+        foreach (preg_split('/\r?\n/', $raw) ?: [] as $line) {
+            if (preg_match('/^\s{2}([A-Za-z0-9._-]+)\s*:\s*\{/', $line, $match) === 1) {
+                $flush();
+                $current = $match[1];
+                continue;
+            }
+            if ($current !== null) {
+                if (preg_match('/^\s*enabled\s*:\s*(no|false|off)\b/i', $line) === 1) {
+                    $enabled = false;
+                } elseif (preg_match('/^\s*\}/', $line) === 1) {
+                    $flush();
+                }
+            }
         }
-        return 'FreeBSD';
+        $flush();
+        if ($repos !== []) {
+            return array_values(array_unique($repos));
+        }
+        return ['FreeBSD'];
+    }
+
+    /**
+     * Stages a temporary pkg REPOS_DIR combining host repo configs with
+     * FreeBSD-base and FreeBSD-ports-kmods disabled so multi-repo installs
+     * (e.g. Poudriere + FreeBSD-ports) resolve cleanly by priority.
+     */
+    private function prepare_service_pkg_repos(string $jail_root): string {
+        $dir = $jail_root . '/etc/tc/pkg-repos';
+        if (is_dir($dir)) {
+            self::remove_tree($dir);
+        }
+        self::directory($dir, 0755);
+        foreach (['/etc/pkg' => '00-etc-', '/usr/local/etc/pkg/repos' => '50-local-'] as $src => $prefix) {
+            if (!is_dir($src)) {
+                continue;
+            }
+            foreach (glob($src . '/*.conf') ?: [] as $file) {
+                if (is_file($file)) {
+                    $contents = @file_get_contents($file);
+                    if (is_string($contents)) {
+                        $this->write($dir . '/' . $prefix . basename($file), $contents, 0644);
+                    }
+                }
+            }
+        }
+        $this->write(
+            $dir . '/99-tc-nobase.conf',
+            "FreeBSD-base: { enabled: no }\nFreeBSD-ports-kmods: { enabled: no }\n",
+            0644
+        );
+        return $dir;
     }
 
     private function render_service_jail_conf(
@@ -2518,7 +2684,7 @@ class Runtime {
         ];
     }
 
-    public static function patch_config_php(string $source, string $domain, string $env = 'production', bool $https = true): string {
+    public static function patch_config_php(string $source, string $domain, string $env = 'production', bool $https = true, ?string $error_404 = null): string {
         $domain = trim($domain);
         if ($domain === '' || str_contains($domain, "\0") || str_contains($env, "\0")) {
             throw new InvalidArgumentException('Invalid Trongate configuration value.');
@@ -2527,6 +2693,12 @@ class Runtime {
             'BASE_URL' => ($https ? 'https' : 'http') . '://' . trim($domain, '/') . '/',
             'ENV' => $env,
         ];
+        if ($error_404 !== null && trim($error_404) !== '') {
+            if (str_contains($error_404, "\0")) {
+                throw new InvalidArgumentException('Invalid Trongate ERROR_404 value.');
+            }
+            $replacements['ERROR_404'] = trim($error_404);
+        }
         $found = [];
         $tokens = token_get_all($source);
         $count = count($tokens);
@@ -2629,7 +2801,7 @@ class Runtime {
             . "define('DATABASE', " . $database . ");\n";
     }
 
-    private function render_php_fpm_conf(int $memory_mb, array $secrets, ?array $valkey): string {
+    private function render_php_fpm_conf(int $memory_mb, array $secrets, ?array $valkey, ?string $auto_prepend = null): string {
         $max_children = max(2, min(64, intdiv($memory_mb, 32)));
         $worker_memory = max(32, min(256, intdiv($memory_mb, 2)));
 
@@ -2663,6 +2835,10 @@ class Runtime {
             'php_admin_value[mysqli.default_socket] = /var/run/tc/mariadb/mysqld.sock',
         ];
 
+        if ($auto_prepend !== null) {
+            $lines[] = 'php_admin_value[auto_prepend_file] = ' . $auto_prepend;
+        }
+
         if ($valkey !== null) {
             $save_path = 'unix:///var/run/tc/valkey/valkey.sock'
                 . '?auth[user]=' . rawurlencode((string) $valkey['user'])
@@ -2683,6 +2859,77 @@ class Runtime {
         }
 
         return implode("\n", $lines) . "\n";
+    }
+
+    public static function render_modules_boot_php(bool $error_pages, bool $log): string {
+        $code = "<?php\n// Managed by trongate.cloud ZFS module registry auto-wiring.\n";
+        if ($log) {
+            $code .= <<<'PHP'
+if (is_file('/app/modules/log/Log.php')) {
+    require_once '/app/modules/log/Log.php';
+    if (!function_exists('tc_log')) {
+        function tc_log(string $channel = 'app'): Log {
+            static $loggers = [];
+            return $loggers[$channel] ??= new Log([new Error_log_writer('[' . $channel . '] ')]);
+        }
+    }
+}
+
+PHP;
+        }
+        if ($error_pages) {
+            $code .= <<<'PHP'
+if (is_file('/app/modules/error_pages/Error_report.php')) {
+    require_once '/app/modules/error_pages/Error_report.php';
+    $tc_send_error = static function (Error_report $report): void {
+        if (!headers_sent()) {
+            http_response_code($report->status);
+            if ($report->status === 503) {
+                header('Retry-After: 60');
+            }
+        }
+        if (Error_report::wants_json($_SERVER)) {
+            if (!headers_sent()) {
+                header('Content-Type: application/json');
+            }
+            echo json_encode(['error' => $report->message]);
+            return;
+        }
+        if (!headers_sent()) {
+            header('Content-Type: text/html; charset=utf-8');
+        }
+        $home = defined('BASE_URL') ? BASE_URL : '/';
+        $view = '/app/modules/error_pages/views/server_error.php';
+        if (is_file($view)) {
+            ob_start();
+            try {
+                require $view;
+                echo ob_get_clean();
+                return;
+            } catch (Throwable) {
+                ob_end_clean();
+            }
+        }
+        echo htmlspecialchars($report->title . '. ' . $report->message, ENT_QUOTES, 'UTF-8');
+    };
+    set_exception_handler(static function (Throwable $e) use ($tc_send_error): void {
+        error_log('Uncaught ' . get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+        $detail = Error_report::shows_detail(defined('ENV') ? ENV : '', $_SERVER);
+        $tc_send_error(Error_report::from_exception($e, $detail));
+    });
+    register_shutdown_function(static function () use ($tc_send_error): void {
+        $error = error_get_last();
+        if ($error === null || ($error['type'] & Error_report::FATAL) === 0 || headers_sent()) {
+            return;
+        }
+        $detail = Error_report::shows_detail(defined('ENV') ? ENV : '', $_SERVER);
+        $tc_send_error(Error_report::from_fatal($error, $detail));
+    });
+}
+
+PHP;
+        }
+        return $code;
     }
 
     private function render_jail_conf(

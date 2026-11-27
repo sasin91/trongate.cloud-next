@@ -3,6 +3,8 @@
 
 <head>
     <?php
+    require_once APPPATH . 'modules/news/services/Markdown.php';
+
     $page_title = $post->title . ' - Blog - trongate.cloud';
     $page_description = $post->summary;
     $feed_href = 'blog/feed';

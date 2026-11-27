@@ -1,11 +1,12 @@
 <?php
 declare(strict_types=1);
-if (PHP_SAPI !== 'cli') {
-    http_response_code(404);
-    exit;
-}
-require dirname(__DIR__, 2) . '/bootstrap.php';
+
+require APPPATH . '/engine/cli_bootstrap.php';
+require_once APPPATH . '/modules/security/services/Encryptor.php';
+require_once APPPATH . '/modules/log/Log.php';
 umask(0077);
+
+$log = new Log([new Stream_writer('[monitor] ', true, STDERR)]);
 
 try {
     if (count($argv) !== 1) {
@@ -15,6 +16,6 @@ try {
     Modules::run('monitoring/_collect');
     echo "Monitoring collected\n";
 } catch (Throwable $error) {
-    fwrite(STDERR, 'Error: ' . $error->getMessage() . "\n");
+    $log->error($error->getMessage());
     exit(1);
 }

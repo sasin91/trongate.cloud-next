@@ -1,46 +1,110 @@
 <?php
 declare(strict_types=1);
 
+require_once APPPATH . 'modules/trongate_security/Trongate_security.php';
+require_once APPPATH . 'modules/validation/services/Validate.php';
+require_once APPPATH . 'modules/security/services/Encryptor.php';
+require_once APPPATH . 'modules/apps/services/Build.php';
+require_once APPPATH . 'modules/apps/services/Build_commands.php';
+require_once APPPATH . 'modules/services/services/Service_spec.php';
+require_once APPPATH . 'modules/login/github/services/Github_app.php';
+
 class Apps extends Trongate {
     /** @var array<string, array{token: string, source: string}> */
     private array $github_repo_tokens = [];
 
+    function can_app(array $actor, string $app_id, string $permission = 'view'): bool {
+        if ($app_id === '') {
+            return false;
+        }
+        if (!empty($actor['is_admin'])) {
+            return true;
+        }
+        return in_array($permission, $this->app_permissions($actor, $app_id), true);
+    }
+
+    function app_permissions(array $actor, string $app_id): array {
+        $this->module('team');
+        if (!empty($actor['is_admin'])) {
+            return array_keys(Team::APP_PERMISSIONS);
+        }
+        $permissions = [];
+        if (($actor['scope'] ?? 'scoped') === 'all') {
+            $permissions = is_array($actor['permissions']['all_apps'] ?? null)
+                ? $actor['permissions']['all_apps']
+                : [];
+        }
+        $specific = $actor['permissions']['apps'][$app_id] ?? null;
+        if (is_array($specific) && $specific !== []) {
+            $permissions = array_merge($permissions, $specific);
+        }
+        return $this->team->normalize_app_permissions($permissions);
+    }
+
+    function effective_app_permissions(array $input): array {
+        if (!is_array($input['actor'] ?? null) || !is_string($input['app_id'] ?? null) || $input['app_id'] === '') {
+            throw new InvalidArgumentException('An actor and app ID are required to resolve app permissions.');
+        }
+        return $this->app_permissions($input['actor'], $input['app_id']);
+    }
+
+    function visible_apps(array $actor, array $apps): array {
+        if (!empty($actor['is_admin'])) {
+            return array_values($apps);
+        }
+        return array_values(array_filter(
+            $apps,
+            fn(array $app): bool => $this->can_app($actor, (string) ($app['id'] ?? ''), 'view')
+        ));
+    }
+
+    function _require_app(string $app_id, string $permission = 'view', string $message = 'You do not have permission to access this application.'): void {
+        if (!$this->can_app($this->workspace->_actor(), $app_id, $permission)) {
+            $this->trongate_security->_forbidden($message);
+        }
+    }
+
+    function make_sure_allowed(): void {
+        block_url('apps/make_sure_allowed');
+        $this->workspace->_actor();
+    }
+
     function index(): void {
-        $this->trongate_security->make_sure_allowed();
-        $actor = $this->trongate_security->_actor();
+        $this->trongate_security->make_sure_allowed('apps');
+        $actor = $this->workspace->_actor();
         $all_summaries = $this->model->_app_summaries();
         $summaries = [];
         foreach ($all_summaries as $app_id => $summary) {
-            if (Access_policy::can_app($actor, (string) $app_id, 'view')) {
+            if ($this->can_app($actor, (string) $app_id, 'view')) {
                 $summaries[$app_id] = $summary;
             }
         }
-        $this->templates->_render('apps', 'dashboard', 'dashboard', [
+        $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
             'app_summaries' => $summaries,
         ]);
     }
 
     function show(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $id = (string) segment(3);
-        $this->trongate_security->_require_app($id, 'view');
+        $this->_require_app($id, 'view');
         try {
             $overview = $this->model->_overview($id);
         } catch (Throwable) {
             http_response_code(404);
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => 'Application not found.',
             ]);
             return;
         }
 
-        $actor = $this->trongate_security->_actor();
+        $actor = $this->workspace->_actor();
         $app = $overview['app'];
-        $log_data = Access_policy::can_app($actor, (string) $app['id'], 'logs')
+        $log_data = $this->can_app($actor, (string) $app['id'], 'logs')
             ? $this->_runtime_read($app, ['action' => 'app-logs', 'app' => (string) $app['id'], 'limit' => 1])
             : null;
-        $this->templates->_render('apps', 'show', 'app-overview', [
+        $this->workspace->_render_panel('apps', 'show', 'app-overview', [
             'overview' => $overview,
             'log_rates' => is_array($log_data['rates'] ?? null) ? $log_data['rates'] : null,
             'crumbs' => [
@@ -51,14 +115,14 @@ class Apps extends Trongate {
     }
 
     function logs(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $id = (string) segment(3);
-        $this->trongate_security->_require_app($id, 'logs', 'You do not have permission to view logs for this app.');
+        $this->_require_app($id, 'logs', 'You do not have permission to view logs for this app.');
         try {
             $overview = $this->model->_overview($id);
         } catch (Throwable) {
             http_response_code(404);
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => 'Application not found.',
             ]);
@@ -67,7 +131,7 @@ class Apps extends Trongate {
 
         $app = $overview['app'];
         $logs = $this->_runtime_read($app, ['action' => 'app-logs', 'app' => (string) $app['id'], 'limit' => 250]);
-        $this->templates->_render('apps', 'logs', 'app-logs', [
+        $this->workspace->_render_panel('apps', 'logs', 'app-logs', [
             'overview' => $overview,
             'app_logs' => $logs,
             'crumbs' => [
@@ -79,9 +143,9 @@ class Apps extends Trongate {
     }
 
     function logs_poll(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $id = (string) segment(3);
-        $this->trongate_security->_require_app($id, 'logs', 'You do not have permission to view logs for this app.');
+        $this->_require_app($id, 'logs', 'You do not have permission to view logs for this app.');
         try {
             $app_id = Validate::id($id);
             $app = $this->records->_get(['kind' => 'app', 'id' => $app_id]);
@@ -110,14 +174,14 @@ class Apps extends Trongate {
     }
 
     function traffic(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $id = (string) segment(3);
-        $this->trongate_security->_require_app($id, 'traffic', 'You do not have permission to view live traffic for this app.');
+        $this->_require_app($id, 'traffic', 'You do not have permission to view live traffic for this app.');
         try {
             $overview = $this->model->_overview($id);
         } catch (Throwable) {
             http_response_code(404);
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => 'Application not found.',
             ]);
@@ -125,7 +189,7 @@ class Apps extends Trongate {
         }
 
         $app = $overview['app'];
-        $this->templates->_render('apps', 'traffic', 'app-traffic', [
+        $this->workspace->_render_panel('apps', 'traffic', 'app-traffic', [
             'overview' => $overview,
             'crumbs' => [
                 ['/apps', 'Apps'],
@@ -136,9 +200,9 @@ class Apps extends Trongate {
     }
 
     function traffic_poll(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $id = (string) segment(3);
-        $this->trongate_security->_require_app($id, 'traffic', 'You do not have permission to view live traffic for this app.');
+        $this->_require_app($id, 'traffic', 'You do not have permission to view live traffic for this app.');
         try {
             $app_id = Validate::id($id);
             $app = $this->records->_get(['kind' => 'app', 'id' => $app_id]);
@@ -182,22 +246,22 @@ class Apps extends Trongate {
     ];
 
     function database(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $id = (string) segment(3);
-        $this->trongate_security->_require_app($id, 'database_read', 'You do not have permission to access this app\'s database.');
+        $this->_require_app($id, 'database_read', 'You do not have permission to access this app\'s database.');
         try {
             $overview = $this->model->_overview($id);
         } catch (Throwable) {
             http_response_code(404);
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => 'Application not found.',
             ]);
             return;
         }
 
-        $actor = $this->trongate_security->_actor();
-        $can_write = Access_policy::can_app($actor, (string) $overview['app']['id'], 'database_write');
+        $actor = $this->workspace->_actor();
+        $can_write = $this->can_app($actor, (string) $overview['app']['id'], 'database_write');
 
         $table = is_string($_GET['table'] ?? null) ? trim($_GET['table']) : '';
         $raw_view = is_string($_GET['view'] ?? null) ? trim($_GET['view']) : '';
@@ -225,30 +289,30 @@ class Apps extends Trongate {
     }
 
     function database_query(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $this->trongate_security->_csrf();
         $app_id = '';
         $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->trongate_security->_require_app($raw_app, 'database_read', 'You do not have permission to query this app\'s database.');
+        $this->_require_app($raw_app, 'database_read', 'You do not have permission to query this app\'s database.');
         $requested_changes = ($_POST['allow_changes'] ?? '') === '1';
         if ($requested_changes) {
-            $this->trongate_security->_require_app($raw_app, 'database_write', 'You only have read-only database access on this app.');
+            $this->_require_app($raw_app, 'database_write', 'You only have read-only database access on this app.');
         }
         try {
             $app_id = Validate::id($raw_app);
             $overview = $this->model->_overview($app_id);
         } catch (Throwable) {
             http_response_code(404);
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => 'Application not found.',
             ]);
             return;
         }
 
-        $actor = $this->trongate_security->_actor();
+        $actor = $this->workspace->_actor();
         $sql = (string) ($_POST['sql'] ?? '');
-        $allow_changes = $requested_changes && Access_policy::can_app($actor, $app_id, 'database_write');
+        $allow_changes = $requested_changes && $this->can_app($actor, $app_id, 'database_write');
         $query_result = null;
         $query_error = null;
 
@@ -283,17 +347,17 @@ class Apps extends Trongate {
     }
 
     function database_import(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $this->trongate_security->_csrf();
         $app_id = '';
         $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->trongate_security->_require_app($raw_app, 'database_write', 'You do not have permission to import SQL into this app\'s database.');
+        $this->_require_app($raw_app, 'database_write', 'You do not have permission to import SQL into this app\'s database.');
         try {
             $app_id = Validate::id($raw_app);
             $overview = $this->model->_overview($app_id);
         } catch (Throwable) {
             http_response_code(404);
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => 'Application not found.',
             ]);
@@ -380,7 +444,7 @@ class Apps extends Trongate {
         }
         $db_info = $this->_runtime_read($app, $inspect_req, 12);
 
-        $this->templates->_render('apps', 'database', 'app-database', array_merge([
+        $this->workspace->_render_panel('apps', 'database', 'app-database', array_merge([
             'overview' => $overview,
             'db_info' => $db_info,
             'starter_sets' => self::STARTER_SQL_SETS,
@@ -414,14 +478,14 @@ class Apps extends Trongate {
     }
 
     function deployments(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $id = (string) segment(3);
-        $this->trongate_security->_require_app($id, 'deployments', 'You do not have permission to view deployments for this app.');
+        $this->_require_app($id, 'deployments', 'You do not have permission to view deployments for this app.');
         try {
             $overview = $this->model->_overview($id, 100);
         } catch (Throwable) {
             http_response_code(404);
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => 'Application not found.',
             ]);
@@ -429,7 +493,7 @@ class Apps extends Trongate {
         }
 
         $app = $overview['app'];
-        $this->templates->_render('apps', 'deployments', 'app-deployments', [
+        $this->workspace->_render_panel('apps', 'deployments', 'app-deployments', [
             'overview' => $overview,
             'crumbs' => [
                 ['/apps', 'Apps'],
@@ -440,14 +504,14 @@ class Apps extends Trongate {
     }
 
     function services(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $id = (string) segment(3);
-        $this->trongate_security->_require_app($id, 'services_view', 'You do not have permission to view services for this app.');
+        $this->_require_app($id, 'services_view', 'You do not have permission to view services for this app.');
         try {
             $overview = $this->model->_overview($id);
         } catch (Throwable) {
             http_response_code(404);
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => 'Application not found.',
             ]);
@@ -459,11 +523,11 @@ class Apps extends Trongate {
         unset($_SESSION['services_flash'], $_SESSION['services_error']);
 
         $this->module('services');
-        $actor = $this->trongate_security->_actor();
+        $actor = $this->workspace->_actor();
         $app = $overview['app'];
         $app_id = (string) $app['id'];
-        $can_manage = Access_policy::can_app($actor, $app_id, 'services_manage');
-        $this->templates->_render('apps', 'services', 'app-services', [
+        $can_manage = $this->can_app($actor, $app_id, 'services_manage');
+        $this->workspace->_render_panel('apps', 'services', 'app-services', [
             'overview' => $overview,
             'services' => $overview['services'],
             'shared_services' => $overview['shared_services'],
@@ -480,14 +544,14 @@ class Apps extends Trongate {
     }
 
     function access(): void {
-        $this->trongate_security->make_sure_allowed();
-        $this->trongate_security->_require_workspace('team.manage', 'You do not have permission to manage team access.');
+        $this->trongate_security->make_sure_allowed('apps');
+        $this->workspace->_require_workspace('team.manage', 'You do not have permission to manage team access.');
         $id = (string) segment(3);
         try {
             $overview = $this->model->_overview($id);
         } catch (Throwable) {
             http_response_code(404);
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => 'Application not found.',
             ]);
@@ -502,9 +566,8 @@ class Apps extends Trongate {
         $this->module('team');
         $app = $overview['app'];
         $app_id = (string) $app['id'];
-        $this->templates->_render('apps', 'access', 'app-access', [
+        $this->workspace->_render_panel('apps', 'access', 'app-access', [
             'overview' => $overview,
-            'administrators' => $this->team->model->_administrators(),
             'app_members' => $this->team->model->_app_members($app_id),
             'all_members' => $this->team->model->_members(),
             'app_invitations' => $this->team->model->_pending_invitations($app_id),
@@ -520,14 +583,14 @@ class Apps extends Trongate {
     }
 
     function settings(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $id = (string) segment(3);
-        $this->trongate_security->_require_app($id, 'settings', 'You do not have permission to view or edit settings for this app.');
+        $this->_require_app($id, 'settings', 'You do not have permission to view or edit settings for this app.');
         try {
             $overview = $this->model->_overview($id);
         } catch (Throwable) {
             http_response_code(404);
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => 'Application not found.',
             ]);
@@ -541,16 +604,16 @@ class Apps extends Trongate {
             'env-deleted' => 'Environment variable removed. Deploy now to apply the change.',
             default => null,
         };
-        $gh_flash = $_SESSION['github_auth_flash'] ?? null;
-        $gh_error = $_SESSION['github_auth_error'] ?? null;
-        unset($_SESSION['github_auth_flash'], $_SESSION['github_auth_error']);
+        $gh_flash = $_SESSION['github_flash'] ?? null;
+        $gh_error = $_SESSION['github_error'] ?? null;
+        unset($_SESSION['github_flash'], $_SESSION['github_error']);
         if ($saved_notice === null && is_string($gh_flash)) {
             $saved_notice = $gh_flash;
         }
 
         $app = $overview['app'];
         $app_id = (string) $app['id'];
-        $this->templates->_render('apps', 'settings', 'app-settings', [
+        $this->workspace->_render_panel('apps', 'settings', 'app-settings', [
             'overview' => $overview,
             'saved_notice' => $saved_notice,
             'message' => is_string($gh_error) ? $gh_error : null,
@@ -564,10 +627,10 @@ class Apps extends Trongate {
     }
 
     function save_settings(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $this->trongate_security->_csrf();
         $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->trongate_security->_require_app($raw_app, 'settings', 'You do not have permission to edit settings for this app.');
+        $this->_require_app($raw_app, 'settings', 'You do not have permission to edit settings for this app.');
         $app_id = '';
         try {
             $app_id = Validate::id($raw_app);
@@ -580,10 +643,10 @@ class Apps extends Trongate {
     }
 
     function save_env(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $this->trongate_security->_csrf();
         $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->trongate_security->_require_app($raw_app, 'settings', 'You do not have permission to edit environment variables for this app.');
+        $this->_require_app($raw_app, 'settings', 'You do not have permission to edit environment variables for this app.');
         $app_id = '';
         try {
             $app_id = Validate::id($raw_app);
@@ -596,10 +659,10 @@ class Apps extends Trongate {
     }
 
     function delete_env(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $this->trongate_security->_csrf();
         $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->trongate_security->_require_app($raw_app, 'settings', 'You do not have permission to edit environment variables for this app.');
+        $this->_require_app($raw_app, 'settings', 'You do not have permission to edit environment variables for this app.');
         $app_id = '';
         try {
             $app_id = Validate::id($raw_app);
@@ -616,7 +679,7 @@ class Apps extends Trongate {
         if ($app_id !== '') {
             try {
                 $overview = $this->model->_overview($app_id);
-                $this->templates->_render('apps', 'settings', 'app-settings', [
+                $this->workspace->_render_panel('apps', 'settings', 'app-settings', [
                     'overview' => $overview,
                     'message' => $message,
                     'github' => $this->_github_ui('apps/settings/' . rawurlencode($app_id), false),
@@ -631,17 +694,17 @@ class Apps extends Trongate {
                 // Fall through to dashboard.
             }
         }
-        $this->templates->_render('apps', 'dashboard', 'dashboard', [
+        $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
             'app_summaries' => $this->_visible_summaries(),
             'message' => $message,
         ]);
     }
 
     function deploy(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $this->trongate_security->_csrf();
         $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->trongate_security->_require_app($raw_app, 'deploy', 'You do not have permission to deploy this app.');
+        $this->_require_app($raw_app, 'deploy', 'You do not have permission to deploy this app.');
         $app_id = '';
         try {
             $app_id = Validate::id($raw_app);
@@ -680,7 +743,7 @@ class Apps extends Trongate {
             if ($app_id !== '') {
                 try {
                     $overview = $this->model->_overview($app_id);
-                    $this->templates->_render('apps', 'show', 'app-overview', [
+                    $this->workspace->_render_panel('apps', 'show', 'app-overview', [
                         'overview' => $overview,
                         'message' => $message,
                         'crumbs' => [
@@ -693,7 +756,7 @@ class Apps extends Trongate {
                     // Fall through to dashboard.
                 }
             }
-            $this->templates->_render('apps', 'dashboard', 'dashboard', [
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
                 'app_summaries' => $this->_visible_summaries(),
                 'message' => $message,
             ]);
@@ -701,8 +764,8 @@ class Apps extends Trongate {
     }
 
     function create(): void {
-        $this->trongate_security->make_sure_allowed();
-        $this->trongate_security->_require_workspace('apps.create', 'You do not have permission to create new apps.');
+        $this->trongate_security->make_sure_allowed('apps');
+        $this->workspace->_require_workspace('apps.create', 'You do not have permission to create new apps.');
         $this->_restore_draft();
         if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_SESSION['app_draft']) && isset($_SESSION['launch_complete'])) {
             unset($_SESSION['launch_request'], $_SESSION['launch_complete']);
@@ -722,13 +785,13 @@ class Apps extends Trongate {
                 unset($_SESSION['draft_server']);
             }
         }
-        $gh_flash = $_SESSION['github_auth_flash'] ?? null;
-        $gh_error = $_SESSION['github_auth_error'] ?? null;
-        unset($_SESSION['github_auth_flash'], $_SESSION['github_auth_error']);
+        $gh_flash = $_SESSION['github_flash'] ?? null;
+        $gh_error = $_SESSION['github_error'] ?? null;
+        unset($_SESSION['github_flash'], $_SESSION['github_error']);
         if ($message === null && is_string($gh_error)) {
             $message = $gh_error;
         }
-        $this->templates->_render('apps', 'wizard', 'new-app', [
+        $this->workspace->_render_panel('apps', 'wizard', 'new-app', [
             'message' => $message,
             'saved_notice' => is_string($gh_flash) ? $gh_flash : null,
             'github' => $this->_github_ui('apps/create', true),
@@ -736,8 +799,8 @@ class Apps extends Trongate {
     }
 
     function branches(): void {
-        $this->trongate_security->make_sure_allowed();
-        $this->trongate_security->_require_workspace('apps.create', 'You do not have permission to list repository branches.');
+        $this->trongate_security->make_sure_allowed('apps');
+        $this->workspace->_require_workspace('apps.create', 'You do not have permission to list repository branches.');
         try {
             $repository = self::_repository((string) ($_GET['repository'] ?? ''));
             $raw = $this->_github($repository . '/branches?per_page=30');
@@ -756,9 +819,9 @@ class Apps extends Trongate {
     }
 
     function draft(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('apps.create', 'You do not have permission to create new apps.');
+        $this->workspace->_require_workspace('apps.create', 'You do not have permission to create new apps.');
         $fields = ['repository', 'branch', 'auto_deploy', 'environment', 'label', 'php_version', 'build_commands', 'php_extensions', 'health', 'wizard_step'];
         $draft = array_intersect_key($_POST, array_flip($fields));
         if (strlen(self::_encode_json($draft)) > 131072) {
@@ -772,9 +835,9 @@ class Apps extends Trongate {
     }
 
     function validate_step(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('apps.create', 'You do not have permission to create new apps.');
+        $this->workspace->_require_workspace('apps.create', 'You do not have permission to create new apps.');
 
         $step = (int) ($_POST['wizard_step'] ?? 0);
         if ($step < 0 || $step > 5) {
@@ -902,6 +965,7 @@ class Apps extends Trongate {
             }
             $label = trim((string) ($_POST['label'] ?? ''));
             $attrs['data-label'] = $label;
+            require_once APPPATH . 'modules/apps/Apps_model.php';
             $attrs['data-domain'] = $label . '.' . Apps_model::apps_domain();
             $draft_updates['label'] = $label;
         } elseif ($step === 4) {
@@ -1006,10 +1070,10 @@ class Apps extends Trongate {
     }
 
     function destroy(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('apps');
         $this->trongate_security->_csrf();
         $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->trongate_security->_require_app($raw_app, 'delete', 'You do not have permission to delete this app.');
+        $this->_require_app($raw_app, 'delete', 'You do not have permission to delete this app.');
         try {
             $app = Validate::id($raw_app);
             $purge_data = ($_POST['purge_data'] ?? '') === '1';
@@ -1021,15 +1085,15 @@ class Apps extends Trongate {
             exit;
         } catch (Throwable $e) {
             $message = $e instanceof RuntimeException ? $e->getMessage() : 'Could not delete app.';
-            $this->templates->_render('apps', 'dashboard', 'dashboard', ['message' => $message]);
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', ['message' => $message]);
         }
     }
 
     private function _visible_summaries(): array {
-        $actor = $this->trongate_security->_actor();
+        $actor = $this->workspace->_actor();
         $out = [];
         foreach ($this->model->_app_summaries() as $app_id => $summary) {
-            if (Access_policy::can_app($actor, (string) $app_id, 'view')) {
+            if ($this->can_app($actor, (string) $app_id, 'view')) {
                 $out[$app_id] = $summary;
             }
         }
@@ -1061,14 +1125,14 @@ class Apps extends Trongate {
             throw new RuntimeException('This launch form has expired. Reload and try again.');
         }
         $operation = $this->_plan_launch($_POST, $_SESSION['launch_request']);
-        $actor = $this->trongate_security->_optional_actor();
+        $actor = $this->workspace->_optional_actor();
         if (is_array($actor) && empty($actor['is_owner']) && empty($actor['is_admin']) && (int) ($actor['member_id'] ?? 0) > 0) {
             $app_id = Validate::id(trim((string) ($_POST['label'] ?? '')));
             $this->module('team');
             $this->team->model->_set_member_app_permissions(
                 (int) $actor['member_id'],
                 $app_id,
-                Access_policy::APP_PRESETS['maintainer']['permissions']
+                Team::APP_PRESETS['maintainer']['permissions']
             );
         }
         $this->model->_delete_draft($this->_draft_owner());
@@ -1079,6 +1143,33 @@ class Apps extends Trongate {
     }
 
     function _display(string $view, array $data): void {
+        $actor = is_array($data['actor'] ?? null) ? $data['actor'] : null;
+        $app_id = (string) ($data['overview']['app']['id'] ?? '');
+        $app_permissions = [
+            'can_deploy' => 'deploy',
+            'can_deployments' => 'deployments',
+            'can_database' => 'database_read',
+            'can_db_write' => 'database_write',
+            'can_logs' => 'logs',
+            'can_traffic' => 'traffic',
+            'can_services' => 'services_view',
+            'can_services_view' => 'services_view',
+            'can_services_manage' => 'services_manage',
+            'can_manage_services' => 'services_manage',
+            'can_settings' => 'settings',
+            'can_delete' => 'delete',
+        ];
+        foreach ($app_permissions as $key => $permission) {
+            $data[$key] = $actor === null || ($app_id !== '' && $this->can_app($actor, $app_id, $permission));
+        }
+        $data += [
+            'actor' => $actor,
+            'can_team' => $actor === null || $this->workspace->can_workspace($actor, 'team.manage'),
+            'can_shared_services_view' => $actor === null || $this->workspace->can_workspace($actor, 'services.view'),
+            'can_shared_services_manage' => $actor === null || $this->workspace->can_workspace($actor, 'services.manage'),
+            'can_create_apps' => $actor === null || $this->workspace->can_workspace($actor, 'apps.create'),
+            'can_jobs' => $actor === null || $this->jobs->_can_access_page($actor),
+        ];
         $data['viewData'] = $data;
         $this->view($view, $data);
     }
@@ -1272,7 +1363,7 @@ class Apps extends Trongate {
 
     /**
      * Resolves an optional GitHub bearer token (App installation token or connected user token)
-     * without touching the database when GitHub App is unconfigured and no user session exists.
+     * without touching the database when no user session exists.
      *
      * @return array{token: string, source: string}
      */
@@ -1282,32 +1373,30 @@ class Apps extends Trongate {
             return $this->github_repo_tokens[$key];
         }
 
-        $app = Github_app::from_env($this->http);
-        if ($app->can_mint_installation_tokens()) {
-            try {
-                $token = $app->repository_token($repository, ['contents' => 'read']);
-                if ($token !== '') {
-                    return $this->github_repo_tokens[$key] = ['token' => $token, 'source' => 'installation'];
-                }
-            } catch (Throwable) {
-                // Fall through to user token or anonymous public read.
+        $app = Github_app::from_config();
+        try {
+            $token = $app->repository_token($repository, ['contents' => 'read']);
+            if ($token !== '') {
+                return $this->github_repo_tokens[$key] = ['token' => $token, 'source' => 'installation'];
             }
+        } catch (Throwable) {
+            // Fall through to user token or anonymous public read.
         }
 
         $has_session_token = !empty($_SESSION['trongatetoken'])
             || !empty($_COOKIE['trongatetoken'])
             || !empty($_SERVER['HTTP_TRONGATETOKEN']);
-        if ($has_session_token && $app->can_sign_in()) {
+        if ($has_session_token) {
             try {
-                $actor = $this->trongate_security->_optional_actor();
+                $actor = $this->workspace->_optional_actor();
                 $user_id = is_array($actor) ? (int) ($actor['user_id'] ?? 0) : 0;
                 if ($user_id > 0) {
-                    $this->module('github_auth');
-                    $this->github_auth->_use_http_client($this->http);
-                    $token_data = $this->github_auth->model->_load_token($user_id);
+                    $this->module('login-github');
+                    $this->github->_use_http_client($this->http);
+                    $token_data = $this->github->model->_load_token($user_id);
                     if (is_array($token_data) && !empty($token_data['token'])) {
                         if (!empty($token_data['expires_at']) && (int) $token_data['expires_at'] < time() + 60) {
-                            $token_data = $this->github_auth->_refresh_user_token($user_id, $token_data);
+                            $token_data = $this->github->_refresh_user_token($user_id, $token_data);
                         }
                         if (is_array($token_data) && !empty($token_data['token'])) {
                             return $this->github_repo_tokens[$key] = ['token' => (string) $token_data['token'], 'source' => 'user'];
@@ -1323,11 +1412,11 @@ class Apps extends Trongate {
     }
 
     private function _github_ui(string $return_path, bool $load_repositories): array {
-        $actor = $this->trongate_security->_optional_actor();
+        $actor = $this->workspace->_optional_actor();
         $user_id = is_array($actor) ? (int) ($actor['user_id'] ?? 0) : 0;
-        $this->module('github_auth');
-        $this->github_auth->_use_http_client($this->http);
-        return $this->github_auth->_ui_context($user_id, $return_path, $load_repositories);
+        $this->module('login-github');
+        $this->github->_use_http_client($this->http);
+        return $this->github->_ui_context($user_id, $return_path, $load_repositories);
     }
 
     function _release_metadata(string $repository, array $commit, string $branch = ''): array {
@@ -1391,17 +1480,15 @@ class Apps extends Trongate {
         $input = $p['plan'] + ['action' => 'build', 'operation' => $id];
         $repository = (string) ($p['plan']['repository'] ?? '');
         if ($repository !== '') {
-            $app = Github_app::from_env($this->http);
-            if ($app->can_mint_installation_tokens()) {
-                try {
-                    $token = $app->repository_token($repository, ['contents' => 'read']);
-                    if ($token !== '') {
-                        $input['github_token'] = $token;
-                    }
-                } catch (Github_api_error $e) {
-                    if ($e->getCode() !== 404) {
-                        throw new RuntimeException('Could not authenticate with GitHub for ' . $repository . '.');
-                    }
+            $app = Github_app::from_config();
+            try {
+                $token = $app->repository_token($repository, ['contents' => 'read']);
+                if ($token !== '') {
+                    $input['github_token'] = $token;
+                }
+            } catch (Github_api_error $e) {
+                if ($e->getCode() !== 404) {
+                    throw new RuntimeException('Could not authenticate with GitHub for ' . $repository . '.');
                 }
             }
         }

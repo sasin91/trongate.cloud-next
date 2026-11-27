@@ -1,4 +1,6 @@
 <?php
+require_once APPPATH . 'modules/services/services/Service_spec.php';
+
 $active_tab = 'overview';
 $app = $overview['app'];
 $app_id = (string) $app['id'];
@@ -20,17 +22,16 @@ $php_version = (string) ($latest['spec']['php_version'] ?? $app['php_version'] ?
 $health_path = (string) ($overview['settings']['health'] ?? $latest['spec']['health'] ?? '/');
 $active_slot = (string) ($current['slot'] ?? '');
 
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
-$can_deploy = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'deploy');
-$can_deployments = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'deployments');
-$can_database = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'database_read');
-$can_logs = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'logs');
-$can_services_view = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'services_view');
-$can_services_manage = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'services_manage');
-$can_shared_services_view = $actor_ctx === null || Access_policy::can_workspace($actor_ctx, 'services.view');
-$can_shared_services_manage = $actor_ctx === null || Access_policy::can_workspace($actor_ctx, 'services.manage');
-$can_settings = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'settings');
-$can_delete = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'delete');
+$can_deploy = !empty($can_deploy);
+$can_deployments = !empty($can_deployments);
+$can_database = !empty($can_database);
+$can_logs = !empty($can_logs);
+$can_services_view = !empty($can_services_view);
+$can_services_manage = !empty($can_services_manage);
+$can_shared_services_view = !empty($can_shared_services_view);
+$can_shared_services_manage = !empty($can_shared_services_manage);
+$can_settings = !empty($can_settings);
+$can_delete = !empty($can_delete);
 ?>
 <main class="panel tc-panel">
     <div class="ov">

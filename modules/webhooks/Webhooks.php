@@ -9,12 +9,14 @@ declare(strict_types=1);
  * push event queues a build & deploy for every matching app on that repository
  * and branch that has Deploy on push enabled (app.auto_deploy = true).
  */
+require_once APPPATH . 'modules/login/github/services/Github_app.php';
+
 class Webhooks extends Trongate {
     /** GitHub caps webhook payloads at 25 MiB. */
     public const MAX_BODY_BYTES = 26214400;
 
     function github(): void {
-        $secret = Github_app::from_env($this->http)->webhook_secret();
+        $secret = Github_app::from_config()->webhook_secret();
         $method = (string) ($_SERVER['REQUEST_METHOD'] ?? '');
         $signature = (string) ($_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? '');
         $event = (string) ($_SERVER['HTTP_X_GITHUB_EVENT'] ?? '');

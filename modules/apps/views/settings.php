@@ -7,8 +7,7 @@ $domain = (string) ($app['domain'] ?? '');
 $settings = $overview['settings'];
 $env_names = $settings['env_names'];
 $optional_extensions = implode(', ', Build_commands::OPTIONAL_EXTENSIONS);
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
-$can_delete = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'delete');
+$can_delete = !empty($can_delete);
 ?>
 <main class="panel tc-panel">
     <div class="ov">
@@ -50,12 +49,10 @@ $can_delete = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id,
                             <p class="form-hint">
                                 Pushes to the branch deploy automatically through the trongate.cloud GitHub App. Turn this off to deploy only when you press <strong>Deploy now</strong>.
                                 <?php $gh = is_array($github ?? null) ? $github : []; ?>
-                                <?php if (!empty($gh['configured'])): ?>
-                                    <?php if (!empty($gh['connected']) && !empty($gh['install_url'])): ?>
-                                        <a href="<?= $e($gh['install_url']) ?>">Manage GitHub repository access ↗</a>
-                                    <?php elseif (empty($gh['connected']) && !empty($gh['connect_url'])): ?>
-                                        <a href="<?= $e($gh['connect_url']) ?>">Connect GitHub</a>
-                                    <?php endif ?>
+                                <?php if (!empty($gh['connected']) && !empty($gh['install_url'])): ?>
+                                    <a href="<?= $e($gh['install_url']) ?>">Manage GitHub repository access ↗</a>
+                                <?php elseif (empty($gh['connected']) && !empty($gh['connect_url'])): ?>
+                                    <a href="<?= $e($gh['connect_url']) ?>">Connect GitHub</a>
                                 <?php endif ?>
                             </p>
                         </div>

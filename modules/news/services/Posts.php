@@ -12,6 +12,8 @@ declare(strict_types=1);
  *   replaces: old-slug=section-id, ... for posts merged into this one (optional);
  *             their old addresses lead to that section of this post
  */
+require_once APPPATH . 'modules/news/services/Markdown.php';
+
 class Posts {
 
     /** Kinds a post can be, with the label the site shows */

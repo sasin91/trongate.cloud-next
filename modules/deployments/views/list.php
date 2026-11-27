@@ -1,6 +1,5 @@
 <?php
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
-$can_services_nav = $actor_ctx === null || Access_policy::can_workspace($actor_ctx, 'services.view');
+$can_services_nav = !empty($can_services_nav);
 ?>
 <section class="ov-card">
     <div class="ov-card-head">

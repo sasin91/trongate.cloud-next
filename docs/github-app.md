@@ -2,7 +2,7 @@
 
 One GitHub App handles everything `trongate.cloud` needs from GitHub:
 
-- **Sign-in, sign-up & repository picker (`modules/github_auth`).** Its OAuth
+- **Sign-in, sign-up & repository picker (`modules/login/github`).** Its OAuth
   client powers "Continue with GitHub" on `/login` and "Connect GitHub" in
   `/apps/create`. Signed out, an unlinked GitHub account signs up automatically
   with its verified primary email (passwordless, with `apps.create` permission,
@@ -51,6 +51,31 @@ users sign in or connect GitHub first, then install the App; the Setup URL
 3. Note the **Client ID** and **slug** (`github.com/apps/<slug>`), generate a
    **Client secret**, and generate a **Private key** (`.pem`).
 
+## Configure local development
+
+For Herd or another local PHP server, copy `.env.example` to `.env` and set your
+development GitHub App values. `.env` is ignored by Git:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+```dotenv
+GITHUB_APP_CLIENT_ID=your-development-app-client-id
+GITHUB_APP_CLIENT_SECRET=your-development-app-client-secret
+```
+
+Only the client ID and client secret are required for GitHub sign-in. Set
+`GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY_FILE`
+to enable App installation and webhook features. Alternatively, provide
+`GITHUB_APP_PRIVATE_KEY` as a single line with literal `\n` separators.
+Environment variables take precedence over values in `.env`.
+
+Set the development GitHub App's callback URL to the exact URL generated from
+your local `BASE_URL`, ending in `/auth/github/callback`. GitHub Apps allow
+multiple callback URLs, so keep the production URL and add your local URL.
+Restart Herd's PHP service after changing `.env` if OPcache is enabled.
+
 ## Configure `tc_panel` on FreeBSD
 
 Five environment variables configure both `tc_panel_fpm` and `tc_worker`:
@@ -88,11 +113,11 @@ repositories continue to deploy manually as before.
 
 ## How the pieces fit
 
-- `modules/github_auth/services/Github_app.php`: OAuth URL/exchange/refresh and
+- `modules/login/github/services/Github_app.php`: OAuth URL/exchange/refresh and
   RS256 App JWT + per-repository installation tokens, using `engine/Http_client.php`.
-- `modules/github_auth/services/Github_client.php`: REST API client for user
+- `modules/login/github/services/Github_client.php`: REST API client for user
   profile, installation repositories, branches, commits, and contents.
-- `modules/github_auth/Github_auth.php`: `/auth/github`, `/auth/github/callback`,
+- `modules/login/github/Github.php`: `/auth/github`, `/auth/github/callback`,
   `/auth/github/installed`, and `POST /auth/github/disconnect`. OAuth state is
   HMAC-SHA256 signed with `installation_key()` and bound to a `SameSite=Lax`
   `HttpOnly` cookie nonce.

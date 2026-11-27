@@ -4,6 +4,9 @@ declare(strict_types=1);
 /**
  * Public blog: longer writing from the shared Markdown post archive in modules/news/posts.
  */
+require_once APPPATH . 'modules/news/services/Posts.php';
+require_once APPPATH . 'modules/news/services/Markdown.php';
+
 class Blog extends Trongate {
 
     /**

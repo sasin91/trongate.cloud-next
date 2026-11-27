@@ -1,6 +1,8 @@
 <?php
-require_once APPPATH . 'modules/trongate_security/traits/Encrypted_credentials.php';
+require_once APPPATH . 'modules/security/traits/Encrypted_credentials.php';
 require_once APPPATH . 'modules/jobs/traits/Job_queue.php';
+require_once APPPATH . 'modules/validation/services/Validate.php';
+require_once APPPATH . 'modules/services/services/Service_spec.php';
 
 class Deployments_model extends Model {
     use Encrypted_credentials, Job_queue;

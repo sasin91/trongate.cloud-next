@@ -29,6 +29,7 @@ class Webhooks_model extends Model {
                 continue;
             }
             try {
+                require_once APPPATH . 'modules/apps/Apps.php';
                 $app_repo = strtolower(Apps::_repository($raw_repo));
             } catch (RuntimeException) {
                 continue;

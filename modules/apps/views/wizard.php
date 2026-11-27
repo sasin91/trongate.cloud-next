@@ -1,11 +1,12 @@
 <?php
+require_once APPPATH . 'modules/apps/services/Build_commands.php';
 $php_version = (string) ($_POST['php_version'] ?? '8.4');
+require_once APPPATH . 'modules/apps/Apps_model.php';
 $apps_domain = Apps_model::apps_domain();
 $optional_extensions = implode(', ', Build_commands::OPTIONAL_EXTENSIONS);
 $initial_label = trim((string) ($_POST['label'] ?? ''));
 $initial_repo = trim((string) ($_POST['repository'] ?? ''));
 $gh = is_array($github ?? null) ? $github : [
-    'configured' => false,
     'connected' => false,
     'github_login' => '',
     'install_url' => '',
@@ -39,7 +40,6 @@ $keys = range('A', 'Z');
                     <legend>Which app are we putting online?</legend>
                 </div>
 
-                <?php if (!empty($gh['configured'])): ?>
                     <div class="gh-connect-bar">
                         <?php if (empty($gh['connected'])): ?>
                             <div class="gh-connect-meta">
@@ -88,7 +88,6 @@ $keys = range('A', 'Z');
                             </div>
                         <?php endif ?>
                     <?php endif ?>
-                <?php endif ?>
 
                 <?php $field('repository', !empty($gh['connected']) ? 'Or enter a GitHub repository' : 'Public GitHub repository'); ?>
                 <p class="wz-hint">Paste <code>https://github.com/owner/repository</code> or <code>owner/repository</code>. <?= !empty($gh['connected']) ? 'Private repositories work automatically when granted to the GitHub App.' : 'We check that the repository is accessible and fetch its default branch.' ?></p>

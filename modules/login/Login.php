@@ -90,12 +90,17 @@ class Login extends Trongate {
     // -----------------------------------------------------------------
 
     /**
-     * Default route - shows login form.
+     * Default login route - start the Team GitHub sign-in flow.
      *
      * @return void
      */
     public function index(): void {
-        $this->login();
+        if ($this->workspace->_optional_actor() !== null) {
+            redirect('apps');
+            return;
+        }
+        $this->module('login-github');
+        $this->github->start();
     }
 
     /**
@@ -108,14 +113,14 @@ class Login extends Trongate {
     public function login(): void {
         // Guard: require a third URL segment to identify the user level
         if (segment(3) === '') {
-            redirect(BASE_URL);
+            redirect('login/login/tg-team');
             return;
         }
 
         $user_level_id = $this->resolve_level();
 
         // Redirect if already logged in
-        $token = $this->trongate_tokens->attempt_get_valid_token($user_level_id === 1 ? [1, 2] : $user_level_id);
+        $token = $this->trongate_tokens->attempt_get_valid_token($user_level_id);
 
         if ($token !== false) {
             $config = $this->model->get_level_config($user_level_id);
@@ -123,8 +128,15 @@ class Login extends Trongate {
             return;
         }
 
-        // Destroy lingering tokens
-        $this->trongate_tokens->destroy();
+        // Clear an invalid token if one was supplied; do not run database cleanup
+        // on a fresh login page with no token to destroy.
+        if (
+            isset($_SESSION['trongatetoken'])
+            || isset($_COOKIE['trongatetoken'])
+            || isset($_SERVER['HTTP_TRONGATETOKEN'])
+        ) {
+            $this->trongate_tokens->destroy();
+        }
 
         $config = $this->model->get_level_config($user_level_id);
         $level_slug = $this->model->get_login_url($user_level_id);
@@ -287,7 +299,7 @@ class Login extends Trongate {
                 if (!empty($config['secret_login_word'])) {
                     $redirect_target = 'login/login/' . $config['secret_login_word'];
                 } elseif ($level_id === 2) {
-                    $redirect_target = 'login/login/1';
+                    $redirect_target = 'login/login/tg-team';
                 } else {
                     $redirect_target = 'login/login/' . $level_id;
                 }
@@ -464,15 +476,6 @@ class Login extends Trongate {
         if ($valid === true) {
             $this->resolved_login_level = $user_level_id;
             return true;
-        }
-
-        // Unified control-plane login: accept team member emails on the main login route.
-        if ($user_level_id === 1) {
-            $levels = $this->model->get_configured_level_configs();
-            if (isset($levels[2]) && $this->model->validate_credentials(strtolower(trim($identifier)), $password, 2)) {
-                $this->resolved_login_level = 2;
-                return true;
-            }
         }
 
         return 'The {label} and/or password you entered is incorrect.';

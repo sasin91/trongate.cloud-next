@@ -110,6 +110,10 @@ ensure_zfs "$TC_POOL/tc/services/valkey" -o atime=off -o compression=lz4
 ensure_zfs "$TC_POOL/tc/apps" -o atime=off -o compression=lz4
 ensure_zfs "$TC_POOL/tc/jails" -o atime=off -o compression=lz4
 ensure_zfs "$TC_POOL/tc/builds" -o atime=off -o compression=lz4
+ensure_zfs "$TC_POOL/tc/registry" -o atime=off -o compression=lz4
+ensure_zfs "$TC_POOL/tc/registry/modules" -o atime=off -o compression=lz4 -o exec=off -o setuid=off
+ensure_zfs "$TC_POOL/tc/registry/repos" -o atime=off -o compression=lz4
+ensure_zfs "$TC_POOL/tc/registry/archives" -o atime=off -o compression=lz4 -o exec=off -o setuid=off
 
 # 4. Enable RACCT/RCTL in /boot/loader.conf (sysrc rejects dotted loader tunable names).
 info "Configuring /boot/loader.conf for rctl(8)"
@@ -226,6 +230,7 @@ install_runtime_file "$RUNTIME_SRC_DIR/builder.php" "/usr/local/libexec/tc/build
 install_runtime_file "$RUNTIME_SRC_DIR/resources.php" "/usr/local/libexec/tc/resources.php" 0644
 install_runtime_file "$RUNTIME_SRC_DIR/metrics.php" "/usr/local/libexec/tc/metrics.php" 0644
 install_runtime_file "$RUNTIME_SRC_DIR/app_database.php" "/usr/local/libexec/tc/app_database.php" 0644
+install_runtime_file "$RUNTIME_SRC_DIR/registry.php" "/usr/local/libexec/tc/registry.php" 0644
 
 cat <<'EOF' > /usr/local/libexec/tc-runtime
 #!/bin/sh

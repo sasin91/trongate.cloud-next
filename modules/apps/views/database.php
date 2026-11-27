@@ -31,8 +31,7 @@ $import_notice = isset($import_notice) && is_string($import_notice) ? $import_no
 $import_error = isset($import_error) && is_string($import_error) ? $import_error : null;
 $import_sql = (string) ($import_sql ?? '');
 $starter_sets = is_array($starter_sets ?? null) ? $starter_sets : [];
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
-$can_db_write = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'database_write');
+$can_db_write = !empty($can_db_write);
 ?>
 <main class="panel tc-panel">
     <div class="ov">

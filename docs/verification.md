@@ -13,7 +13,7 @@ TC_DSN='mysql:host=127.0.0.1;dbname=tc' TC_DB_USER=tc make test-mariadb
 ```
 
 What is covered by automated `.phpt` tests:
-- **Syntax checks (`make lint`)**: `php -l` across `bootstrap.php`, `engine/`,
+- **Syntax checks (`make lint`)**: `php -l` across `engine/`,
   `infra/runtime/`, `modules/`, `public/`, and `tests/`.
 - **Engine & module boundaries** (`engine/tests/http_client.phpt`,
   `engine/tests/modules_and_db.phpt`): Shared `Http_client` validation, GitHub
@@ -21,7 +21,7 @@ What is covered by automated `.phpt` tests:
   transactions, and `Records` CRUD.
 - **Owning module suites** (`modules/apps/tests/`, `modules/jobs/tests/`,
   `modules/servers/tests/`, `modules/setup/tests/`,
-  `modules/trongate_security/tests/`, `modules/validation/tests/`):
+  `modules/security/tests/`, `modules/validation/tests/`):
   `Build_commands`, `Build::plan()`, `Trongate_config::patch_config_php()`,
   queue claims/leases/fencing, `Job_context` + `Worker` dispatch, `Ssh::inspect`
   protocol v2, CLI entry points, libsodium encryption & redaction, and

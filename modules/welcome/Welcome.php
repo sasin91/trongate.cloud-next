@@ -10,6 +10,7 @@ class Welcome extends Trongate {
      * The landing page in the trongate.cloud palette.
      */
     public function index(): void {
+        require_once APPPATH . 'modules/apps/Apps_model.php';
         $this->view('default_homepage', [
             'apps_domain' => Apps_model::apps_domain(),
         ]);
@@ -22,6 +23,7 @@ class Welcome extends Trongate {
     public function preview(): void {
         header("Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'self'; form-action 'self'");
 
+        require_once APPPATH . 'modules/apps/Apps_model.php';
         $apps_domain = Apps_model::apps_domain();
         $now = time();
         $minutes_ago = static fn(int $minutes): int => $now - ($minutes * 60);

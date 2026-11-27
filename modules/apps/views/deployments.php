@@ -6,8 +6,7 @@ $label = (string) ($app['label'] ?? $app_id);
 $releases = $overview['releases'];
 $deployments = $overview['deployments'];
 $canary = $overview['canary'];
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
-$can_deploy = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'deploy');
+$can_deploy = !empty($can_deploy);
 ?>
 <main class="panel tc-panel">
     <div class="ov">

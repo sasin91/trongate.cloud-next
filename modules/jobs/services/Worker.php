@@ -1,5 +1,7 @@
 <?php
 declare(strict_types=1);
+require_once APPPATH . 'modules/jobs/services/Job_context.php';
+
 class Worker {
     function __construct(private Model $model) {
     }

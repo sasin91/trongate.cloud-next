@@ -54,10 +54,10 @@ $viewData += [
     'app_invitations' => $app_invitations ?? [],
     'invite_link' => $invite_link ?? null,
 ];
-$can_services_nav = $actor !== null && Access_policy::can_workspace($actor, 'services.view');
-$can_jobs_nav = $actor !== null && Access_policy::can_access_jobs_page($actor);
-$can_team_nav = $actor !== null && Access_policy::can_workspace($actor, 'team.manage');
-$can_create_apps = $actor !== null && Access_policy::can_workspace($actor, 'apps.create');
+$can_services_nav = !empty($can_services_nav);
+$can_jobs_nav = !empty($can_jobs_nav);
+$can_team_nav = !empty($can_team_nav);
+$can_create_apps = !empty($can_create_apps);
 ?>
 <!doctype html>
 <html lang="en">
@@ -80,7 +80,7 @@ $can_create_apps = $actor !== null && Access_policy::can_workspace($actor, 'apps
 </head>
 <body class="wz-body">
     <aside id="mx-feedback" role="status" aria-live="polite"></aside>
-    <button hidden id="mx-error-trigger" mx-get="/templates/request_error" mx-target="#mx-feedback" mx-trigger="none" mx-after-swap="resourceRelease"></button>
+    <button hidden id="mx-error-trigger" mx-get="/workspace/request_error" mx-target="#mx-feedback" mx-trigger="none" mx-after-swap="resourceRelease"></button>
     <header class="wz-top tc-header">
         <div class="wz-top-row tc-header-row">
             <div class="tc-header-left">

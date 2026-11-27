@@ -1,4 +1,6 @@
 <?php
+require_once APPPATH . 'modules/security/services/Encryptor.php';
+
 trait Encrypted_credentials {
     function secret(string $id, ?string $value = null): string {
         if ($value !== null) {

@@ -3,13 +3,12 @@ $active_tab = 'access';
 $app = $overview['app'];
 $app_id = (string) $app['id'];
 $label = (string) ($app['label'] ?? $app_id);
-$administrators = $administrators ?? [];
 $app_members = $app_members ?? [];
 $all_members = $all_members ?? [];
 $app_invitations = $app_invitations ?? [];
 $invite_link = is_array($invite_link ?? null) ? $invite_link : null;
-$presets = Access_policy::APP_PRESETS;
-$app_perms_meta = Access_policy::APP_PERMISSIONS;
+$presets = Team::APP_PRESETS;
+$app_perms_meta = Team::APP_PERMISSIONS;
 
 $existing_ids = array_flip(array_map(static fn(array $m): int => (int) $m['id'], $app_members));
 $grantable_members = array_values(array_filter(
@@ -64,16 +63,6 @@ $grantable_members = array_values(array_filter(
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($administrators as $admin): ?>
-                                    <tr>
-                                        <td>
-                                            <strong><?= $e($admin['username']) ?></strong>
-                                            <div class="muted" style="font-size:12px">Primary administrator</div>
-                                        </td>
-                                        <td><span class="ov-badge ok">Workspace owner</span></td>
-                                        <td></td>
-                                    </tr>
-                                <?php endforeach ?>
                                 <?php foreach ($app_members as $m): ?>
                                     <tr>
                                         <td>
@@ -82,7 +71,7 @@ $grantable_members = array_values(array_filter(
                                         </td>
                                         <td style="white-space:normal">
                                             <span class="ov-badge" style="background:#ecebfa;color:var(--primary)"><?= $e($m['app_preset_label']) ?></span>
-                                            <div class="muted" style="font-size:12px;margin-top:4px"><?= $e(implode(', ', Access_policy::permission_labels($m['app_permissions']))) ?></div>
+                                            <div class="muted" style="font-size:12px;margin-top:4px"><?= $e(implode(', ', $m['app_permission_labels'])) ?></div>
                                         </td>
                                         <td style="text-align:right">
                                             <div class="team-row-actions">

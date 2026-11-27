@@ -10,23 +10,6 @@ class Team_model extends Model {
         return $email;
     }
 
-    function _administrators(): array {
-        return $this->db->query_bind(
-            'SELECT id, username, trongate_user_id FROM trongate_administrators ORDER BY id ASC',
-            [],
-            'statement'
-        )->fetchAll();
-    }
-
-    function _administrator_by_user_id(int $user_id): ?array {
-        $row = $this->db->query_bind(
-            'SELECT id, username, trongate_user_id FROM trongate_administrators WHERE trongate_user_id = ? LIMIT 1',
-            [$user_id],
-            'statement'
-        )->fetch();
-        return is_array($row) ? $row : null;
-    }
-
     function _members(): array {
         $rows = $this->db->query_bind(
             'SELECT id, email, name, trongate_user_id, role, scope, permissions, active, created_at, last_login FROM team_members ORDER BY created_at DESC, id DESC',
@@ -155,7 +138,8 @@ class Team_model extends Model {
 
         $role = ($grant['role'] ?? 'member') === 'admin' ? 'admin' : 'member';
         $scope = ($grant['scope'] ?? 'scoped') === 'all' ? 'all' : 'scoped';
-        $permissions = Access_policy::normalize_permissions(
+        $this->module('team');
+        $permissions = $this->team->normalize_permissions(
             is_array($grant['permissions'] ?? null) ? $grant['permissions'] : [],
             $role,
             $scope
@@ -263,7 +247,8 @@ class Team_model extends Model {
                 if ($authenticated_member_id !== null && $authenticated_member_id !== (int) $existing['id']) {
                     throw new RuntimeException('This invitation is for ' . $email . '.');
                 }
-                $merged = Access_policy::merge_grant($existing, $invite);
+                $this->module('team');
+                $merged = $this->team->merge_grant($existing, $invite);
                 $this->db->query_bind(
                     'UPDATE team_members SET role = ?, scope = ?, permissions = ?, active = 1, last_login = ? WHERE id = ?',
                     [$merged['role'], $merged['scope'], self::_encode_json($merged['permissions']), $now, (int) $existing['id']],
@@ -329,7 +314,8 @@ class Team_model extends Model {
         }
         $role = ($grant['role'] ?? 'member') === 'admin' ? 'admin' : 'member';
         $scope = ($grant['scope'] ?? 'scoped') === 'all' ? 'all' : 'scoped';
-        $permissions = Access_policy::normalize_permissions(
+        $this->module('team');
+        $permissions = $this->team->normalize_permissions(
             is_array($grant['permissions'] ?? null) ? $grant['permissions'] : [],
             $role,
             $scope
@@ -359,13 +345,14 @@ class Team_model extends Model {
             throw new RuntimeException('Workspace administrators already have full access to all apps.');
         }
         $perms = $member['permissions'];
-        $clean = Access_policy::normalize_app_permissions($app_perms);
+        $this->module('team');
+        $clean = $this->team->normalize_app_permissions($app_perms);
         if ($clean === []) {
             unset($perms['apps'][$app_id]);
         } else {
             $perms['apps'][$app_id] = $clean;
         }
-        $normalized = Access_policy::normalize_permissions($perms, 'member', (string) $member['scope']);
+        $normalized = $this->team->normalize_permissions($perms, 'member', (string) $member['scope']);
         $this->db->query_bind(
             'UPDATE team_members SET permissions = ? WHERE id = ?',
             [self::_encode_json($normalized), $member_id],
@@ -456,9 +443,10 @@ class Team_model extends Model {
      */
     function _app_members(string $app_id): array {
         $result = [];
+        $this->module('team');
         foreach ($this->_members() as $member) {
-            $actor = Access_policy::from_member($member);
-            $effective = Access_policy::app_permissions($actor, $app_id);
+            $actor = $this->team->actor_from_member($member);
+            $effective = Modules::run('apps/effective_app_permissions', ['actor' => $actor, 'app_id' => $app_id]);
             if ($effective === []) {
                 continue;
             }
@@ -468,7 +456,8 @@ class Team_model extends Model {
                     ? (isset($member['permissions']['apps'][$app_id]) ? 'All apps + custom' : 'All apps')
                     : 'Direct access');
             $member['app_permissions'] = $effective;
-            $member['app_preset_label'] = Access_policy::preset_label($effective);
+            $member['app_preset_label'] = $this->team->preset_label($effective);
+            $member['app_permission_labels'] = $this->team->permission_labels($effective);
             $member['app_source'] = $source;
             $member['direct_permissions'] = $member['permissions']['apps'][$app_id] ?? [];
             $result[] = $member;
@@ -480,7 +469,8 @@ class Team_model extends Model {
         $role = ($row['role'] ?? 'member') === 'admin' ? 'admin' : 'member';
         $scope = ($row['scope'] ?? 'scoped') === 'all' ? 'all' : 'scoped';
         $raw = is_string($row['permissions'] ?? null) ? (json_decode($row['permissions'], true) ?: []) : [];
-        $perms = Access_policy::normalize_permissions($raw, $role, $scope);
+        $this->module('team');
+        $perms = $this->team->normalize_permissions($raw, $role, $scope);
         return [
             'id' => (int) ($row['id'] ?? 0),
             'email' => (string) ($row['email'] ?? ''),
@@ -492,7 +482,7 @@ class Team_model extends Model {
             'active' => (int) ($row['active'] ?? 1) === 1,
             'created_at' => (int) ($row['created_at'] ?? 0),
             'last_login' => (int) ($row['last_login'] ?? 0),
-            'summary' => Access_policy::summary_lines($role, $scope, $perms),
+            'summary' => $this->team->summary_lines($role, $scope, $perms),
         ];
     }
 
@@ -500,7 +490,8 @@ class Team_model extends Model {
         $role = ($row['role'] ?? 'member') === 'admin' ? 'admin' : 'member';
         $scope = ($row['scope'] ?? 'scoped') === 'all' ? 'all' : 'scoped';
         $raw = is_string($row['permissions'] ?? null) ? (json_decode($row['permissions'], true) ?: []) : [];
-        $perms = Access_policy::normalize_permissions($raw, $role, $scope);
+        $this->module('team');
+        $perms = $this->team->normalize_permissions($raw, $role, $scope);
         return [
             'id' => (string) ($row['id'] ?? ''),
             'email' => (string) ($row['email'] ?? ''),
@@ -514,7 +505,7 @@ class Team_model extends Model {
             'accepted_at' => (int) ($row['accepted_at'] ?? 0),
             'revoked_at' => (int) ($row['revoked_at'] ?? 0),
             'accepted_member_id' => (int) ($row['accepted_member_id'] ?? 0),
-            'summary' => Access_policy::summary_lines($role, $scope, $perms),
+            'summary' => $this->team->summary_lines($role, $scope, $perms),
         ];
     }
 

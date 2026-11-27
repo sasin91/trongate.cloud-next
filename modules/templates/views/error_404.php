@@ -1,30 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <?php
-    $page_title = 'Page not found - trongate.cloud';
-    $page_description = 'The page you are looking for does not exist or has been moved.';
-    require __DIR__ . '/_site_head.php';
-    ?>
+    <base href="<?= BASE_URL ?>">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Page Not Found</title>
+    <link rel="stylesheet" href="css/trongate.css">
 </head>
-
-<body class="lp">
-    <?php require __DIR__ . '/_site_header.php'; ?>
-
-    <main class="lp-wrap lp-news">
-        <div class="lp-news-head">
-            <span class="lp-kicker">404</span>
-            <h1 class="lp-h2">Page not found.</h1>
-            <p class="lp-sub">Sorry, the page you're looking for doesn't exist or has been moved.</p>
+<body>
+    <div class="container-sm">
+        <div class="text-center mt-7">
+            <h1>404</h1>
+            <h2>Page Not Found</h2>
+            <p>Sorry, the page you're looking for doesn't exist or has been moved.</p>
+            
+            <div class="mt-3">
+                <?php
+                echo anchor(BASE_URL, 'Go to Homepage', ['class' => 'button']);
+                echo form_button('back', 'Go Back', ['class' => 'button alt', 'onclick' => 'history.back()']);
+                ?>
+            </div>
         </div>
-        <div class="lp-post-foot">
-            <a href="<?= BASE_URL ?>" class="lp-btn">Go to homepage</a>
-            <a href="news" class="lp-more">Read the news <span aria-hidden="true">&rarr;</span></a>
-        </div>
-    </main>
-
-    <?php require __DIR__ . '/_site_footer.php'; ?>
+    </div>
 </body>
-
 </html>

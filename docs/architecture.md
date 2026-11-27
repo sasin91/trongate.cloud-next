@@ -30,7 +30,7 @@ block an entire controller in its constructor. Feature assets use normal
 Controllers access their model via `$this->model` and load other modules through
 Trongate's module loader so database transactions share the caller's PDO
 connection. Supporting service classes live under their owning modules in
-`services/` and are autoloaded by root `bootstrap.php`.
+`services/` and are explicitly loaded by their callers with `require_once`.
 
 The canonical MariaDB schema is root `setup.sql`; SQLite tests use
 `modules/setup/fixtures/setup.sqlite.sql`. The CLI-only `Setup_model` applies

@@ -1,10 +1,18 @@
 <?php
 declare(strict_types=1);
 
+require_once APPPATH . 'modules/validation/services/Validate.php';
+require_once APPPATH . 'modules/servers/services/Ssh.php';
+
 class Servers extends Trongate {
+    function make_sure_allowed(): void {
+        block_url('servers/make_sure_allowed');
+        $this->workspace->_actor();
+    }
+
     function details(): void {
-        $this->trongate_security->make_sure_allowed();
-        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
+        $this->trongate_security->make_sure_allowed('servers');
+        $this->workspace->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         $message = null;
         $details = null;
         $saved = false;
@@ -28,7 +36,7 @@ class Servers extends Trongate {
                 }
             }
         }
-        $this->templates->_render('servers', 'details', 'server-details', [
+        $this->workspace->_render_panel('servers', 'details', 'server-details', [
             'message' => $message,
             'resource_details' => $details,
             'resources_saved' => $saved,
@@ -36,8 +44,8 @@ class Servers extends Trongate {
     }
 
     function index(): void {
-        $this->trongate_security->make_sure_allowed();
-        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
+        $this->trongate_security->make_sure_allowed('servers');
+        $this->workspace->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->action();
             return;
@@ -46,41 +54,41 @@ class Servers extends Trongate {
         foreach ($this->records->_all('server') as $server) {
             $capacities[$server['id']] = $this->monitoring->model->_summary($server['id']);
         }
-        $this->templates->_render('servers', 'index', 'servers', [
+        $this->workspace->_render_panel('servers', 'index', 'servers', [
             'capacities' => $capacities,
         ]);
     }
 
     function builds(): void {
-        $this->trongate_security->make_sure_allowed();
-        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
-        $this->templates->_render('servers', 'builds', 'build-servers');
+        $this->trongate_security->make_sure_allowed('servers');
+        $this->workspace->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
+        $this->workspace->_render_panel('servers', 'builds', 'build-servers');
     }
 
     function connect(): void {
-        $this->trongate_security->make_sure_allowed();
-        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
+        $this->trongate_security->make_sure_allowed('servers');
+        $this->workspace->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->action();
             return;
         }
-        $this->templates->_render('servers', 'confirm', 'connect-server');
+        $this->workspace->_render_panel('servers', 'confirm', 'connect-server');
     }
 
     function confirm(): void {
-        $this->trongate_security->make_sure_allowed();
-        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
+        $this->trongate_security->make_sure_allowed('servers');
+        $this->workspace->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->action();
             return;
         }
-        $this->templates->_render('servers', 'confirm', 'confirm-server');
+        $this->workspace->_render_panel('servers', 'confirm', 'confirm-server');
     }
 
     function action(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('servers');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
+        $this->workspace->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         $model = $this->model;
         $inline = ($_POST['inline'] ?? '') === 'server';
         $command = (string) ($_POST['command'] ?? '');
@@ -96,7 +104,7 @@ class Servers extends Trongate {
             if ($inline) {
                 $this->trongate_security->_json(['error' => $message], 422);
             } else {
-                $this->templates->_render('servers', 'confirm', 'confirm-server', ['message' => $message]);
+                $this->workspace->_render_panel('servers', 'confirm', 'confirm-server', ['message' => $message]);
             }
         }
     }
@@ -223,9 +231,9 @@ class Servers extends Trongate {
     }
 
     function scan(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('servers');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
+        $this->workspace->_require_workspace('servers.manage', 'You do not have permission to manage servers.');
         $this->trongate_security->_json($this->_scan_server($_POST));
     }
 }

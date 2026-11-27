@@ -8,6 +8,9 @@ declare(strict_types=1);
  * optional customer build commands execute only inside an ephemeral rctl-bounded
  * FreeBSD build jail on the target host.
  */
+require_once APPPATH . 'modules/validation/services/Validate.php';
+require_once APPPATH . 'modules/apps/services/Build_commands.php';
+
 final class Build {
     static function plan(array $p): array {
         $app = Validate::id((string) ($p['app'] ?? ''));

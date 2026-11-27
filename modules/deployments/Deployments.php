@@ -1,17 +1,75 @@
 <?php
 declare(strict_types=1);
 
+require_once APPPATH . 'modules/trongate_security/Trongate_security.php';
+require_once APPPATH . 'modules/validation/services/Validate.php';
+require_once APPPATH . 'modules/services/services/Service_spec.php';
+require_once APPPATH . 'modules/servers/services/Ssh.php';
+
 class Deployments extends Trongate {
+    function make_sure_allowed(): void {
+        block_url('deployments/make_sure_allowed');
+        $this->workspace->_actor();
+    }
+
+    function _job_target(array $job): array {
+        $payload = [];
+        if (isset($job['payload'])) {
+            $payload = is_string($job['payload'])
+                ? (json_decode($job['payload'], true) ?: [])
+                : (is_array($job['payload']) ? $job['payload'] : []);
+        }
+        $app = (string) ($payload['app'] ?? $payload['launch']['app'] ?? $payload['plan']['app'] ?? '');
+        if ($app === '' && ($job['target_kind'] ?? '') === 'app') {
+            $app = (string) ($job['target'] ?? '');
+        }
+        $service = (string) (
+            $payload['service_name']
+            ?? (is_string($payload['service'] ?? null)
+                ? $payload['service']
+                : ($payload['service']['name'] ?? $payload['name'] ?? ''))
+        );
+        if ($service === '' && ($job['target_kind'] ?? '') === 'service') {
+            $service = (string) ($job['target'] ?? '');
+        }
+        return [
+            'kind' => (string) ($job['kind'] ?? ''),
+            'app' => $app,
+            'service' => $service,
+        ];
+    }
+
+    function _can_view_job(array $actor, array $job): bool {
+        if (!empty($actor['is_owner']) || !empty($actor['is_admin'])) {
+            return true;
+        }
+        $target = $this->_job_target($job);
+        $kind = $target['kind'];
+        $app = $target['app'];
+        if (in_array($kind, ['deploy-service', 'destroy-service'], true)) {
+            if ($app !== '') {
+                return $this->apps->can_app($actor, $app, 'services_view')
+                    || $this->apps->can_app($actor, $app, 'deployments');
+            }
+            return $this->workspace->can_workspace($actor, 'services.view');
+        }
+        if ($app !== '') {
+            return $this->apps->can_app($actor, $app, 'deployments');
+        }
+        return $this->workspace->can_workspace($actor, 'servers.manage')
+            || $this->workspace->can_workspace($actor, 'jobs.reconcile');
+    }
+
     function index(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('deployments');
         try {
             $operation = $this->jobs->model->_details((string) ($_GET['operation'] ?? ''));
         } catch (Throwable) {
             $this->trongate_security->_json(['error' => 'Deployment not found'], 404);
             return;
         }
-        $actor = $this->trongate_security->_actor();
-        if (!Access_policy::can_view_job($actor, $operation['job'])) {
+        $actor = $this->workspace->_actor();
+        if (!$this->_can_view_job($actor, $operation['job'])) {
             $this->trongate_security->_forbidden('You do not have permission to view this operation.');
         }
         $timeline = $this->model->_timeline($operation['job']['id']);
@@ -41,7 +99,7 @@ class Deployments extends Trongate {
         } else {
             $crumbs[] = ['/deployments?operation=' . rawurlencode((string) $operation['job']['id']), 'Deployment'];
         }
-        $this->templates->_render(
+        $this->workspace->_render_panel(
             'deployments',
             $timeline ? 'timeline' : 'progress',
             'deployment',
@@ -50,17 +108,17 @@ class Deployments extends Trongate {
     }
 
     function live(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('deployments');
         $this->trongate_security->_csrf();
         $id = (string) ($_POST['operation'] ?? '');
         try {
             $job = $this->jobs->model->job($id);
-            $target = Access_policy::job_target($job);
-            $this->trongate_security->_require_app($target['app'], 'deploy', 'You do not have permission to take this app live.');
+            $target = $this->_job_target($job);
+            $this->apps->_require_app($target['app'], 'deploy', 'You do not have permission to take this app live.');
             $this->model->_go_live($id);
             header('Location: /deployments?operation=' . rawurlencode($id), true, 303);
         } catch (RuntimeException $error) {
-            $this->templates->_render(
+            $this->workspace->_render_panel(
                 'deployments',
                 'timeline',
                 'deployment',
@@ -70,10 +128,10 @@ class Deployments extends Trongate {
     }
 
     function change(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('deployments');
         $this->trongate_security->_csrf();
         $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->trongate_security->_require_app($raw_app, 'deploy', 'You do not have permission to deploy or modify traffic for this app.');
+        $this->apps->_require_app($raw_app, 'deploy', 'You do not have permission to deploy or modify traffic for this app.');
         $command = (string) ($_POST['command'] ?? '');
         try {
             if (!in_array($command, ['redeploy-app', 'canary-app', 'canary-weight', 'canary-promote', 'canary-abort', 'rollback-app'], true)) {
@@ -81,7 +139,7 @@ class Deployments extends Trongate {
             }
             $this->_change($command);
         } catch (Throwable $e) {
-            $this->templates->_render(
+            $this->workspace->_render_panel(
                 'apps',
                 'dashboard',
                 'dashboard',
@@ -120,6 +178,19 @@ class Deployments extends Trongate {
     }
 
     function _display(string $view, array $data): void {
+        $actor = is_array($data['actor'] ?? null) ? $data['actor'] : null;
+        $timeline = is_array($data['timeline'] ?? null) ? $data['timeline'] : [];
+        $app_id = (string) ($timeline['app_id'] ?? '');
+        $data += [
+            'actor' => $actor,
+            'can_deploy' => $actor === null || ($app_id !== '' && $this->apps->can_app($actor, $app_id, 'deploy')),
+            'can_manage_service' => $actor === null || (
+                $app_id !== ''
+                    ? $this->apps->can_app($actor, $app_id, 'services_manage')
+                    : $this->workspace->can_workspace($actor, 'services.manage')
+            ),
+            'can_services_nav' => $actor === null || $this->workspace->can_workspace($actor, 'services.view'),
+        ];
         $data['viewData'] = $data;
         $this->view($view, $data);
     }
@@ -171,6 +242,7 @@ class Deployments extends Trongate {
             foreach ($release['file_secrets'] ?? [] as $target => $ref) {
                 $file_values[$target] = $s->secret($ref);
             }
+            require_once APPPATH . 'modules/apps/Apps_model.php';
             $apps_suffix = '.' . Apps_model::apps_domain();
             if (is_string($release['domain'] ?? null) && str_ends_with($release['domain'], $apps_suffix)) {
                 $request['defer_public'] = false;

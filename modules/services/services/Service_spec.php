@@ -9,6 +9,8 @@ declare(strict_types=1);
  * always-on in an isolated rctl-bounded non-root FreeBSD jail on lo1, and apps
  * receive {NAME}_URL (e.g. LAYA_URL) on their next deploy.
  */
+require_once APPPATH . 'modules/apps/services/Build_commands.php';
+
 final class Service_spec {
     public const MAX_PER_SERVER = 10;
     public const NAME_PATTERN = '/^[a-z][a-z0-9_]{0,39}$/D';
@@ -133,6 +135,19 @@ final class Service_spec {
      */
     static function presets(): array {
         return [
+            'embeddings' => [
+                'label' => 'EmbeddingGemma 2 (semantic search)',
+                'name' => 'embeddings',
+                'packages' => 'llama-cpp curl ca_root_nss',
+                'setup' => 'mkdir -p /var/db/service/llama',
+                'command' => 'llama-server --hf-repo ggml-org/embeddinggemma-2-GGUF:Q8_0 --embeddings --pooling mean --ctx-size 2048 --batch-size 2048 --ubatch-size 2048 --host 0.0.0.0 --port "$PORT"',
+                'port' => 8080,
+                'memory_mb' => 1024,
+                'env' => implode("\n", [
+                    'LLAMA_CACHE=/var/db/service/llama',
+                    'SSL_CERT_FILE=/usr/local/share/certs/ca-root-nss.crt',
+                ]),
+            ],
             'laya' => [
                 'label' => 'Laya (AI verdict model)',
                 'name' => 'laya',
@@ -162,6 +177,19 @@ final class Service_spec {
                     'LAYA_HOST=0.0.0.0',
                     'LAYA_PORT=8080',
                 ]),
+            ],
+            'embeddings' => [
+                'label' => 'Embeddings (llama.cpp + EmbeddingGemma 2)',
+                'name' => 'embeddings',
+                'packages' => 'llama-cpp',
+                'setup' => implode("\n", [
+                    'mkdir -p /var/db/service/models',
+                    'if [ ! -f /var/db/service/models/embeddinggemma-2-Q8_0.gguf ]; then /usr/bin/fetch -o /var/db/service/models/embeddinggemma-2-Q8_0.gguf.part https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/main/embeddinggemma-2-Q8_0.gguf && mv /var/db/service/models/embeddinggemma-2-Q8_0.gguf.part /var/db/service/models/embeddinggemma-2-Q8_0.gguf; fi',
+                ]),
+                'command' => '/usr/local/bin/llama-server -m /var/db/service/models/embeddinggemma-2-Q8_0.gguf --embeddings --pooling mean --host 0.0.0.0 --port "$PORT" --ctx-size 2048 --batch-size 2048 --ubatch-size 2048 -np 1 --threads 2',
+                'port' => 8080,
+                'memory_mb' => 768,
+                'env' => '',
             ],
             'python' => [
                 'label' => 'Python 3.12 HTTP',

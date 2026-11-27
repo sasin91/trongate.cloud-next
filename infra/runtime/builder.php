@@ -418,6 +418,7 @@ class Builder {
                     'detected_uploads' => $inspection['detected_uploads'],
                     'persistent_paths' => $inspection['persistent_paths'],
                     'disk_quota_mb' => $inspection['disk_quota_mb'],
+                    'declared_modules' => $inspection['declared_modules'],
                 ];
                 $this->write($result_path, $output);
                 return $output;
@@ -590,13 +591,71 @@ class Builder {
 
         $persistent_paths = self::normalize_persistent_paths($candidate_paths);
         $disk_quota_mb = self::recommended_disk_quota_mb($release_bytes, $detected_uploads);
+        $declared_modules = self::parse_modules_manifest($root . '/trongate-modules.json');
 
         return [
             'release_bytes' => $release_bytes,
             'detected_uploads' => $detected_uploads,
             'persistent_paths' => $persistent_paths,
             'disk_quota_mb' => $disk_quota_mb,
+            'declared_modules' => $declared_modules,
         ];
+    }
+
+    /**
+     * Parses an optional repository `trongate-modules.json` manifest:
+     *   {"modules": {"sasin91/error_pages": "1.0.0", "sasin91/log": {"version": "1.0.1", "autowire": true}}}
+     *
+     * @return list<array{namespace: string, name: string, version: string, autowire: bool}>
+     */
+    public static function parse_modules_manifest(string $path): array {
+        if (!is_file($path) || is_link($path) || (int) filesize($path) > 65536) {
+            return [];
+        }
+        $raw = file_get_contents($path);
+        if (!is_string($raw) || trim($raw) === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+        $entries = is_array($decoded['modules'] ?? null) ? $decoded['modules'] : [];
+        $autowire_map = is_array($decoded['autowire'] ?? null) ? $decoded['autowire'] : [];
+        $result = [];
+        $seen = [];
+        foreach ($entries as $key => $val) {
+            if (!is_string($key) || !str_contains($key, '/')) {
+                continue;
+            }
+            [$ns, $name] = explode('/', $key, 2);
+            if (
+                preg_match('/\A[a-z][a-z0-9-]{1,38}\z/D', $ns) !== 1
+                || preg_match('/\A[a-z][a-z0-9_]{0,39}\z/D', $name) !== 1
+                || isset($seen[$name])
+            ) {
+                continue;
+            }
+            $version = is_string($val) ? trim($val) : (is_array($val) && is_string($val['version'] ?? null) ? trim($val['version']) : '');
+            $version = ltrim($version, 'v');
+            if (preg_match('/\A[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?\z/D', $version) !== 1) {
+                continue;
+            }
+            $autowire = is_array($val) && array_key_exists('autowire', $val)
+                ? (bool) $val['autowire']
+                : (array_key_exists($name, $autowire_map) ? (bool) $autowire_map[$name] : in_array($name, ['error_pages', 'log'], true));
+            $seen[$name] = true;
+            $result[] = [
+                'namespace' => $ns,
+                'name' => $name,
+                'version' => $version,
+                'autowire' => $autowire,
+            ];
+            if (count($result) >= 30) {
+                break;
+            }
+        }
+        return $result;
     }
 
     public static function recommended_disk_quota_mb(int $release_bytes, bool $detected_uploads): int {

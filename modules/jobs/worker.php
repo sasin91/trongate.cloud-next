@@ -1,11 +1,14 @@
 <?php
 declare(strict_types=1);
-if (PHP_SAPI !== 'cli') {
-    http_response_code(404);
-    exit;
-}
-require dirname(__DIR__, 2) . '/bootstrap.php';
+
+require APPPATH . '/engine/cli_bootstrap.php';
+require_once APPPATH . '/modules/security/services/Encryptor.php';
+require_once APPPATH . '/modules/jobs/services/Worker.php';
+require_once APPPATH . '/modules/log/Log.php';
+require_once APPPATH . '/modules/jobs/Jobs.php';
 umask(0077);
+
+$log = new Log([new Stream_writer('[worker] ', true, STDERR)]);
 
 try {
     if (count($argv) > 2 || (isset($argv[1]) && $argv[1] !== '--once')) {
@@ -21,6 +24,6 @@ try {
         sleep(3);
     } while (true);
 } catch (Throwable $error) {
-    fwrite(STDERR, 'Error: ' . $error->getMessage() . "\n");
+    $log->error($error->getMessage());
     exit(1);
 }

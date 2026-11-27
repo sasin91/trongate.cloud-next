@@ -1,8 +1,9 @@
 <?php
+require_once APPPATH . 'modules/services/services/Service_spec.php';
+
 $services = $services ?? [];
 $presets = $presets ?? Service_spec::presets();
 $can_add_service = $can_add_service ?? true;
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
 ?>
 <main class="panel">
     <div class="panel-heading">
@@ -55,11 +56,7 @@ $actor_ctx = is_array($actor ?? null) ? $actor : null;
                                     <small class="wz-errors"><?= $e($svc['error']) ?></small>
                                 <?php endif ?>
                             </span>
-                            <?php
-                                $can_manage_row = $actor_ctx === null || ($svc_app !== ''
-                                    ? Access_policy::can_app($actor_ctx, $svc_app, 'services_manage')
-                                    : Access_policy::can_workspace($actor_ctx, 'services.manage'));
-                            ?>
+                            <?php $can_manage_row = !empty($can_manage_by_service[$svc_id]); ?>
                             <?php if ($can_manage_row): ?>
                                 <span class="service-actions">
                                     <form method="post" action="/services/redeploy">

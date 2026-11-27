@@ -62,7 +62,8 @@ root `infra/` (separate from the `modules/` Trongate control plane):
   (accessed lazily via `$this->http`). It owns TLS, timeouts, and raw
   responses; modules own authentication, encoding, and error mapping.
 - **Subprocess execution** lives in `engine/Process.php`.
-- **Startup & autoloading** live in root `bootstrap.php`.
+- **Startup** uses `engine/ignition.php` for web requests and
+  `engine/cli_bootstrap.php` for direct CLI entry points.
 - **Direct CLI entry points**: Services invoke `modules/jobs/worker.php`,
   `modules/setup/init.php`, `modules/setup/migrate.php`, and
   `modules/monitoring/collect.php` directly with PHP; there is no generic

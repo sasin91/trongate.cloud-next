@@ -54,6 +54,7 @@ class Utilities extends Trongate {
             // Block entire module
             if ($current_module === $target_module) {
                 http_response_code(403);
+                json(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS));
                 die('403 Forbidden - Direct URL access not permitted');
             }
         } else {

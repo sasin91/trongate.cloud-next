@@ -1,8 +1,12 @@
 <?php
 declare(strict_types=1);
 
-require_once APPPATH . 'modules/trongate_security/traits/Encrypted_credentials.php';
+require_once APPPATH . 'modules/security/traits/Encrypted_credentials.php';
 require_once APPPATH . 'modules/jobs/traits/Job_queue.php';
+require_once APPPATH . 'modules/validation/services/Validate.php';
+require_once APPPATH . 'modules/apps/services/Build.php';
+require_once APPPATH . 'modules/apps/services/Build_commands.php';
+require_once APPPATH . 'modules/apps/services/Trongate_config.php';
 
 class Apps_model extends Model {
     use Encrypted_credentials, Job_queue;
@@ -72,6 +76,7 @@ class Apps_model extends Model {
             $server = Validate::id((string) $server_record['id']);
         }
 
+        require_once APPPATH . 'modules/apps/Apps.php';
         $repository = Apps::_repository((string) ($p['repository'] ?? ''));
         $branch = trim((string) ($p['branch'] ?? 'main'));
         if ($branch === '' || strlen($branch) > 200) {
@@ -520,6 +525,7 @@ class Apps_model extends Model {
         }
 
         $raw_ext = (string) ($input['php_extensions'] ?? '');
+        require_once APPPATH . 'modules/apps/Apps.php';
         $ext_error = Apps::_validate_extensions($raw_ext);
         if ($ext_error !== null) {
             throw new RuntimeException($ext_error);
@@ -548,6 +554,7 @@ class Apps_model extends Model {
     function _save_env(string $id, string $raw): int {
         $app_id = Validate::id($id);
         $app = $this->records->_get(['kind' => 'app', 'id' => $app_id]);
+        require_once APPPATH . 'modules/apps/Apps.php';
         $err = Apps::_validate_environment($raw);
         if ($err !== null) {
             throw new RuntimeException($err);
@@ -663,6 +670,7 @@ class Apps_model extends Model {
         $server = Validate::id((string) ($app['server'] ?? ''));
         $target = $this->_build_target($server, $app_id);
         $base_spec = is_array($releases[0]['spec'] ?? null) ? $releases[0]['spec'] : [];
+        require_once APPPATH . 'modules/apps/Apps.php';
         $repository = Apps::_repository((string) ($app['repository'] ?? ($source_data['repository'] ?? '')));
 
         $commands = array_key_exists('build_commands', $app)

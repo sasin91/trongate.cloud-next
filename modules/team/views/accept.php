@@ -14,7 +14,7 @@
                 <?php if ($invitation === null): ?>
                     <h1>Invitation unavailable.</h1>
                     <p>This invitation link is invalid, has already been accepted, or has expired. Ask a workspace administrator to send a fresh link.</p>
-                    <p><a class="btn-secondary" href="/login/login/1">Go to sign in</a></p>
+                    <p><a class="btn-secondary" href="/login/login/tg-team">Go to sign in</a></p>
                 <?php else:
                     $default_name = strstr((string) $invitation['email'], '@', true) ?: (string) $invitation['email'];
                 ?>

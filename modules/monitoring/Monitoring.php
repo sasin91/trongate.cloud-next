@@ -1,12 +1,7 @@
 <?php
-class Monitoring extends Trongate {
-    function __construct(?string $module_name = null) {
-        parent::__construct($module_name ?? 'monitoring');
-        if (PHP_SAPI !== 'cli') {
-            block_url('monitoring');
-        }
-    }
+require_once APPPATH . 'modules/servers/services/Ssh.php';
 
+class Monitoring extends Trongate {
     function _collect(): void {
         $ssh = new Ssh($this->model);
         foreach ($this->records->_all('server') as $server) {

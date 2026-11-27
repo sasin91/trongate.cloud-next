@@ -1,5 +1,5 @@
 <?php
-require_once APPPATH . 'modules/trongate_security/traits/Encrypted_credentials.php';
+require_once APPPATH . 'modules/security/traits/Encrypted_credentials.php';
 
 class Monitoring_model extends Model {
     use Encrypted_credentials;

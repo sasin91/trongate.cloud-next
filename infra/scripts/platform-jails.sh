@@ -8,10 +8,14 @@ BASE_RELEASE="${BASE_RELEASE:-$(freebsd-version -u | sed 's/-p[0-9]*$//')}"
 PHP_RUNTIME="${PHP_RUNTIME:-php84}"
 PANEL_DOMAIN="${PANEL_DOMAIN:-}"
 PANEL_SRC_DIR="${PANEL_SRC_DIR:-}"
+REGISTRY_DOMAIN="${REGISTRY_DOMAIN:-}"
+REGISTRY_ARCHIVE_BASE_URL="${REGISTRY_ARCHIVE_BASE_URL:-}"
+EMBEDDINGS_URL="${EMBEDDINGS_URL:-}"
 
 MARIADB_MEMORY_MB="${MARIADB_MEMORY_MB:-4096}"
 VALKEY_MEMORY_MB="${VALKEY_MEMORY_MB:-512}"
 PANEL_MEMORY_MB="${PANEL_MEMORY_MB:-512}"
+REGISTRY_MEMORY_MB="${REGISTRY_MEMORY_MB:-256}"
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 INFRA_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -424,6 +428,166 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 3b. ZFS Module Registry & Marketplace Jail (tc_registry on lo1 10.99.0.3)
+# ---------------------------------------------------------------------------
+JAIL_LIST="tc_mariadb tc_valkey tc_panel"
+if [ -n "$REGISTRY_DOMAIN" ]; then
+    info "Provisioning tc_registry jail (10.99.0.3, ${REGISTRY_MEMORY_MB} MiB limit) for ${REGISTRY_DOMAIN}"
+    REG_JAIL_DS="$TC_POOL/tc/jails/tc_registry"
+    REG_JAIL_DIR="/$REG_JAIL_DS"
+    REG_SOCK_DIR="/var/run/tc/sockets/tc_registry"
+    REG_RUNTIME_DIR="/$TC_POOL/tc/runtimes/builder"
+    if [ ! -d "$REG_RUNTIME_DIR" ]; then
+        REG_RUNTIME_DIR="$PHP_DIR"
+    fi
+
+    if ! zfs list -H "$REG_JAIL_DS" >/dev/null 2>&1; then
+        zfs clone "$SKEL_DS@v1" "$REG_JAIL_DS"
+    fi
+
+    install -d -o www -g "$CADDY_GID" -m 0750 "$REG_SOCK_DIR"
+    mkdir -p \
+        "$REG_JAIL_DIR/app" \
+        "$REG_JAIL_DIR/etc/rc.d" \
+        "$REG_JAIL_DIR/etc/tc" \
+        "$REG_JAIL_DIR/var/db/tc/panel" \
+        "$REG_JAIL_DIR/var/db/tc/registry/repos" \
+        "$REG_JAIL_DIR/var/db/tc/registry/modules" \
+        "$REG_JAIL_DIR/var/db/tc/registry/archives"
+    chmod 0755 "$REG_JAIL_DIR/app" "$REG_JAIL_DIR/etc/rc.d" "$REG_JAIL_DIR/etc/tc" "$REG_JAIL_DIR/var/db/tc" "$REG_JAIL_DIR/var/db/tc/registry"
+
+    if ! grep -q '^tc-caddy:' "$REG_JAIL_DIR/etc/group"; then
+        printf 'tc-caddy:*:%s:\n' "$CADDY_GID" >> "$REG_JAIL_DIR/etc/group"
+    fi
+
+    if [ -n "$PANEL_SRC_DIR" ] && [ -d "$PANEL_SRC_DIR" ]; then
+        info "Syncing registry marketplace source from $PANEL_SRC_DIR into $REG_JAIL_DIR/app"
+        tar -cf - -C "$PANEL_SRC_DIR" --exclude='.git' --exclude='var' --exclude='tests' . | tar -xf - -C "$REG_JAIL_DIR/app"
+    fi
+
+    case "$REGISTRY_DOMAIN" in
+        http://*|https://*)
+            REGISTRY_BASE_URL="$REGISTRY_DOMAIN"
+            ;;
+        *)
+            REGISTRY_BASE_URL="https://$REGISTRY_DOMAIN"
+            ;;
+    esac
+
+    cat <<EOF > "$REG_JAIL_DIR/etc/tc/php-fpm.conf"
+[global]
+pid = /var/run/php-fpm/php-fpm.pid
+error_log = /var/log/php-fpm.log
+daemonize = yes
+
+[tc_registry]
+user = www
+group = www
+listen = /var/run/php-fpm/php-fpm.sock
+listen.owner = www
+listen.group = tc-caddy
+listen.mode = 0660
+pm = ondemand
+pm.max_children = 12
+pm.process_idle_timeout = 30s
+pm.max_requests = 500
+clear_env = yes
+env[PATH] = /usr/local/bin:/usr/bin:/bin
+env[PHP_INI_SCAN_DIR] = /usr/local/etc/php-base:/etc/tc/php.d
+env[TC_STATE] = /var/db/tc/panel
+env[TC_REGISTRY_MODE] = "1"
+env[TC_REGISTRY_ROOT] = "/var/db/tc/registry"
+env[TC_BASE_URL] = "${REGISTRY_BASE_URL}"
+env[TC_REGISTRY_URL] = "${REGISTRY_BASE_URL}"
+EOF
+
+    if [ -n "$PANEL_DOMAIN" ]; then
+        printf 'env[TC_PANEL_URL] = "%s"\n' "$PANEL_BASE_URL" >> "$REG_JAIL_DIR/etc/tc/php-fpm.conf"
+    fi
+    if [ -n "$REGISTRY_ARCHIVE_BASE_URL" ]; then
+        printf 'env[TC_REGISTRY_ARCHIVE_BASE_URL] = "%s"\n' "$REGISTRY_ARCHIVE_BASE_URL" >> "$REG_JAIL_DIR/etc/tc/php-fpm.conf"
+    fi
+    if [ -n "$EMBEDDINGS_URL" ]; then
+        printf 'env[EMBEDDINGS_URL] = "%s"\n' "$EMBEDDINGS_URL" >> "$REG_JAIL_DIR/etc/tc/php-fpm.conf"
+    fi
+
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        v="${v#\"}"
+        v="${v%\"}"
+        printf 'env[%s] = "%s"\n' "$k" "$v" >> "$REG_JAIL_DIR/etc/tc/php-fpm.conf"
+    done < /var/db/tc/runtime/panel-db.env
+    chmod 0600 "$REG_JAIL_DIR/etc/tc/php-fpm.conf"
+
+    install -o root -g wheel -m 0755 "$CONFIG_DIR/tc_registry_fpm.rc" "$REG_JAIL_DIR/etc/rc.d/tc_registry_fpm"
+    sysrc -f "$REG_JAIL_DIR/etc/rc.conf" tc_registry_fpm_enable="YES" >/dev/null
+
+    cat <<EOF > /etc/fstab.tc_registry
+$BASE_DIR                   $REG_JAIL_DIR/.base                     nullfs ro 0 0
+$REG_RUNTIME_DIR            $REG_JAIL_DIR/usr/local                 nullfs ro 0 0
+$PANEL_STATE_DIR            $REG_JAIL_DIR/var/db/tc/panel           nullfs ro 0 0
+/$TC_POOL/tc/registry/repos $REG_JAIL_DIR/var/db/tc/registry/repos  nullfs rw 0 0
+/$TC_POOL/tc/registry/modules $REG_JAIL_DIR/var/db/tc/registry/modules nullfs ro 0 0
+/$TC_POOL/tc/registry/archives $REG_JAIL_DIR/var/db/tc/registry/archives nullfs ro 0 0
+/var/run/tc/mariadb         $REG_JAIL_DIR/var/run/tc/mariadb        nullfs rw 0 0
+/var/run/tc/valkey          $REG_JAIL_DIR/var/run/tc/valkey         nullfs rw 0 0
+$REG_SOCK_DIR               $REG_JAIL_DIR/var/run/php-fpm           nullfs rw 0 0
+EOF
+
+    REG_SWAP_MB="$REGISTRY_MEMORY_MB"
+    cat <<EOF > /etc/jail.conf.d/tc_registry.conf
+tc_registry {
+    path = "$REG_JAIL_DIR";
+    host.hostname = "tc-registry.internal";
+    interface = "lo1";
+    ip4.addr = "10.99.0.3/32";
+    mount.devfs;
+    devfs_ruleset = 4;
+    mount.fstab = "/etc/fstab.tc_registry";
+    allow.raw_sockets = 0;
+    allow.mount = 0;
+    allow.chflags = 0;
+    enforce_statfs = 2;
+    exec.clean;
+    exec.start = "/sbin/ldconfig /lib /usr/lib /usr/local/lib && /bin/sh /etc/rc";
+    exec.stop = "/bin/sh /etc/rc.shutdown";
+    exec.poststart = "if [ \$(sysctl -n kern.racct.enable 2>/dev/null || echo 0) = 1 ]; then rctl -a jail:tc_registry:memoryuse:deny=${REGISTRY_MEMORY_MB}M; rctl -a jail:tc_registry:swapuse:deny=${REG_SWAP_MB}M; rctl -a jail:tc_registry:pcpu:deny=100; rctl -a jail:tc_registry:maxproc:deny=128; rctl -a jail:tc_registry:openfiles:deny=2048; fi; pfctl -t tc_registry -T add 10.99.0.3 2>/dev/null || true";
+    exec.poststop = "if [ \$(sysctl -n kern.racct.enable 2>/dev/null || echo 0) = 1 ]; then rctl -r jail:tc_registry 2>/dev/null || true; fi";
+}
+EOF
+
+    if ! jls -j tc_registry >/dev/null 2>&1; then
+        service jail onestart tc_registry
+    else
+        jexec tc_registry service tc_registry_fpm restart
+    fi
+
+    info "Adding registry marketplace route for $REGISTRY_DOMAIN (immutable archives served from ZFS ARC)"
+    cat <<EOF > /var/db/tc/runtime/routes/01-tc_registry.caddy
+${REGISTRY_DOMAIN} {
+    encode zstd gzip
+
+    handle_path /archives/* {
+        root * /${TC_POOL}/tc/registry/archives
+        header Cache-Control "public, max-age=31536000, immutable"
+        header X-Content-Type-Options "nosniff"
+        file_server
+    }
+
+    handle {
+        root * ${REG_JAIL_DIR}/app/public
+        php_fastcgi unix//var/run/tc/sockets/tc_registry/php-fpm.sock {
+            root /app/public
+        }
+        file_server
+    }
+}
+EOF
+    chmod 0644 /var/db/tc/runtime/routes/01-tc_registry.caddy
+    JAIL_LIST="tc_mariadb tc_valkey tc_panel tc_registry"
+fi
+
+# ---------------------------------------------------------------------------
 # 4. Host Boot Hook for Active App Jails (tc_apps)
 # ---------------------------------------------------------------------------
 info "Installing tc_apps host boot service"
@@ -453,7 +617,7 @@ fi
 
 # Register platform jails in /etc/rc.conf jail_list in boot dependency order.
 # Active app jails are started after platform jails + pf by /usr/local/etc/rc.d/tc_apps.
-sysrc jail_list="tc_mariadb tc_valkey tc_panel" >/dev/null
+sysrc jail_list="${JAIL_LIST}" >/dev/null
 
 if command -v caddy >/dev/null 2>&1; then
     caddy validate --config /var/db/tc/runtime/Caddyfile --adapter caddyfile

@@ -1,4 +1,6 @@
 <?php
+require_once APPPATH . 'modules/services/services/Service_spec.php';
+
 $active_tab = 'services';
 $app = $overview['app'];
 $app_id = (string) $app['id'];
@@ -7,10 +9,9 @@ $services = $services ?? $overview['services'] ?? [];
 $shared_services = $shared_services ?? $overview['shared_services'] ?? [];
 $presets = $presets ?? Service_spec::presets();
 $can_add_service = $can_add_service ?? true;
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
-$can_manage_services = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'services_manage');
-$can_shared_services_view = $actor_ctx === null || Access_policy::can_workspace($actor_ctx, 'services.view');
-$can_shared_services_manage = $actor_ctx === null || Access_policy::can_workspace($actor_ctx, 'services.manage');
+$can_manage_services = !empty($can_manage_services);
+$can_shared_services_view = !empty($can_shared_services_view);
+$can_shared_services_manage = !empty($can_shared_services_manage);
 $app_service_names = [];
 foreach ($services as $svc) {
     if (!empty($svc['name'])) {

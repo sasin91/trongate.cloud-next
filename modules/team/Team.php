@@ -1,18 +1,243 @@
 <?php
 declare(strict_types=1);
 
+require_once APPPATH . 'modules/trongate_security/Trongate_security.php';
+require_once APPPATH . 'modules/team/services/Mailer.php';
+require_once APPPATH . 'modules/validation/services/Validate.php';
+
 class Team extends Trongate {
+    public const APP_PERMISSIONS = [
+        'view' => ['label' => 'Overview', 'description' => 'View app status, domains, and architecture.', 'group' => 'read'],
+        'deployments' => ['label' => 'Deployments', 'description' => 'View deployment history, built releases, and build logs.', 'group' => 'read'],
+        'logs' => ['label' => 'Logs', 'description' => 'View live app logs and 24-hour error rates.', 'group' => 'read'],
+        'traffic' => ['label' => 'Traffic', 'description' => 'View and record live HTTP traffic.', 'group' => 'read'],
+        'services_view' => ['label' => 'View services', 'description' => 'View private services attached to this app.', 'group' => 'read'],
+        'database_read' => ['label' => 'Database (read-only)', 'description' => 'Browse tables, inspect schema, and run read-only SQL.', 'group' => 'read'],
+        'deploy' => ['label' => 'Deploy & rollback', 'description' => 'Trigger deploys, rollbacks, canary rollouts, and DNS go-live.', 'group' => 'write'],
+        'services_manage' => ['label' => 'Manage services', 'description' => 'Add, redeploy, and remove private services for this app.', 'group' => 'write'],
+        'database_write' => ['label' => 'Database (write & import)', 'description' => 'Run mutating SQL and import .sql files or starter tables.', 'group' => 'write'],
+        'settings' => ['label' => 'Settings & environment', 'description' => 'Edit branch, build commands, and encrypted environment variables.', 'group' => 'write'],
+        'delete' => ['label' => 'Delete app', 'description' => 'Delete the app and optionally purge its database and data.', 'group' => 'write'],
+    ];
+
+    public const WORKSPACE_PERMISSIONS = [
+        'apps.create' => ['label' => 'Create apps', 'description' => 'Launch new apps from the setup wizard.'],
+        'services.view' => ['label' => 'View shared services', 'description' => 'View server-wide private services.'],
+        'services.manage' => ['label' => 'Manage shared services', 'description' => 'Add, redeploy, and remove server-wide private services.'],
+        'servers.manage' => ['label' => 'Manage servers', 'description' => 'View, inspect, connect servers, and edit resource limits.'],
+        'jobs.reconcile' => ['label' => 'Reconcile jobs', 'description' => 'Reconcile uncertain background jobs.'],
+        'team.manage' => ['label' => 'Manage team', 'description' => 'Invite members and manage roles and access.'],
+    ];
+
+    public const APP_PRESETS = [
+        'viewer' => [
+            'label' => 'Viewer',
+            'description' => 'Read-only overview, deployments, logs, traffic, and attached services.',
+            'permissions' => ['view', 'deployments', 'logs', 'traffic', 'services_view'],
+        ],
+        'developer' => [
+            'label' => 'Developer',
+            'description' => 'Viewer access plus deploys, rollbacks, read-only database, and app services.',
+            'permissions' => ['view', 'deployments', 'deploy', 'logs', 'traffic', 'database_read', 'services_view', 'services_manage'],
+        ],
+        'maintainer' => [
+            'label' => 'Maintainer',
+            'description' => 'Full control over the app including settings, database writes, and deletion.',
+            'permissions' => ['view', 'deployments', 'deploy', 'logs', 'traffic', 'database_read', 'database_write', 'services_view', 'services_manage', 'settings', 'delete'],
+        ],
+    ];
+
+    public function normalize_app_permissions(array $list): array {
+        $allowed = array_keys(self::APP_PERMISSIONS);
+        $set = [];
+        foreach ($list as $item) {
+            if (is_string($item) && in_array($item, $allowed, true)) {
+                $set[$item] = true;
+            }
+        }
+        if ($set === []) {
+            return [];
+        }
+        $set['view'] = true;
+        if (!empty($set['deploy'])) {
+            $set['deployments'] = true;
+        }
+        if (!empty($set['database_write'])) {
+            $set['database_read'] = true;
+        }
+        if (!empty($set['services_manage'])) {
+            $set['services_view'] = true;
+        }
+        return array_values(array_filter($allowed, static fn(string $key): bool => !empty($set[$key])));
+    }
+
+    public function normalize_workspace_permissions(array $list): array {
+        $allowed = array_keys(self::WORKSPACE_PERMISSIONS);
+        $set = array_fill_keys(array_filter($list, static fn($permission): bool => is_string($permission) && in_array($permission, $allowed, true)), true);
+        if (!empty($set['services.manage'])) {
+            $set['services.view'] = true;
+        }
+        return array_values(array_filter($allowed, static fn(string $key): bool => !empty($set[$key])));
+    }
+
+    public function normalize_permissions(array $raw, string $role = 'member', string $scope = 'scoped'): array {
+        if ($role === 'admin') {
+            return [
+                'workspace' => array_keys(self::WORKSPACE_PERMISSIONS),
+                'all_apps' => array_keys(self::APP_PERMISSIONS),
+                'apps' => [],
+            ];
+        }
+
+        $workspace = $this->normalize_workspace_permissions(is_array($raw['workspace'] ?? null) ? $raw['workspace'] : []);
+        $all_apps = $scope === 'all'
+            ? $this->normalize_app_permissions(is_array($raw['all_apps'] ?? null) ? $raw['all_apps'] : [])
+            : [];
+        $apps = [];
+        foreach (is_array($raw['apps'] ?? null) ? $raw['apps'] : [] as $app_id => $permissions) {
+            if (!is_string($app_id) || !preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/D', $app_id) || !is_array($permissions)) {
+                continue;
+            }
+            $clean = $this->normalize_app_permissions($permissions);
+            if ($clean !== []) {
+                $apps[$app_id] = $clean;
+            }
+        }
+        ksort($apps);
+        return ['workspace' => $workspace, 'all_apps' => $all_apps, 'apps' => $apps];
+    }
+
+    public function preset_label(array $permissions): string {
+        $normalized = $this->normalize_app_permissions($permissions);
+        if ($normalized === []) {
+            return 'No access';
+        }
+        foreach (self::APP_PRESETS as $preset) {
+            if ($normalized === $this->normalize_app_permissions($preset['permissions'])) {
+                return $preset['label'];
+            }
+        }
+        return 'Custom (' . count($normalized) . ')';
+    }
+
+    public function permission_labels(array $permissions): array {
+        $labels = [];
+        foreach ($this->normalize_app_permissions($permissions) as $permission) {
+            $labels[] = self::APP_PERMISSIONS[$permission]['label'] ?? $permission;
+        }
+        return $labels;
+    }
+
+    public function summary_lines(string $role, string $scope, array $permissions): array {
+        if ($role === 'admin') {
+            return ['Full workspace access (all apps, services, servers, and team)'];
+        }
+        $normalized = $this->normalize_permissions($permissions, $role, $scope);
+        $lines = [];
+        if ($scope === 'all' && $normalized['all_apps'] !== []) {
+            $lines[] = 'All apps · ' . $this->preset_label($normalized['all_apps']);
+        }
+        foreach ($normalized['apps'] as $app_id => $app_permissions) {
+            $lines[] = $app_id . ' · ' . $this->preset_label($app_permissions);
+        }
+        foreach ($normalized['workspace'] as $permission) {
+            $lines[] = self::WORKSPACE_PERMISSIONS[$permission]['label'] ?? $permission;
+        }
+        return $lines !== [] ? $lines : ['No access granted'];
+    }
+
+    public function merge_grant(array $existing, array $grant): array {
+        $existing_role = ($existing['role'] ?? 'member') === 'admin' ? 'admin' : 'member';
+        $grant_role = ($grant['role'] ?? 'member') === 'admin' ? 'admin' : 'member';
+        if ($existing_role === 'admin' || $grant_role === 'admin') {
+            return ['role' => 'admin', 'scope' => 'all', 'permissions' => $this->normalize_permissions([], 'admin', 'all')];
+        }
+
+        $existing_scope = ($existing['scope'] ?? 'scoped') === 'all' ? 'all' : 'scoped';
+        $grant_scope = ($grant['scope'] ?? 'scoped') === 'all' ? 'all' : 'scoped';
+        $scope = $existing_scope === 'all' || $grant_scope === 'all' ? 'all' : 'scoped';
+        $existing_permissions = $this->normalize_permissions(
+            is_string($existing['permissions'] ?? null) ? (json_decode($existing['permissions'], true) ?: []) : (array) ($existing['permissions'] ?? []),
+            'member',
+            $existing_scope
+        );
+        $grant_permissions = $this->normalize_permissions(
+            is_string($grant['permissions'] ?? null) ? (json_decode($grant['permissions'], true) ?: []) : (array) ($grant['permissions'] ?? []),
+            'member',
+            $grant_scope
+        );
+
+        $apps = $existing_permissions['apps'];
+        foreach ($grant_permissions['apps'] as $app_id => $permissions) {
+            $apps[$app_id] = $this->normalize_app_permissions(array_merge($apps[$app_id] ?? [], $permissions));
+        }
+        return [
+            'role' => 'member',
+            'scope' => $scope,
+            'permissions' => $this->normalize_permissions([
+                'workspace' => array_merge($existing_permissions['workspace'], $grant_permissions['workspace']),
+                'all_apps' => array_merge($existing_permissions['all_apps'], $grant_permissions['all_apps']),
+                'apps' => $apps,
+            ], 'member', $scope),
+        ];
+    }
+
+    public function parse_form_grant(array $post, array $valid_app_ids): array {
+        $access_mode = trim((string) ($post['access_mode'] ?? 'scoped'));
+        if ($access_mode === 'admin') {
+            return ['role' => 'admin', 'scope' => 'all', 'permissions' => $this->normalize_permissions([], 'admin', 'all')];
+        }
+
+        $scope = $access_mode === 'all' ? 'all' : 'scoped';
+        $workspace = is_array($post['workspace_perms'] ?? null) ? $post['workspace_perms'] : [];
+        $all_apps = is_array($post['all_app_perms'] ?? null) ? $post['all_app_perms'] : [];
+        $apps_in = is_array($post['app_perms'] ?? null) ? $post['app_perms'] : [];
+        $preset = trim((string) ($post['all_app_preset'] ?? ''));
+        if ($scope === 'all' && $all_apps === [] && isset(self::APP_PRESETS[$preset])) {
+            $all_apps = self::APP_PRESETS[$preset]['permissions'];
+        }
+
+        $valid_ids = array_flip($valid_app_ids);
+        $apps = [];
+        foreach ($apps_in as $app_id => $permissions) {
+            if (!is_string($app_id) || !isset($valid_ids[$app_id]) || !is_array($permissions)) {
+                continue;
+            }
+            $clean = $this->normalize_app_permissions($permissions);
+            if ($clean !== []) {
+                $apps[$app_id] = $clean;
+            }
+        }
+        $normalized = $this->normalize_permissions(['workspace' => $workspace, 'all_apps' => $all_apps, 'apps' => $apps], 'member', $scope);
+        if ($normalized['workspace'] === [] && $normalized['all_apps'] === [] && $normalized['apps'] === []) {
+            throw new RuntimeException('Select at least one app or workspace permission.');
+        }
+        return ['role' => 'member', 'scope' => $scope, 'permissions' => $normalized];
+    }
+
+    public function single_app_target(string $role, string $scope, array $permissions): ?string {
+        if ($role === 'admin' || $scope === 'all') {
+            return null;
+        }
+        $apps = is_array($permissions['apps'] ?? null) ? array_keys($permissions['apps']) : [];
+        return count($apps) === 1 ? (string) $apps[0] : null;
+    }
+
+    function make_sure_allowed(): void {
+        block_url('team/make_sure_allowed');
+        $this->_actor();
+    }
+
     function index(): void {
-        $this->trongate_security->make_sure_allowed();
-        $this->trongate_security->_require_workspace('team.manage');
+        $this->trongate_security->make_sure_allowed('team');
+        $this->workspace->_require_workspace('team.manage');
 
         $flash = $_SESSION['team_flash'] ?? null;
         $error = $_SESSION['team_error'] ?? null;
         $invite_link = $_SESSION['team_invite_link'] ?? null;
         unset($_SESSION['team_flash'], $_SESSION['team_error'], $_SESSION['team_invite_link']);
 
-        $this->templates->_render('team', 'index', 'team', [
-            'administrators' => $this->model->_administrators(),
+        $this->workspace->_render_panel('team', 'index', 'team', [
             'members' => $this->model->_members(),
             'invitations' => $this->model->_pending_invitations(),
             'all_apps' => $this->records->_all('app'),
@@ -24,9 +249,9 @@ class Team extends Trongate {
     }
 
     function invite(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('team');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('team.manage');
+        $this->workspace->_require_workspace('team.manage');
 
         $return_app = trim((string) ($_POST['return_app'] ?? ''));
         $redirect_to = $return_app !== ''
@@ -38,14 +263,14 @@ class Team extends Trongate {
             $note = (string) ($_POST['note'] ?? '');
             $ttl_days = (int) ($_POST['expires_days'] ?? 7);
             $valid_app_ids = array_map(static fn(array $a): string => (string) ($a['id'] ?? ''), $this->records->_all('app'));
-            $grant = Access_policy::parse_form_grant($_POST, $valid_app_ids);
+            $grant = $this->parse_form_grant($_POST, $valid_app_ids);
 
-            $actor = $this->trongate_security->_actor();
+            $actor = $this->_actor();
             $invited_by = $actor['email'] !== '' ? $actor['email'] : $actor['label'];
             $created = $this->model->_create_invitation($email, $grant, $note, $invited_by, $ttl_days);
 
             $url = rtrim(BASE_URL, '/') . '/team/accept/' . $created['token'];
-            $summary = Access_policy::summary_lines($created['role'], $created['scope'], $created['permissions']);
+            $summary = $this->summary_lines($created['role'], $created['scope'], $created['permissions']);
             $mail = Mailer::send_invite(
                 $created['email'],
                 $url,
@@ -75,9 +300,9 @@ class Team extends Trongate {
     }
 
     function resend_invite(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('team');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('team.manage');
+        $this->workspace->_require_workspace('team.manage');
 
         $return_app = trim((string) ($_POST['return_app'] ?? ''));
         $redirect_to = $return_app !== ''
@@ -88,7 +313,7 @@ class Team extends Trongate {
             $id = trim((string) ($_POST['invitation'] ?? ''));
             $rotated = $this->model->_rotate_invitation($id);
             $url = rtrim(BASE_URL, '/') . '/team/accept/' . $rotated['token'];
-            $summary = Access_policy::summary_lines($rotated['role'], $rotated['scope'], $rotated['permissions']);
+            $summary = $this->summary_lines($rotated['role'], $rotated['scope'], $rotated['permissions']);
             $mail = Mailer::send_invite(
                 $rotated['email'],
                 $url,
@@ -118,9 +343,9 @@ class Team extends Trongate {
     }
 
     function revoke_invite(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('team');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('team.manage');
+        $this->workspace->_require_workspace('team.manage');
 
         $return_app = trim((string) ($_POST['return_app'] ?? ''));
         $redirect_to = $return_app !== ''
@@ -140,15 +365,14 @@ class Team extends Trongate {
     }
 
     function member(): void {
-        $this->trongate_security->make_sure_allowed();
-        $this->trongate_security->_require_workspace('team.manage');
+        $this->trongate_security->make_sure_allowed('team');
+        $this->workspace->_require_workspace('team.manage');
 
         $id = segment(3, 'int');
         $member = $id > 0 ? $this->model->_find_member($id) : null;
         if ($member === null) {
             http_response_code(404);
-            $this->templates->_render('team', 'index', 'team', [
-                'administrators' => $this->model->_administrators(),
+            $this->workspace->_render_panel('team', 'index', 'team', [
                 'members' => $this->model->_members(),
                 'invitations' => $this->model->_pending_invitations(),
                 'all_apps' => $this->records->_all('app'),
@@ -162,7 +386,7 @@ class Team extends Trongate {
         $error = $_SESSION['team_error'] ?? null;
         unset($_SESSION['team_flash'], $_SESSION['team_error']);
 
-        $this->templates->_render('team', 'member', 'team-member', [
+        $this->workspace->_render_panel('team', 'member', 'team-member', [
             'member' => $member,
             'all_apps' => $this->records->_all('app'),
             'saved_notice' => is_string($flash) ? $flash : null,
@@ -175,9 +399,9 @@ class Team extends Trongate {
     }
 
     function update_member(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('team');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('team.manage');
+        $this->workspace->_require_workspace('team.manage');
 
         $member_id = (int) ($_POST['member_id'] ?? 0);
         try {
@@ -186,11 +410,11 @@ class Team extends Trongate {
                 throw new RuntimeException('Team member not found.');
             }
             $valid_app_ids = array_map(static fn(array $a): string => (string) ($a['id'] ?? ''), $this->records->_all('app'));
-            $grant = Access_policy::parse_form_grant($_POST, $valid_app_ids);
+            $grant = $this->parse_form_grant($_POST, $valid_app_ids);
 
-            $actor = $this->trongate_security->_actor();
+            $actor = $this->_actor();
             if ((int) ($actor['member_id'] ?? 0) === $member_id) {
-                $simulated = Access_policy::from_member([
+                $simulated = $this->actor_from_member([
                     'id' => $member_id,
                     'email' => $member['email'],
                     'name' => $member['name'],
@@ -199,7 +423,7 @@ class Team extends Trongate {
                     'scope' => $grant['scope'],
                     'permissions' => $grant['permissions'],
                 ]);
-                if (!Access_policy::can_workspace($simulated, 'team.manage')) {
+                if (!$this->workspace->can_workspace($simulated, 'team.manage')) {
                     throw new RuntimeException('You cannot remove your own team management permission.');
                 }
             }
@@ -216,9 +440,9 @@ class Team extends Trongate {
     }
 
     function update_app_member(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('team');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('team.manage');
+        $this->workspace->_require_workspace('team.manage');
 
         $app_id = '';
         try {
@@ -231,8 +455,8 @@ class Team extends Trongate {
             } else {
                 $perms = is_array($_POST['perms'] ?? null) ? $_POST['perms'] : [];
                 $preset = trim((string) ($_POST['preset'] ?? ''));
-                if ($perms === [] && isset(Access_policy::APP_PRESETS[$preset])) {
-                    $perms = Access_policy::APP_PRESETS[$preset]['permissions'];
+                if ($perms === [] && isset(self::APP_PRESETS[$preset])) {
+                    $perms = self::APP_PRESETS[$preset]['permissions'];
                 }
             }
             $updated = $this->model->_set_member_app_permissions($member_id, $app_id, $perms);
@@ -248,13 +472,13 @@ class Team extends Trongate {
     }
 
     function toggle_member(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('team');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('team.manage');
+        $this->workspace->_require_workspace('team.manage');
 
         $member_id = (int) ($_POST['member_id'] ?? 0);
         $active = ($_POST['active'] ?? '0') === '1';
-        $actor = $this->trongate_security->_actor();
+        $actor = $this->_actor();
         try {
             if ((int) ($actor['member_id'] ?? 0) === $member_id && !$active) {
                 throw new RuntimeException('You cannot suspend your own account.');
@@ -272,12 +496,12 @@ class Team extends Trongate {
     }
 
     function remove_member(): void {
-        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->make_sure_allowed('team');
         $this->trongate_security->_csrf();
-        $this->trongate_security->_require_workspace('team.manage');
+        $this->workspace->_require_workspace('team.manage');
 
         $member_id = (int) ($_POST['member_id'] ?? 0);
-        $actor = $this->trongate_security->_actor();
+        $actor = $this->_actor();
         try {
             if ((int) ($actor['member_id'] ?? 0) === $member_id) {
                 throw new RuntimeException('You cannot remove your own account.');
@@ -379,7 +603,7 @@ class Team extends Trongate {
                 'expiry_date' => time() + 86400,
             ]);
 
-            $single_app = Access_policy::single_app_target(
+            $single_app = $this->single_app_target(
                 $accepted['invitation']['role'],
                 $accepted['invitation']['scope'],
                 $accepted['invitation']['permissions']
@@ -400,19 +624,53 @@ class Team extends Trongate {
     }
 
     private function _optional_actor(): ?array {
-        $token = $this->trongate_tokens->attempt_get_valid_token([1, 2]);
+        $token = $this->trongate_tokens->attempt_get_valid_token(2);
         if ($token === false) {
             return null;
         }
         $user = $this->trongate_tokens->get_user_obj($token);
-        if ($user === false || (int) $user->user_level_id !== 2) {
+        if ($user === false) {
             return null;
         }
         $member = $this->model->_find_member_by_user_id((int) $user->trongate_user_id);
         if ($member === null || !$member['active']) {
             return null;
         }
-        return Access_policy::from_member($member);
+        return $this->actor_from_member($member);
+    }
+
+    private function _actor(): array {
+        $actor = $this->_optional_actor();
+        if ($actor !== null) {
+            return $actor;
+        }
+
+        if (from_trongate_mx() || ($_POST['inline'] ?? '') === 'server' || ($_GET['poll'] ?? '') === '1') {
+            $this->trongate_security->_json(['error' => 'Your session expired. Sign in again.'], 401);
+            exit;
+        }
+        redirect('login');
+        exit;
+    }
+
+    public function actor_from_member(array $row): array {
+        $role = ($row['role'] ?? 'member') === 'admin' ? 'admin' : 'member';
+        $scope = ($row['scope'] ?? 'scoped') === 'all' ? 'all' : 'scoped';
+        $raw = is_string($row['permissions'] ?? null)
+            ? (json_decode($row['permissions'], true) ?: [])
+            : (is_array($row['permissions'] ?? null) ? $row['permissions'] : []);
+        $permissions = $this->normalize_permissions($raw, $role, $scope);
+        return [
+            'user_id' => (int) ($row['trongate_user_id'] ?? 0),
+            'member_id' => (int) ($row['id'] ?? 0),
+            'is_owner' => false,
+            'is_admin' => $role === 'admin',
+            'role' => $role,
+            'scope' => $role === 'admin' ? 'all' : $scope,
+            'label' => trim((string) ($row['name'] ?? '')) !== '' ? (string) $row['name'] : (string) ($row['email'] ?? ''),
+            'email' => (string) ($row['email'] ?? ''),
+            'permissions' => $permissions,
+        ];
     }
 
     private function _render_accept(array $data): void {

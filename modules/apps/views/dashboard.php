@@ -1,7 +1,6 @@
 <?php
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
-$can_create_apps = $actor_ctx === null || Access_policy::can_workspace($actor_ctx, 'apps.create');
-$can_view_jobs = $actor_ctx === null || Access_policy::can_access_jobs_page($actor_ctx);
+$can_create_apps = !empty($can_create_apps);
+$can_view_jobs = !empty($can_jobs);
 ?>
 <main class="panel tc-panel">
     <div class="section-header">

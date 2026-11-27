@@ -3,6 +3,8 @@
 
 <head>
     <?php
+    require_once APPPATH . 'modules/news/services/Markdown.php';
+
     $page_title = $post->title . ' - trongate.cloud';
     $page_description = $post->summary;
     require APPPATH . 'modules/templates/views/_site_head.php';

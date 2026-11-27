@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once APPPATH . 'modules/validation/services/Validate.php';
 
 final class Ssh {
     private const REQUIRED_CAPABILITIES = [

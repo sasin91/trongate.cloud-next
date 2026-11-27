@@ -4,8 +4,7 @@ $groups = [];
 $counts = ['active' => 0, 'failed' => 0];
 $today = gmdate('Y-m-d');
 $yesterday = gmdate('Y-m-d', time() - 86400);
-$actor_ctx = is_array($actor ?? null) ? $actor : null;
-$can_reconcile = $actor_ctx === null || Access_policy::can_workspace($actor_ctx, 'jobs.reconcile');
+$can_reconcile = !empty($can_reconcile);
 
 foreach ($jobs as $job) {
     $st = (string) ($job['status'] ?? '');

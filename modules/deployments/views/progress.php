@@ -30,6 +30,7 @@ $diag = array_filter([
         <ol class="deployment-activity" id="logs-content">
             <?php foreach ($operation['steps'] as $step):
                 $sdata = json_decode((string) ($step['data'] ?? ''), true) ?: [];
+                require_once APPPATH . 'modules/deployments/Deployments_model.php';
                 $stext = match ($step['step']) {
                     'claimed' => 'Operation started.',
                     'progress' => Deployments_model::_phase_label((string) ($sdata['phase'] ?? '')),

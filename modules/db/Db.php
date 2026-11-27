@@ -33,8 +33,7 @@ class Db extends Trongate {
      * with the Trongate module system.
      * 
      * @param string|null $module_name The module name (passed by framework for integration)
-     * @param string|null $db_group Reserved database group argument.
-     * @param PDO|null $connection Existing connection for a shared workflow transaction.
+     * @param string|null $db_group Database group name from config/database.php (defaults to 'default')
      * @return void
      * @throws Exception If database group is not configured
      * @throws Exception If database connection fails
@@ -53,33 +52,57 @@ class Db extends Trongate {
      *     'database' => 'myapp'
      * ];
      */
-    public function __construct(?string $module_name = null, ?string $db_group = null, ?PDO $connection = null) {
+    public function __construct(?string $module_name = null, ?string $db_group = null) {
         // Call parent constructor first - REQUIRED by framework!
         parent::__construct($module_name);
 
         // Block all direct URL access to this module
-        if (PHP_SAPI !== 'cli') {
-            block_url('db');
-        }
+        block_url('db');
         
         // Determine environment mode
         $this->is_dev_mode = defined('ENV') && strtolower(ENV) === 'dev';
         
-        $dsn = getenv('TC_DSN') ?: 'mysql:unix_socket=/var/run/tc/mariadb/mysqld.sock;dbname=tc_panel';
-        $this->dbh = $connection ?? new PDO(
-            $dsn,
-            getenv('TC_DB_USER') ?: 'tc_panel',
-            getenv('TC_DB_PASSWORD') ?: '',
-            str_starts_with($dsn, 'mysql:') ? [PDO::MYSQL_ATTR_FOUND_ROWS => true] : []
-        );
-        $this->dbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $this->dbh->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-    }
-
-    /** Share this connection when a workflow spans several module models. */
-    public function connection(): PDO {
-        return $this->dbh;
+        // Default to 'default' group if none specified
+        $db_group = $db_group ?? 'default';
+        
+        if (!isset($GLOBALS['databases'][$db_group])) {
+            if ($this->is_dev_mode) {
+                throw new Exception("Database group '{$db_group}' is not configured in /config/database.php");
+            } else {
+                throw new Exception("Configuration error.");
+            }
+        }
+        
+        $config = $GLOBALS['databases'][$db_group];
+        
+        $this->host = $config['host'];
+        $this->port = $config['port'] ?? '3306';
+        $this->user = $config['user'];
+        $this->pass = $config['password'];
+        $this->dbname = $config['database'];
+        
+        // If database name is empty, return without connecting
+        if ($this->dbname === '') {
+            return;
+        }
+        
+        $dsn = 'mysql:host=' . $this->host . ';port=' . $this->port . ';dbname=' . $this->dbname . ';charset=' . $this->charset;
+        $options = [
+            PDO::ATTR_PERSISTENT => true,
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
+        ];
+        
+        try {
+            $this->dbh = new PDO($dsn, $this->user, $this->pass, $options);
+        } catch (PDOException $e) {
+            $this->error = $e->getMessage();
+            
+            if ($this->is_dev_mode) {
+                throw new Exception("Database connection failed: " . $e->getMessage());
+            } else {
+                throw new Exception("Service unavailable.");
+            }
+        }
     }
 
     /**
@@ -163,7 +186,7 @@ class Db extends Trongate {
      * Execute a raw SQL query
      * 
      * @param string $sql SQL query
-     * @param string|null $return_type 'object', 'array', 'column', 'statement', or null for no return
+     * @param string|null $return_type 'object', 'array', or null for no return
      * @return mixed Query results or null
      * 
      * Examples:
@@ -177,17 +200,10 @@ class Db extends Trongate {
 
         $this->prepare_and_execute($sql, []);
 
-        if ($return_type === 'statement') {
-            // The caller owns the cursor; do not retain a second reference and read lock.
-            $statement = $this->stmt;
-            $this->stmt = null;
-            return $statement;
-        } elseif ($return_type === 'object') {
+        if ($return_type === 'object') {
             return $this->stmt->fetchAll(PDO::FETCH_OBJ);
         } elseif ($return_type === 'array') {
             return $this->stmt->fetchAll(PDO::FETCH_ASSOC);
-        } elseif ($return_type === 'column') {
-            return $this->stmt->fetchColumn();
         }
 
         return null;
@@ -197,8 +213,8 @@ class Db extends Trongate {
      * Execute a raw SQL query with parameter binding
      * 
      * @param string $sql SQL query with named parameters
-     * @param array $data Named parameters or a zero-based list for positional placeholders
-     * @param string|null $return_type 'object', 'array', 'column', 'statement', or null for no return
+     * @param array $data Associative array of parameters
+     * @param string|null $return_type 'object', 'array', or null for no return
      * @return mixed Query results or null
      * 
      * Example:
@@ -215,17 +231,10 @@ class Db extends Trongate {
 
         $this->prepare_and_execute($sql, $data);
 
-        if ($return_type === 'statement') {
-            // The caller owns the cursor; do not retain a second reference and read lock.
-            $statement = $this->stmt;
-            $this->stmt = null;
-            return $statement;
-        } elseif ($return_type === 'object') {
+        if ($return_type === 'object') {
             return $this->stmt->fetchAll(PDO::FETCH_OBJ);
         } elseif ($return_type === 'array') {
             return $this->stmt->fetchAll(PDO::FETCH_ASSOC);
-        } elseif ($return_type === 'column') {
-            return $this->stmt->fetchColumn();
         }
 
         return null;
@@ -255,43 +264,6 @@ class Db extends Trongate {
         $result = $this->stmt->fetch(PDO::FETCH_ASSOC);
 
         return (int) $result['total'];
-    }
-
-    /**
-     * Executes a callback function within a database transaction.
-     *
-     * This method provides a way to execute a block of code that involves database operations
-     * within a transaction. If the callback function completes successfully, the transaction
-     * is committed. If any exception occurs within the callback, the transaction is rolled back,
-     * ensuring data integrity.
-     *
-     * @param callable $callback The callback function to execute within the transaction.
-     *                           This callback will receive the database instance as its only argument.
-     * 
-     * Example:
-     * $db->transaction(function($db) {
-     *     $db->insert('users', ['name' => 'John Doe', 'email' => [EMAIL_ADDRESS]']);
-     *     $db->insert('orders', ['user_id' => 1, 'amount' => 100]);
-     * });
-     * 
-     * @throws \Exception If any exception occurs within the callback function.
-     */
-    public function transaction(callable $callback): mixed {
-        $this->dbh->beginTransaction();
-        try {
-            $result = $callback($this);
-            
-            if ($result) {
-                $this->dbh->commit();
-            } else {
-                $this->dbh->rollBack();
-            }
-            
-            return $result;
-        } catch (\Exception $e) {
-            $this->dbh->rollBack();
-            throw $e;
-        }
     }
 
     /**
@@ -607,9 +579,7 @@ class Db extends Trongate {
      */
     public function table_exists(string $table): bool {
         try {
-            $sql = $this->dbh->getAttribute(PDO::ATTR_DRIVER_NAME)==='sqlite'
-                ? "SELECT name FROM sqlite_master WHERE type='table' AND name=:table"
-                : "SHOW TABLES LIKE :table";
+            $sql = "SHOW TABLES LIKE :table";
             $stmt = $this->dbh->prepare($sql);
             $stmt->bindParam(':table', $table, PDO::PARAM_STR);
             $stmt->execute();
@@ -740,11 +710,6 @@ class Db extends Trongate {
      * Prepare and execute SQL statement with parameter binding
      */
     private function prepare_and_execute(string $sql, array $data = []): bool {
-        $this->prepare($sql, $data);
-        return $this->stmt->execute();
-    }
-
-    private function prepare(string $sql, array $data = []): void {
         $this->stmt = $this->dbh->prepare($sql);
 
         foreach ($data as $key => $value) {
@@ -755,9 +720,11 @@ class Db extends Trongate {
                 default => PDO::PARAM_STR,
             };
             
-            $param_key = is_int($key) ? $key + 1 : (str_starts_with($key, ':') ? $key : ":$key");
+            $param_key = (str_starts_with($key, ':')) ? $key : ":$key";
             $this->stmt->bindValue($param_key, $value, $type);
         }
+
+        return $this->stmt->execute();
     }
 
     /**
