@@ -112,9 +112,18 @@ fi
 mv "$NEW_APP" "$PANEL_APP_DIR"
 rm -rf "$OLD_APP"
 
-mkdir -p /root/tc-panel-src
-rm -rf /root/tc-panel-src/*
-tar -cf - -C "$PANEL_APP_DIR" . | tar -xf - -C /root/tc-panel-src
+PANEL_SRC_DIR="/root/tc-panel-src"
+NEW_PANEL_SRC="/root/tc-panel-src.new.$$"
+OLD_PANEL_SRC="/root/tc-panel-src.old.$$"
+mkdir -p "$NEW_PANEL_SRC"
+tar -cf - -C "$PANEL_APP_DIR" . | tar -xf - -C "$NEW_PANEL_SRC"
+if [ -d "$PANEL_SRC_DIR" ]; then
+    mv "$PANEL_SRC_DIR" "$OLD_PANEL_SRC"
+fi
+mv "$NEW_PANEL_SRC" "$PANEL_SRC_DIR"
+if [ -d "$OLD_PANEL_SRC" ]; then
+    rm -rf "$OLD_PANEL_SRC"
+fi
 
 # 6. Apply database migrations as www inside tc_panel.
 jexec -U www tc_panel /bin/sh -c '
