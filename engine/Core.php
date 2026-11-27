@@ -76,7 +76,7 @@ class Core {
      * @return string The path to the controller file
      */
     private function get_controller_path(): string {
-        $controller_path = '../modules/' . $this->current_module . '/' . $this->current_controller . '.php';
+        $controller_path = APPPATH . 'modules/' . $this->current_module . '/' . $this->current_controller . '.php';
 
         if (file_exists($controller_path)) {
             return $controller_path;
@@ -105,7 +105,7 @@ class Core {
             $child_module = strtolower($bits[1]);
             $this->current_controller = ucfirst($bits[1]);
             
-            $controller_path = '../modules/' . $parent_module . '/' . $child_module . '/' . ucfirst($bits[1]) . '.php';
+            $controller_path = APPPATH . 'modules/' . $parent_module . '/' . $child_module . '/' . ucfirst($bits[1]) . '.php';
             
             if (file_exists($controller_path)) {
                 return $controller_path;
@@ -128,7 +128,7 @@ class Core {
         $handler_parts = explode('/', ERROR_404);
         list($module, $method) = $handler_parts;
 
-        $controller_path = '../modules/' . $module . '/' . ucfirst($module) . '.php';
+        $controller_path = APPPATH . 'modules/' . $module . '/' . ucfirst($module) . '.php';
         $controller_class = ucfirst($module);
 
         require_once $controller_path;
@@ -229,10 +229,10 @@ class Core {
      */
     private function serve_vendor_asset(): void {
         $vendor_file_path = explode('/vendor/', ASSUMED_URL)[1];
-        $vendor_file_path = '../vendor/' . $vendor_file_path;
+        $vendor_file_path = APPPATH . 'vendor/' . $vendor_file_path;
         
         try {
-            $vendor_file_path = $this->sanitize_file_path($vendor_file_path, '../vendor/');
+            $vendor_file_path = $this->sanitize_file_path($vendor_file_path, APPPATH . 'vendor/');
             
             if (file_exists($vendor_file_path)) {
                 if (strpos($vendor_file_path, '.css')) {
@@ -349,16 +349,16 @@ class Core {
                 }
 
                 // Build asset path
-                $asset_path = '../modules/' . strtolower($target_module) . '/' . $target_dir . '/' . $file_name;
+                $asset_path = APPPATH . 'modules/' . strtolower($target_module) . '/' . $target_dir . '/' . $file_name;
                 
                 try {
                     // Sanitize path (handles realpath resolution and traversal)
-                    $asset_path = $this->sanitize_file_path($asset_path, '../modules/');
+                    $asset_path = $this->sanitize_file_path($asset_path, APPPATH . 'modules/');
                     
                     if (is_file($asset_path)) {
                         
                         // Post-Sanitization Path Validation
-                        $real_modules_path = realpath('../modules/');
+                        $real_modules_path = realpath(APPPATH . 'modules/');
                         if (strpos($asset_path, $real_modules_path) !== 0) {
                             http_response_code(403);
                             die('Access denied: path outside modules directory');

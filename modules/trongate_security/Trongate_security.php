@@ -42,7 +42,10 @@ class Trongate_security extends Trongate {
                 $this->services->make_sure_allowed();
                 break;
             case 'registry':
-                $this->apps->make_sure_allowed();
+                $this->workspace->_require_workspace(
+                    'registry.manage',
+                    'You do not have permission to manage the module registry.'
+                );
                 break;
             case 'team':
                 $this->team->make_sure_allowed();

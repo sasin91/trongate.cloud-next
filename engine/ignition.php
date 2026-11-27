@@ -2,10 +2,10 @@
 session_start();
 
 // Config files
-require_once '../config/config.php';
-require_once '../config/custom_routing.php';
-require_once '../config/database.php';
-require_once '../config/site_owner.php';
+require_once dirname(__DIR__) . '/config/config.php';
+require_once dirname(__DIR__) . '/config/custom_routing.php';
+require_once dirname(__DIR__) . '/config/database.php';
+require_once dirname(__DIR__) . '/config/site_owner.php';
 
 // Make the $databases array globally accessible
 // This is required for multi-database functionality
@@ -129,11 +129,11 @@ define('SEGMENTS', $data['segments']);
 define('ASSUMED_URL', $data['assumed_url']);
 
 // Helper files - Load after constants are defined
-require_once 'tg_helpers/flashdata_helper.php';
-require_once 'tg_helpers/form_helper.php';
-require_once 'tg_helpers/string_helper.php';
-require_once 'tg_helpers/url_helper.php';
-require_once 'tg_helpers/utilities_helper.php';
+require_once __DIR__ . '/tg_helpers/flashdata_helper.php';
+require_once __DIR__ . '/tg_helpers/form_helper.php';
+require_once __DIR__ . '/tg_helpers/string_helper.php';
+require_once __DIR__ . '/tg_helpers/url_helper.php';
+require_once __DIR__ . '/tg_helpers/utilities_helper.php';
 
 /* --------------------------------------------------------------
  * Interceptor execution (early hooks)

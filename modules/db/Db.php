@@ -711,6 +711,7 @@ class Db extends Trongate {
      */
     private function prepare_and_execute(string $sql, array $data = []): bool {
         $this->stmt = $this->dbh->prepare($sql);
+        $positional = str_contains($sql, '?');
 
         foreach ($data as $key => $value) {
             $type = match (true) {
@@ -719,8 +720,12 @@ class Db extends Trongate {
                 is_null($value) => PDO::PARAM_NULL,
                 default => PDO::PARAM_STR,
             };
-            
-            $param_key = (str_starts_with($key, ':')) ? $key : ":$key";
+
+            if ($positional && is_int($key)) {
+                $param_key = $key + 1;
+            } else {
+                $param_key = (is_string($key) && str_starts_with($key, ':')) ? $key : ":$key";
+            }
             $this->stmt->bindValue($param_key, $value, $type);
         }
 

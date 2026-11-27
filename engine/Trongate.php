@@ -91,7 +91,7 @@ class Trongate {
 
         // Build the controller path and class name
         $controller_class = ucfirst($target_module);
-        $controller_path = '../modules/' . $target_module . '/' . $controller_class . '.php';
+        $controller_path = APPPATH . 'modules/' . $target_module . '/' . $controller_class . '.php';
         $is_child_module = false;
 
         // If standard path doesn't exist, try child module
@@ -146,7 +146,7 @@ class Trongate {
             $child_module = strtolower($bits[1]);
             $controller_class = ucfirst($child_module);
 
-            $controller_path = '../modules/' . $parent_module . '/' . $child_module . '/' . $controller_class . '.php';
+            $controller_path = APPPATH . 'modules/' . $parent_module . '/' . $child_module . '/' . $controller_class . '.php';
 
             if (file_exists($controller_path)) {
                 return [

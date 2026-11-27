@@ -104,7 +104,7 @@ class Model {
 
         // Build the controller path and class name
         $controller_class = ucfirst($target_module);
-        $controller_path = '../modules/' . $target_module . '/' . $controller_class . '.php';
+        $controller_path = APPPATH . 'modules/' . $target_module . '/' . $controller_class . '.php';
         $is_child_module = false;
 
         // If standard path doesn't exist, try child module
@@ -153,7 +153,7 @@ class Model {
             $child_module = strtolower($bits[1]);
             $controller_class = ucfirst($child_module);
 
-            $controller_path = '../modules/' . $parent_module . '/' . $child_module . '/' . $controller_class . '.php';
+            $controller_path = APPPATH . 'modules/' . $parent_module . '/' . $child_module . '/' . $controller_class . '.php';
 
             if (file_exists($controller_path)) {
                 return [
@@ -220,7 +220,7 @@ class Model {
      * @return bool True if it looks like a module might exist, false otherwise.
      */
     private function is_potential_module(string $key): bool {
-        $module_path = '../modules/' . strtolower($key) . '/' . ucfirst($key) . '.php';
+        $module_path = APPPATH . 'modules/' . strtolower($key) . '/' . ucfirst($key) . '.php';
         return file_exists($module_path);
     }
 
@@ -283,7 +283,7 @@ class Model {
         $possible_paths = [];
 
         // Priority 1: Standard module path
-        $possible_paths[] = '../modules/' . $module_name . '/' . $model_class . '.php';
+        $possible_paths[] = APPPATH . 'modules/' . $module_name . '/' . $model_class . '.php';
 
         // Priority 2: Child module path (for parent-child module structure)
         if (strpos($module_name, '-') !== false) {
@@ -293,7 +293,7 @@ class Model {
                 $parent_module = strtolower($bits[0]);
                 $child_module = strtolower($bits[1]);
                 $model_class_name = ucfirst($child_module) . '_model';
-                $possible_paths[] = '../modules/' . $parent_module . '/' . $child_module . '/' . $model_class_name . '.php';
+                $possible_paths[] = APPPATH . 'modules/' . $parent_module . '/' . $child_module . '/' . $model_class_name . '.php';
             }
         }
 
