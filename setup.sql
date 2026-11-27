@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS trongate_user_levels (id INTEGER PRIMARY KEY, level_t
 CREATE TABLE IF NOT EXISTS trongate_users (id INTEGER PRIMARY KEY AUTO_INCREMENT, code VARCHAR(64) NOT NULL, user_level_id INTEGER NOT NULL) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS trongate_administrators (id INTEGER PRIMARY KEY AUTO_INCREMENT, username VARCHAR(100) NOT NULL UNIQUE, password VARCHAR(255) NOT NULL, trongate_user_id INTEGER NOT NULL UNIQUE) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS trongate_tokens (id INTEGER PRIMARY KEY AUTO_INCREMENT, token VARCHAR(64) NOT NULL UNIQUE, user_id INTEGER NOT NULL, expiry_date BIGINT NOT NULL, code VARCHAR(64)) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS login_attempts (id INTEGER PRIMARY KEY AUTO_INCREMENT, target_table VARCHAR(100) NOT NULL, identifier VARCHAR(255) NOT NULL, ip_address VARCHAR(64) NOT NULL, attempted_at BIGINT NOT NULL) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS login_attempts (id INTEGER PRIMARY KEY AUTO_INCREMENT, target_table VARCHAR(100) NOT NULL, identifier VARCHAR(255) NOT NULL, ip_address VARCHAR(64) NOT NULL, attempted_at BIGINT NOT NULL, KEY idx_identifier (target_table, identifier, attempted_at), KEY idx_ip (target_table, ip_address, attempted_at)) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS password_resets (id INTEGER PRIMARY KEY AUTO_INCREMENT, target_table VARCHAR(64) NOT NULL, identifier VARCHAR(255) NOT NULL, token VARCHAR(64) NOT NULL UNIQUE, expiry_date BIGINT NOT NULL, used TINYINT NOT NULL DEFAULT 0, created_at BIGINT NOT NULL) ENGINE=InnoDB;
 INSERT INTO trongate_user_levels(id,level_title) SELECT 1,'Administrator' WHERE NOT EXISTS (SELECT 1 FROM trongate_user_levels WHERE id=1);
 INSERT INTO trongate_user_levels(id,level_title) SELECT 2,'Team Member' WHERE NOT EXISTS (SELECT 1 FROM trongate_user_levels WHERE id=2);
 

@@ -30,6 +30,22 @@ die() {
     exit 1
 }
 
+if [ -z "$PANEL_DOMAIN" ]; then
+    die "Set PANEL_DOMAIN to the public HTTPS panel hostname."
+fi
+
+case "$PANEL_DOMAIN" in
+    https://*)
+        PANEL_BASE_URL="$PANEL_DOMAIN"
+        ;;
+    http://*)
+        die "PANEL_DOMAIN must use HTTPS."
+        ;;
+    *)
+        PANEL_BASE_URL="https://$PANEL_DOMAIN"
+        ;;
+esac
+
 info() {
     printf '==> %s\n' "$*"
 }
@@ -315,6 +331,14 @@ chmod 0755 "$PANEL_JAIL_DIR/var/db" "$PANEL_JAIL_DIR/var/db/tc" "$PANEL_JAIL_DIR
 chown 80:80 "$PANEL_STATE_DIR"
 chmod 0700 "$PANEL_STATE_DIR"
 
+if [ ! -e "$PANEL_STATE_DIR/key" ]; then
+    (umask 077; openssl rand -base64 32 > "$PANEL_STATE_DIR/key")
+    chown 80:80 "$PANEL_STATE_DIR/key"
+    chmod 0600 "$PANEL_STATE_DIR/key"
+elif [ ! -s "$PANEL_STATE_DIR/key" ]; then
+    die "Panel key file exists but is empty; refusing to replace it"
+fi
+
 if ! grep -q '^tc-caddy:' "$PANEL_JAIL_DIR/etc/group"; then
     printf 'tc-caddy:*:%s:\n' "$CADDY_GID" >> "$PANEL_JAIL_DIR/etc/group"
 fi
@@ -353,17 +377,7 @@ env[TC_STATE] = /var/db/tc/panel
 env[TC_ENV] = prod
 EOF
 
-if [ -n "$PANEL_DOMAIN" ]; then
-    case "$PANEL_DOMAIN" in
-        http://*|https://*)
-            PANEL_BASE_URL="$PANEL_DOMAIN"
-            ;;
-        *)
-            PANEL_BASE_URL="https://$PANEL_DOMAIN"
-            ;;
-    esac
-    printf 'env[TC_BASE_URL] = "%s"\n' "$PANEL_BASE_URL" >> "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"
-fi
+printf 'env[TC_BASE_URL] = "%s"\n' "$PANEL_BASE_URL" >> "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"
 
 while IFS='=' read -r k v; do
     [ -n "$k" ] || continue

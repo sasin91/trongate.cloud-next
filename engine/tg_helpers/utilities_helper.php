@@ -14,6 +14,9 @@
  * @return void
  */
 function block_url(string $block_path = ''): void {
+    if (PHP_SAPI === 'cli') {
+        return;
+    }
     Modules::run('utilities/block_url', $block_path);
 }
 

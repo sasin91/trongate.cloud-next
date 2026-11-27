@@ -35,7 +35,18 @@ mkdir -p "$STAGE/src"
 tar -xzf "$ARCHIVE" -C "$STAGE/src"
 
 SRC="$STAGE/src"
-for required in engine/cli_bootstrap.php public/index.php infra/runtime/runtime.php modules/setup/migrate.php; do
+for required in \
+    config/database.php \
+    engine/cli_bootstrap.php \
+    public/index.php \
+    infra/runtime/runtime.php \
+    modules/jobs/worker.php \
+    modules/monitoring/collect.php \
+    modules/setup/Setup.php \
+    modules/setup/Setup_model.php \
+    modules/setup/init.php \
+    modules/setup/migrate.php \
+    setup.sql; do
     if [ ! -f "$SRC/$required" ]; then
         printf '{"status":"failed","error":"missing required file: %s"}\n' "$required"
         exit 1
@@ -43,7 +54,16 @@ for required in engine/cli_bootstrap.php public/index.php infra/runtime/runtime.
 done
 
 # 2. Syntax-check critical PHP files before touching live state.
-for f in "$SRC"/engine/cli_bootstrap.php "$SRC"/public/index.php "$SRC"/infra/runtime/*.php; do
+for f in \
+    "$SRC"/config/database.php \
+    "$SRC"/engine/cli_bootstrap.php \
+    "$SRC"/engine/Core.php \
+    "$SRC"/modules/db/Db.php \
+    "$SRC"/modules/jobs/worker.php \
+    "$SRC"/modules/monitoring/collect.php \
+    "$SRC"/modules/setup/*.php \
+    "$SRC"/public/index.php \
+    "$SRC"/infra/runtime/*.php; do
     [ -f "$f" ] || continue
     /usr/local/bin/php -l "$f" >/dev/null
 done

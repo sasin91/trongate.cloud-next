@@ -56,8 +56,9 @@ class Db extends Trongate {
         // Call parent constructor first - REQUIRED by framework!
         parent::__construct($module_name);
 
-        // Block all direct URL access to this module
-        block_url('db');
+        if (PHP_SAPI !== 'cli') {
+            block_url('db');
+        }
         
         // Determine environment mode
         $this->is_dev_mode = defined('ENV') && strtolower(ENV) === 'dev';
@@ -86,7 +87,7 @@ class Db extends Trongate {
             return;
         }
         
-        $dsn = 'mysql:host=' . $this->host . ';port=' . $this->port . ';dbname=' . $this->dbname . ';charset=' . $this->charset;
+        $dsn = !empty($config['dsn']) ? $config['dsn'] : 'mysql:host=' . $this->host . ';port=' . $this->port . ';dbname=' . $this->dbname . ';charset=' . $this->charset;
         $options = [
             PDO::ATTR_PERSISTENT => true,
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
@@ -187,7 +188,7 @@ class Db extends Trongate {
      * 
      * @param string $sql SQL query
      * @param string|null $return_type 'object', 'array', or null for no return
-     * @return mixed Query results or null
+     * @return mixed Query results, a PDOStatement, or null
      * 
      * Examples:
      * $results = $db->query('SELECT * FROM users WHERE age > 18', 'object');
@@ -200,7 +201,9 @@ class Db extends Trongate {
 
         $this->prepare_and_execute($sql, []);
 
-        if ($return_type === 'object') {
+        if ($return_type === 'statement') {
+            return $this->stmt;
+        } elseif ($return_type === 'object') {
             return $this->stmt->fetchAll(PDO::FETCH_OBJ);
         } elseif ($return_type === 'array') {
             return $this->stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -215,7 +218,7 @@ class Db extends Trongate {
      * @param string $sql SQL query with named parameters
      * @param array $data Associative array of parameters
      * @param string|null $return_type 'object', 'array', or null for no return
-     * @return mixed Query results or null
+     * @return mixed Query results, a PDOStatement, or null
      * 
      * Example:
      * $results = $db->query_bind(
@@ -231,13 +234,22 @@ class Db extends Trongate {
 
         $this->prepare_and_execute($sql, $data);
 
-        if ($return_type === 'object') {
+        if ($return_type === 'statement') {
+            return $this->stmt;
+        } elseif ($return_type === 'object') {
             return $this->stmt->fetchAll(PDO::FETCH_OBJ);
         } elseif ($return_type === 'array') {
             return $this->stmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
         return null;
+    }
+
+    public function connection(): PDO {
+        if (!($this->dbh instanceof PDO)) {
+            throw new RuntimeException('Database connection is not initialized.');
+        }
+        return $this->dbh;
     }
 
     /**

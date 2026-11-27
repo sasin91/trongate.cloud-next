@@ -26,11 +26,21 @@ class Core {
 
         if (strpos(ASSUMED_URL, '/vendor/')) {
             $this->serve_vendor_asset();
-        } elseif (strpos(ASSUMED_URL, MODULE_ASSETS_TRIGGER) === false) {
+        } elseif (!$this->is_module_asset_request()) {
             $this->serve_controller();
         } else {
             $this->serve_module_asset();
         }
+    }
+
+    private function is_module_asset_request(): bool {
+        $segments = SEGMENTS;
+        foreach ($segments as $index => $segment) {
+            if (str_ends_with($segment, MODULE_ASSETS_TRIGGER) && count($segments) - $index >= 3) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

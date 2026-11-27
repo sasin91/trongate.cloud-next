@@ -44,9 +44,10 @@ Set `PANEL_DOMAIN` when running `infra/scripts/platform-jails.sh`; it writes the
 HTTPS `TC_BASE_URL` and `TC_ENV=prod` into the panel PHP-FPM environment. With a
 Cloudflare Tunnel, keep the public URL HTTPS and route the tunnel to Caddy over
 HTTP on port 80. The application uses the `TC_STATE/key` file for `APP_KEY`,
-so preserve the existing `/var/db/tc/panel/key` exactly when upgrading: a new
-key cannot decrypt existing data. Local development defaults to the `.test`
-URL and a fixed development-only key.
+which `platform-jails.sh` creates only when absent. Preserve the existing
+`/var/db/tc/panel/key` exactly when upgrading: a new key cannot decrypt existing
+data. CLI setup commands read database credentials from `TC_STATE/db.env`.
+Local development defaults to the `.test` URL and a fixed development-only key.
 
 4. Initialize the MariaDB schema and local administrator:
 
@@ -97,8 +98,9 @@ MariaDB dump) to take a consistent backup:
 
 - **Control-plane database**: `mariadb-dump --single-transaction tc_panel`
   (inventory, encrypted credentials, jobs, steps, locks, and admin hashes).
-- **Control-plane state & key**: the `.env` file containing `APP_KEY` and
-  `/var/db/tc/panel/`.
+- **Control-plane state & key**: `/var/db/tc/panel/key` and
+  `/var/db/tc/panel/db.env` (plus `github.env` when configured). Keep the key
+  private and restore it together with its matching database.
 - **Host runtime metadata & TLS state**: `/var/db/tc/runtime` (state, jobs,
   `ips.json`, `resources.json`, `Caddyfile`), `/etc/jail.conf.d/`,
   `/etc/tc-resources.json`, and Caddy's ACME data directory.
