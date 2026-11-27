@@ -13,6 +13,7 @@ $current = $overview['current'];
 $live = $overview['live_state'];
 $canary = $overview['canary'];
 $services = $overview['services'];
+$shared_services = $overview['shared_services'] ?? [];
 $can_rollback = (bool) $overview['can_rollback'];
 $database_name = (string) $overview['database_name'];
 $php_version = (string) ($latest['spec']['php_version'] ?? $app['php_version'] ?? '8.4');
@@ -26,6 +27,8 @@ $can_database = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_i
 $can_logs = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'logs');
 $can_services_view = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'services_view');
 $can_services_manage = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'services_manage');
+$can_shared_services_view = $actor_ctx === null || Access_policy::can_workspace($actor_ctx, 'services.view');
+$can_shared_services_manage = $actor_ctx === null || Access_policy::can_workspace($actor_ctx, 'services.manage');
 $can_settings = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'settings');
 $can_delete = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id, 'delete');
 ?>
@@ -88,7 +91,31 @@ $can_delete = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id,
                                     </div>
                                 </div>
 
-                                <?php if ($can_services_view): ?>
+                                <?php if ($can_services_view):
+                                    $app_service_names = [];
+                                    foreach ($services as $svc) {
+                                        if (!empty($svc['name'])) {
+                                            $app_service_names[(string) $svc['name']] = true;
+                                        }
+                                    }
+                                ?>
+                                    <?php foreach ($shared_services as $svc):
+                                        $svc_id = (string) ($svc['id'] ?? $svc['name'] ?? '');
+                                        $svc_name = (string) ($svc['name'] ?? '');
+                                        if ($svc_name === '' || isset($app_service_names[$svc_name])) {
+                                            continue;
+                                        }
+                                        $svc_status = (string) ($svc['status'] ?? 'pending');
+                                    ?>
+                                        <div class="ov-node ov-node-db">
+                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>
+                                            <div>
+                                                <span class="ov-node-kind">Shared service</span>
+                                                <strong class="ov-mono"><?= $e($svc_name) ?></strong>
+                                                <span class="muted"><?= $e(Service_spec::url_variable($svc_name)) ?> &middot; <span class="<?= $svc_status === 'failed' ? 'ov-warn-text' : '' ?>"><?= $e($svc_status) ?></span><?php if ($can_shared_services_view): ?> &middot; <a href="/services#service-<?= $e(rawurlencode($svc_id)) ?>"><?= $can_shared_services_manage ? 'Manage' : 'View' ?></a><?php endif ?></span>
+                                            </div>
+                                        </div>
+                                    <?php endforeach ?>
                                     <?php foreach ($services as $svc):
                                         $svc_name = (string) ($svc['name'] ?? '');
                                         $svc_status = (string) ($svc['status'] ?? 'pending');

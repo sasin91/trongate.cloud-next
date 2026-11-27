@@ -432,11 +432,19 @@ class Apps_model extends Model {
             ];
         }
 
+        $all_services = $this->records->_all('service');
+        $app_server = (string) ($app['server'] ?? '');
         $services = array_values(array_filter(
-            $this->records->_all('service'),
+            $all_services,
             static fn($svc) => ($svc['app'] ?? '') === $app_id
         ));
         usort($services, static fn($a, $b) => strcmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? '')));
+
+        $shared_services = array_values(array_filter(
+            $all_services,
+            static fn($svc) => ($svc['app'] ?? '') === '' && ($svc['server'] ?? '') === $app_server
+        ));
+        usort($shared_services, static fn($a, $b) => strcmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? '')));
 
         $latest_release = $releases[0] ?? null;
         $live_state = self::_derive_live_state($app, $latest_release, $raw_app_jobs);
@@ -464,6 +472,7 @@ class Apps_model extends Model {
             'live_state' => $live_state,
             'canary' => $canary,
             'services' => $services,
+            'shared_services' => $shared_services,
             'can_rollback' => $canary === null && ($succeeded_deploys >= 2 || count($releases) >= 2),
             'database_name' => 'tc_' . str_replace('-', '_', $app_id),
             'settings' => [

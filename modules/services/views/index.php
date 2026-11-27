@@ -38,7 +38,7 @@ $actor_ctx = is_array($actor ?? null) ? $actor : null;
                             ? 'Remove ' . $svc['name'] . ' from ' . $svc_app . '? Redeploy ' . $svc_app . ' after removing it.'
                             : 'Remove ' . $svc['name'] . '? Apps calling it will get errors until you redeploy them without it.';
                     ?>
-                        <li class="service-row">
+                        <li class="service-row" id="service-<?= $e($svc_id) ?>">
                             <span class="service-who">
                                 <strong>
                                     <span><?= $e($svc['name']) ?></span>

@@ -136,6 +136,8 @@ try {
     $ovTwo = $appsModel->_overview('app-two');
     svc_check(count($ovOne['services']) === 1 && $ovOne['services'][0]['id'] === $rtA, 'app-one overview must only include app-one services');
     svc_check(count($ovTwo['services']) === 1 && $ovTwo['services'][0]['id'] === $rtB, 'app-two overview must only include app-two services');
+    svc_check(count($ovOne['shared_services']) === 1 && $ovOne['shared_services'][0]['id'] === 'laya', 'app-one overview must expose shared services on its server');
+    svc_check(count($ovTwo['shared_services']) === 1 && $ovTwo['shared_services'][0]['id'] === 'laya', 'app-two overview must expose shared services on its server');
 
     // Duplicate name in same app must be rejected
     $dupRejected = false;

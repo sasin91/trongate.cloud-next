@@ -48,6 +48,7 @@
 @media(max-width:900px){.services-grid{grid-template-columns:1fr}}
 .service-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
 .service-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:16px;border:1px solid var(--wz-line);border-radius:10px;background:var(--wz-bg)}
+.service-row:target{border-color:var(--primary);box-shadow:0 0 0 2px var(--accent-soft)}
 .service-who{display:flex;flex-direction:column;gap:4px;min-width:0}
 .service-who strong{display:inline-flex;align-items:center;gap:8px;font-size:16px}
 .service-who small{color:var(--wz-muted);font-size:13px;overflow-wrap:anywhere}

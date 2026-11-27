@@ -347,15 +347,40 @@ try {
         throw new RuntimeException('App overview page missing expected sections, app ID links/forms, or exposed secret');
     }
 
+    // Add a shared server-wide service and ensure app overview + services tab link to it
+    $model->put('service', 'laya', [
+        'name' => 'laya',
+        'runtime_name' => 'laya',
+        'server' => 'web',
+        'command' => '/var/db/service/venv/bin/python -m laya.serve',
+        'port' => 8080,
+        'memory_mb' => 4096,
+        'status' => 'running',
+        'ip' => '10.99.251.1',
+        'url' => 'http://10.99.251.1:8080',
+    ]);
+    [$code, $overviewWithShared] = request(null, '/apps/show/web-demo');
+    if (
+        $code !== 200
+        || !str_contains($overviewWithShared, 'Shared service')
+        || !str_contains($overviewWithShared, 'LAYA_URL')
+        || !str_contains($overviewWithShared, 'href="/services#service-laya"')
+    ) {
+        throw new RuntimeException('App overview did not link to shared service');
+    }
+
     [$code, $appSvcPage] = request(null, '/apps/services/web-demo');
     if (
         $code !== 200
+        || !str_contains($appSvcPage, 'Shared services')
+        || !str_contains($appSvcPage, 'LAYA_URL=http://10.99.251.1:8080')
+        || !str_contains($appSvcPage, 'href="/services#service-laya"')
         || !str_contains($appSvcPage, 'private services web-demo can call')
         || !str_contains($appSvcPage, 'name="app" value="web-demo"')
         || !str_contains($appSvcPage, 'Laya (AI verdict model)')
         || !str_contains($appSvcPage, 'href="/apps/services/web-demo" aria-current="page"')
     ) {
-        throw new RuntimeException('App services tab missing expected app-scoped content');
+        throw new RuntimeException('App services tab missing expected shared/app-scoped content');
     }
 
     // Add a service scoped to web-demo and ensure another app does not see it

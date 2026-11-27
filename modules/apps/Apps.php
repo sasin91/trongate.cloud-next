@@ -466,6 +466,7 @@ class Apps extends Trongate {
         $this->templates->_render('apps', 'services', 'app-services', [
             'overview' => $overview,
             'services' => $overview['services'],
+            'shared_services' => $overview['shared_services'],
             'presets' => Service_spec::presets(),
             'can_add_service' => $can_manage && $this->services->model->_can_add((string) ($app['server'] ?? '')),
             'saved_notice' => is_string($flash) ? $flash : null,

@@ -54,6 +54,7 @@ class Services extends Trongate {
                     $this->templates->_render('apps', 'services', 'app-services', [
                         'overview' => $overview,
                         'services' => $overview['services'],
+                        'shared_services' => $overview['shared_services'],
                         'presets' => Service_spec::presets(),
                         'can_add_service' => $this->model->_can_add((string) ($app['server'] ?? '')),
                         'message' => $message,
