@@ -350,6 +350,7 @@ clear_env = yes
 env[PATH] = /usr/local/bin:/usr/bin:/bin
 env[PHP_INI_SCAN_DIR] = /usr/local/etc/php-base:/etc/tc/php.d
 env[TC_STATE] = /var/db/tc/panel
+env[TC_ENV] = prod
 EOF
 
 if [ -n "$PANEL_DOMAIN" ]; then

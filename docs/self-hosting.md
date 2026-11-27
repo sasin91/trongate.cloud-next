@@ -34,18 +34,19 @@ command="/usr/local/bin/doas /usr/local/libexec/tc-runtime",no-port-forwarding,n
 ```sh
 TC_STATE=/var/db/tc/panel
 TC_BASE_URL=https://control.example.com
+TC_ENV=prod
 TC_DSN=mysql:unix_socket=/var/run/tc/mariadb/mysqld.sock;dbname=tc_panel;charset=utf8mb4
 TC_DB_USER=tc_panel
 # TC_DB_PASSWORD is stored in /var/db/tc/panel/db.env (0600, owned by www).
 ```
 
-Generate a unique 32-byte key with
-`php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;'` and set it as `APP_KEY`
-in the control plane's untracked `.env` file before production use. For an
-existing installation, use the exact contents of `/var/db/tc/panel/key` as
-`APP_KEY`; a new key cannot decrypt existing data. Local testing can omit
-`APP_KEY` and uses a fixed development-only key. Existing installations without
-`APP_KEY` continue to read their key from `/var/db/tc/panel/key`.
+Set `PANEL_DOMAIN` when running `infra/scripts/platform-jails.sh`; it writes the
+HTTPS `TC_BASE_URL` and `TC_ENV=prod` into the panel PHP-FPM environment. With a
+Cloudflare Tunnel, keep the public URL HTTPS and route the tunnel to Caddy over
+HTTP on port 80. The application uses the `TC_STATE/key` file for `APP_KEY`,
+so preserve the existing `/var/db/tc/panel/key` exactly when upgrading: a new
+key cannot decrypt existing data. Local development defaults to the `.test`
+URL and a fixed development-only key.
 
 4. Initialize the MariaDB schema and local administrator:
 
