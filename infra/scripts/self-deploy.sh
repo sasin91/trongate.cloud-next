@@ -143,7 +143,7 @@ jexec tc_panel service tc_monitor restart >/dev/null
 HEALTH_OK=0
 i=0
 while [ "$i" -lt 10 ]; do
-    OUT="$(env SCRIPT_FILENAME=/app/public/index.php SCRIPT_NAME=/index.php REQUEST_METHOD=GET REQUEST_URI=/login/login/1 QUERY_STRING= HTTP_HOST=trongate.cloud DOCUMENT_ROOT=/app/public SERVER_PROTOCOL=HTTP/1.1 GATEWAY_INTERFACE=CGI/1.1 /usr/local/bin/cgi-fcgi -bind -connect /var/run/tc/sockets/tc_panel/php-fpm.sock 2>/dev/null || true)"
+    OUT="$(env SCRIPT_FILENAME=/app/public/index.php SCRIPT_NAME=/index.php REQUEST_METHOD=GET REQUEST_URI=/tg-admin QUERY_STRING= HTTP_HOST=trongate.cloud DOCUMENT_ROOT=/app/public SERVER_PROTOCOL=HTTP/1.1 GATEWAY_INTERFACE=CGI/1.1 /usr/local/bin/cgi-fcgi -bind -connect /var/run/tc/sockets/tc_panel/php-fpm.sock 2>/dev/null || true)"
     if printf '%s' "$OUT" | grep -q 'Sign in'; then
         HEALTH_OK=1
         break
