@@ -42,15 +42,54 @@ class Jobs extends Trongate {
             $this->trongate_security->_forbidden('You do not have permission to view background jobs.');
         }
         $message = null;
+        $worker_diagnostics = null;
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->trongate_security->_csrf();
-            $this->workspace->_require_workspace('jobs.reconcile', 'You do not have permission to reconcile jobs.');
+            $action = (string) ($_POST['action'] ?? '');
+            if ($action === 'reconcile') {
+                $this->workspace->_require_workspace('jobs.reconcile', 'You do not have permission to reconcile jobs.');
+            }
             try {
-                if (($_POST['action'] ?? '') !== 'reconcile') {
-                    throw new RuntimeException('Unknown job action');
+                if ($action === 'reconcile') {
+                    $this->model->_retry((string) ($_POST['job'] ?? ''));
+                    $message = 'Job queued for reconciliation.';
+                } elseif ($action === 'inspect-worker') {
+                    $operation = (string) ($_POST['job'] ?? '');
+                    if (preg_match('/\A[a-f0-9]{32}\z/D', $operation) !== 1) {
+                        throw new RuntimeException('Invalid job identifier.');
+                    }
+                    $job = $this->model->job($operation);
+                    $this->module('deployments');
+                    if (!$this->deployments->_can_view_job($actor, $job)) {
+                        $this->trongate_security->_forbidden('You do not have permission to inspect this job.');
+                    }
+                    if (
+                        $job['kind'] !== 'build'
+                        || preg_match('/\Abuilder:([^:]+)\z/D', (string) $job['resource'], $server_id) !== 1
+                    ) {
+                        throw new RuntimeException('Worker inspection is available for build jobs only.');
+                    }
+
+                    $queue = $this->model->_diagnostics($operation);
+                    $worker = Modules::run('servers/_inspect_panel_worker', $server_id[1]);
+                    $local_source_hash = hash_file('sha256', APPPATH . 'modules/jobs/worker.php');
+                    if ($local_source_hash === false) {
+                        throw new RuntimeException('Could not read the deployed worker source file.');
+                    }
+                    $worker['worker_source_matches_panel'] = null;
+                    if ($worker['panel_jail_running']) {
+                        $worker_source_hash = $worker['worker_source_sha256'] ?? null;
+                        if (!is_string($worker_source_hash) || preg_match('/\A[a-f0-9]{64}\z/i', $worker_source_hash) !== 1) {
+                            throw new RuntimeException('The host did not return a valid worker source fingerprint.');
+                        }
+                        $worker['worker_source_matches_panel'] = hash_equals(strtolower($local_source_hash), strtolower($worker_source_hash));
+                    }
+                    unset($worker['worker_source_sha256']);
+                    $worker_diagnostics = ['queue' => $queue, 'worker' => $worker];
+                    $message = 'Read-only worker inspection completed.';
+                } else {
+                    throw new RuntimeException('Unknown job action.');
                 }
-                $this->model->_retry((string) ($_POST['job'] ?? ''));
-                $message = 'Job queued for reconciliation.';
             } catch (RuntimeException $error) {
                 http_response_code(422);
                 $message = $error->getMessage();
@@ -58,6 +97,7 @@ class Jobs extends Trongate {
         }
         $this->workspace->_render_panel('jobs', 'index', 'jobs', [
             'message' => $message,
+            'worker_diagnostics' => $worker_diagnostics,
             'crumbs' => [['/jobs', 'Jobs']],
         ]);
     }

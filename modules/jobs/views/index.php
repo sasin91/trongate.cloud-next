@@ -5,6 +5,7 @@ $counts = ['active' => 0, 'failed' => 0];
 $today = gmdate('Y-m-d');
 $yesterday = gmdate('Y-m-d', time() - 86400);
 $can_reconcile = !empty($can_reconcile);
+$worker_diagnostics = is_array($worker_diagnostics ?? null) ? $worker_diagnostics : null;
 
 foreach ($jobs as $job) {
     $st = (string) ($job['status'] ?? '');
@@ -46,6 +47,21 @@ foreach ($jobs as $job) {
     </div>
 
     <?php if ($message !== null): ?><p role="status" class="card" style="padding:14px 18px"><?= $e($message) ?></p><?php endif ?>
+
+    <?php if ($worker_diagnostics !== null):
+        $queue = $worker_diagnostics['queue'];
+        $worker = $worker_diagnostics['worker'];
+        $samples = array_map('intval', $worker['worker_process_samples'] ?? []);
+    ?>
+        <section class="ov-card ov-pad" aria-labelledby="worker-diagnostics-heading">
+            <h2 id="worker-diagnostics-heading">Worker diagnostics</h2>
+            <p>Queue: <?= $e($queue['status']) ?>; claim attempts: <?= (int) $queue['attempts'] ?>; lease active: <?= $queue['lease_active'] ? 'yes' : 'no' ?>.</p>
+            <p>Resource lock: <?= $e($queue['resource_lock']) ?><?= $queue['blocking_job_status'] !== null ? ' (blocking job: ' . $e($queue['blocking_job_status']) . ')' : '' ?>.</p>
+            <p>tc_panel jail: <?= $worker['panel_jail_running'] ? 'running' : 'not running' ?>; tc_worker service: <?= $worker['worker_service_active'] ? 'active' : 'inactive' ?>.</p>
+            <p>PHP worker process counts across three samples: <?= $samples ? $e(implode(', ', $samples)) : 'not sampled (panel jail is stopped)' ?>.</p>
+            <p>Deployed worker file matches this panel deployment: <?= $worker['worker_source_matches_panel'] === null ? 'unavailable' : ($worker['worker_source_matches_panel'] ? 'yes' : 'no') ?>.</p>
+        </section>
+    <?php endif ?>
 
     <?php if (!$jobs): ?>
         <section class="ov-card ov-pad">
@@ -107,6 +123,14 @@ foreach ($jobs as $job) {
                                             <button class="btn-secondary">Reconcile job</button>
                                         </form>
                                     </div>
+                                <?php endif ?>
+                                <?php if ($job['kind'] === 'build' && in_array($st, ['pending', 'running'], true)): ?>
+                                    <form method="post">
+                                        <?= $csrf() ?>
+                                        <input type="hidden" name="action" value="inspect-worker">
+                                        <input type="hidden" name="job" value="<?= $e($job['id']) ?>">
+                                        <button class="btn-secondary">Inspect worker</button>
+                                    </form>
                                 <?php endif ?>
                             </div>
                             <a class="job-link" href="/deployments?operation=<?= $e(rawurlencode($job['id'])) ?>">View &rarr;</a>

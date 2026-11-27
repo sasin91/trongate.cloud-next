@@ -184,6 +184,45 @@ final class Ssh {
         ];
     }
 
+    function inspect_panel_worker(array $server): array {
+        Validate::server($server);
+        $r = $this->command($server, 'tc-runtime', self::_encode_json(['action' => 'inspect-panel-worker']), 30);
+        if ($r['exit'] !== 0) {
+            throw new RuntimeException('Could not inspect the panel worker over the pinned SSH connection.');
+        }
+
+        $data = json_decode($r['out'], true);
+        if (
+            !is_array($data)
+            || ($data['status'] ?? '') !== 'succeeded'
+            || !is_bool($data['panel_jail_running'] ?? null)
+            || !is_bool($data['worker_service_active'] ?? null)
+            || !is_array($data['worker_process_samples'] ?? null)
+        ) {
+            throw new RuntimeException('The host returned an invalid panel-worker inspection response.');
+        }
+
+        $samples = [];
+        foreach ($data['worker_process_samples'] as $sample) {
+            if (!is_int($sample) || $sample < 0) {
+                throw new RuntimeException('The host returned invalid worker process counts.');
+            }
+            $samples[] = $sample;
+        }
+
+        $source_hash = $data['worker_source_sha256'] ?? null;
+        if ($source_hash !== null && (!is_string($source_hash) || preg_match('/\A[a-f0-9]{64}\z/i', $source_hash) !== 1)) {
+            throw new RuntimeException('The host returned an invalid worker source fingerprint.');
+        }
+
+        return [
+            'panel_jail_running' => $data['panel_jail_running'],
+            'worker_service_active' => $data['worker_service_active'],
+            'worker_process_samples' => $samples,
+            'worker_source_sha256' => $source_hash,
+        ];
+    }
+
     function runtime(array $server, array $request, ?callable $heartbeat = null): array {
         $r = $this->command($server, 'tc-runtime', self::_encode_json($request), 1800, $heartbeat);
         $data = json_decode($r['out'], true);

@@ -18,6 +18,10 @@ class Freebsd_simulated_runtime extends Runtime {
     public bool $mock_rctl_enabled = true;
     public bool $mock_pf_enabled = true;
     public bool $mock_builder_ready = true;
+    public bool $mock_panel_jail_running = true;
+    public bool $mock_worker_service_running = true;
+    public array $mock_worker_pids = ['101'];
+    public int $mock_other_php_processes = 0;
     public array $allocation = ['memory_mb' => 256, 'cpu_percent' => 100, 'disk_quota_mb' => 1024];
 
     public function __construct(string $root) {
@@ -26,6 +30,9 @@ class Freebsd_simulated_runtime extends Runtime {
         $this->existing_paths[$this->valkey_socket] = true;
         self::directory($this->bases_root . '/15.1-RELEASE', 0755);
         self::directory($this->runtimes_root . '/php84', 0755);
+        $worker_source = $this->jails_root . '/tc_panel/app/modules/jobs/worker.php';
+        self::directory(dirname($worker_source), 0755);
+        file_put_contents($worker_source, 'worker source');
     }
 
     public function path_exists(string $path): bool {
@@ -111,10 +118,37 @@ class Freebsd_simulated_runtime extends Runtime {
         }
         if (array_slice($args, 0, 2) === ['jls', '-j']) {
             $jail = $args[2] ?? '';
+            if ($jail === 'tc_panel' && $args === ['jls', '-j', 'tc_panel', 'name']) {
+                if ($this->mock_panel_jail_running) {
+                    return 'tc_panel';
+                }
+                throw new RuntimeException('jail not found');
+            }
             if (isset($this->running_jails[$jail])) {
                 return $jail;
             }
             throw new RuntimeException('jail not found');
+        }
+        if ($args === ['jexec', 'tc_panel', 'service', 'tc_worker', 'onestatus']) {
+            if ($this->mock_worker_service_running) {
+                return 'tc_worker is running';
+            }
+            throw new RuntimeException('service is not running');
+        }
+        if ($args === ['jexec', 'tc_panel', 'ps', '-axo', 'command']) {
+            $processes = ['COMMAND'];
+            if ($this->mock_worker_pids !== []) {
+                $processes[] = '/usr/sbin/daemon -f -r /usr/local/bin/php /app/modules/jobs/worker.php';
+                $processes = array_merge(
+                    $processes,
+                    array_fill(0, count($this->mock_worker_pids), '/usr/local/bin/php /app/modules/jobs/worker.php')
+                );
+            }
+            $processes = array_merge(
+                $processes,
+                array_fill(0, $this->mock_other_php_processes, '/usr/local/bin/php /app/modules/monitoring/collect.php')
+            );
+            return implode("\n", $processes);
         }
         if (array_slice($args, 0, 2) === ['rctl', '-a']) {
             if (preg_match('/^jail:([^:]+):/', $args[2] ?? '', $m) === 1) {

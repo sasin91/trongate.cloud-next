@@ -28,6 +28,34 @@ class Jobs_model extends Model {
         $r = $this->db->query_bind('SELECT * FROM jobs WHERE id=?', [$id], 'statement')->fetch();
         if (!$r) { throw new RuntimeException('Unknown operation'); } return $r;
     }
+    function _diagnostics(string $id): array {
+        $job = $this->job($id);
+        $locked_operation = $this->db->query_bind(
+            'SELECT operation FROM resource_locks WHERE resource=?',
+            [$job['resource']],
+            'statement'
+        )->fetchColumn();
+        $lock_state = $locked_operation === false
+            ? 'free'
+            : ($locked_operation === $id ? 'held-by-this-job' : 'held-by-another-job');
+        $blocking_status = null;
+        if ($lock_state === 'held-by-another-job') {
+            $status = $this->db->query_bind(
+                'SELECT status FROM jobs WHERE id=?',
+                [$locked_operation],
+                'statement'
+            )->fetchColumn();
+            $blocking_status = $status === false ? 'missing' : (string) $status;
+        }
+
+        return [
+            'status' => (string) $job['status'],
+            'attempts' => (int) $job['attempts'],
+            'lease_active' => $job['status'] === 'running' && (int) $job['lease'] > time(),
+            'resource_lock' => $lock_state,
+            'blocking_job_status' => $blocking_status,
+        ];
+    }
     function heartbeat(string $id, string $owner): void {
         if (!$this->db->query_bind("UPDATE jobs SET lease=? WHERE id=? AND owner=? AND status='running'", [time()+90,$id,$owner], 'statement')->rowCount()) {
             throw new RuntimeException('Worker lease lost');

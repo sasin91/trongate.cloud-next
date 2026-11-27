@@ -93,6 +93,9 @@ Then initialize the first administrator using a temporary `0600` credential file
 printf '{"action":"inspect-host"}\n' | jexec tc_panel ssh -i /var/db/tc/panel/host-key tc-agent@10.99.0.1
 # Expected: JSON with "status":"succeeded", "protocol":2, "os":"freebsd", "application_ready":true
 
+printf '{"action":"inspect-panel-worker"}\n' | jexec tc_panel ssh -i /var/db/tc/panel/host-key tc-agent@10.99.0.1
+# Expected: read-only tc_panel jail, tc_worker service, PHP worker process, and deployed worker fingerprint status
+
 jexec tc_panel ssh -i /var/db/tc/panel/host-key tc-agent@10.99.0.1 "id" </dev/null
 # Expected: JSON error from tc-runtime (never shell output)
 ```

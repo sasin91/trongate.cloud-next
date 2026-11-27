@@ -230,6 +230,11 @@ class Servers extends Trongate {
         return $inspection;
     }
 
+    function _inspect_panel_worker(string $server_id): array {
+        $server = $this->records->_get(['kind' => 'server', 'id' => Validate::id($server_id)]);
+        return (new Ssh($this->model))->inspect_panel_worker($server);
+    }
+
     function scan(): void {
         $this->trongate_security->make_sure_allowed('servers');
         $this->trongate_security->_csrf();

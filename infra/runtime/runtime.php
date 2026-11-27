@@ -323,6 +323,55 @@ class Runtime {
         ];
     }
 
+    public function inspect_panel_worker(): array {
+        if ($this->probe(['jls', '-j', 'tc_panel', 'name'], 5) === null) {
+            return [
+                'status' => 'succeeded',
+                'panel_jail_running' => false,
+                'worker_service_active' => false,
+                'worker_process_samples' => [],
+                'worker_source_sha256' => null,
+            ];
+        }
+
+        $service_active = $this->probe(['jexec', 'tc_panel', 'service', 'tc_worker', 'onestatus'], 5) !== null;
+        $process_samples = [];
+        for ($sample = 0; $sample < 3; $sample++) {
+            $output = $this->run(['jexec', 'tc_panel', 'ps', '-axo', 'command'], 5);
+            $worker_count = 0;
+            // The daemon supervisor also carries worker.php in argv; count only the PHP child.
+            foreach (explode("\n", $output) as $command) {
+                $parts = preg_split('/\s+/', trim($command), 2);
+                if (
+                    is_array($parts)
+                    && count($parts) === 2
+                    && basename($parts[0]) === 'php'
+                    && str_contains($parts[1], '/app/modules/jobs/worker.php')
+                ) {
+                    $worker_count++;
+                }
+            }
+            $process_samples[] = $worker_count;
+            if ($sample < 2) {
+                usleep(250000);
+            }
+        }
+
+        $source_path = $this->jails_root . '/tc_panel/app/modules/jobs/worker.php';
+        $source_hash = hash_file('sha256', $source_path);
+        if (!is_string($source_hash)) {
+            throw new RuntimeException('Could not verify the deployed worker source file.');
+        }
+
+        return [
+            'status' => 'succeeded',
+            'panel_jail_running' => true,
+            'worker_service_active' => $service_active,
+            'worker_process_samples' => $process_samples,
+            'worker_source_sha256' => $source_hash,
+        ];
+    }
+
     public function allocate_ip(string $app, string $slot): string {
         $app = self::match($app, '[a-z][a-z0-9-]{0,39}');
         $slot = self::match($slot, 'blue|green');
@@ -1667,6 +1716,9 @@ class Runtime {
         }
         if ($action === 'inspect-host') {
             return $this->inspect_host();
+        }
+        if ($action === 'inspect-panel-worker') {
+            return $this->inspect_panel_worker();
         }
         if ($action === 'build') {
             return $this->local_build($request);
