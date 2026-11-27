@@ -340,7 +340,7 @@ class Github extends Trongate {
     }
 
     function _state_key(): string {
-        return installation_key();
+        return APP_KEY;
     }
 
     function _safe_return(string $path): string {

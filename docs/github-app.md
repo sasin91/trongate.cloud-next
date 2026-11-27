@@ -119,7 +119,7 @@ repositories continue to deploy manually as before.
   profile, installation repositories, branches, commits, and contents.
 - `modules/login/github/Github.php`: `/auth/github`, `/auth/github/callback`,
   `/auth/github/installed`, and `POST /auth/github/disconnect`. OAuth state is
-  HMAC-SHA256 signed with `installation_key()` and bound to a `SameSite=Lax`
+  HMAC-SHA256 signed with `APP_KEY` and bound to a `SameSite=Lax`
   `HttpOnly` cookie nonce.
 - `modules/webhooks/Webhooks.php`: `POST /webhooks/github` validates
   `X-Hub-Signature-256` in constant time and queues builds for every matching app

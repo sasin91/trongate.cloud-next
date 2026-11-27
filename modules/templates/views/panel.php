@@ -53,6 +53,21 @@ $viewData += [
     'all_members' => $all_members ?? [],
     'app_invitations' => $app_invitations ?? [],
     'invite_link' => $invite_link ?? null,
+    'registry_modules' => $registry_modules ?? [],
+    'registry_tokens' => $registry_tokens ?? [],
+    'registry_servers' => $registry_servers ?? [],
+    'registry_categories' => $registry_categories ?? [],
+    'embeddings_health' => $embeddings_health ?? null,
+    'embedding_stats' => $embedding_stats ?? null,
+    'new_token' => $new_token ?? null,
+    'app_modules' => $app_modules ?? [],
+    'registry_results' => $registry_results ?? [],
+    'registry_versions' => $registry_versions ?? [],
+    'registry_schemas' => $registry_schemas ?? [],
+    'registry_query' => $registry_query ?? '',
+    'registry_category' => $registry_category ?? '',
+    'registry_fallback_notice' => $registry_fallback_notice ?? null,
+    'modules_pending_deploy' => $modules_pending_deploy ?? false,
 ];
 $can_services_nav = !empty($can_services_nav);
 $can_jobs_nav = !empty($can_jobs_nav);
@@ -98,6 +113,7 @@ $can_create_apps = !empty($can_create_apps);
             <?php if ($signedIn): ?>
                 <nav class="tc-nav">
                     <a href="/apps"<?= $page === 'dashboard' ? ' aria-current="page"' : '' ?>>Apps</a>
+                    <a href="/registry"<?= $page === 'registry-manage' ? ' aria-current="page"' : '' ?>>Registry</a>
                     <?php if ($can_services_nav): ?>
                         <a href="/services"<?= $page === 'services' ? ' aria-current="page"' : '' ?>>Services</a>
                     <?php endif ?>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once APPPATH . 'modules/trongate_security/Trongate_security.php';
 require_once APPPATH . 'modules/validation/services/Validate.php';
 require_once APPPATH . 'modules/services/services/Service_spec.php';
+require_once APPPATH . 'modules/registry/services/Module_spec.php';
 require_once APPPATH . 'modules/servers/services/Ssh.php';
 
 class Deployments extends Trongate {
@@ -241,6 +242,28 @@ class Deployments extends Trongate {
             $file_values = [];
             foreach ($release['file_secrets'] ?? [] as $target => $ref) {
                 $file_values[$target] = $s->secret($ref);
+            }
+            // Merge encrypted per-module secret configs into read-only /app/config/<module>.php overlays.
+            $app_record = $this->records->_find(['kind' => 'app', 'id' => (string) $p['app']]);
+            $app_mods = is_array($app_record['modules'] ?? null) ? $app_record['modules'] : [];
+            foreach ($release['modules'] ?? [] as $mod) {
+                $mod_name = (string) ($mod['name'] ?? '');
+                if ($mod_name === '' || in_array($mod_name, ['config', 'database', 'custom_routing', 'site_owner'], true)) {
+                    continue;
+                }
+                $cfg_target = '/app/config/' . $mod_name . '.php';
+                if (array_key_exists($cfg_target, $file_values)) {
+                    continue;
+                }
+                $secret_refs = is_array($app_mods[$mod_name]['secret_refs'] ?? null) ? $app_mods[$mod_name]['secret_refs'] : [];
+                if ($secret_refs !== []) {
+                    $merged_cfg = is_array($mod['config'] ?? null) ? $mod['config'] : [];
+                    foreach ($secret_refs as $ck => $cref) {
+                        $merged_cfg[$ck] = $s->secret((string) $cref);
+                    }
+                    $label = ($mod['namespace'] ?? '') . '/' . $mod_name . '@' . ($mod['version'] ?? '');
+                    $file_values[$cfg_target] = Module_spec::render_config_php($label, $merged_cfg);
+                }
             }
             require_once APPPATH . 'modules/apps/Apps_model.php';
             $apps_suffix = '.' . Apps_model::apps_domain();

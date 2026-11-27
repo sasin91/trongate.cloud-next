@@ -40,6 +40,7 @@ if ($can_traffic) {
 if ($can_services) {
     $tabs[] = ['/apps/services/' . rawurlencode($app_id), 'Services', $active_tab === 'services'];
 }
+$tabs[] = ['/apps/modules/' . rawurlencode($app_id), 'Modules', $active_tab === 'modules'];
 if ($can_jobs) {
     $tabs[] = ['/jobs', 'Jobs', false];
 }

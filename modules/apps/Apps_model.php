@@ -7,6 +7,7 @@ require_once APPPATH . 'modules/validation/services/Validate.php';
 require_once APPPATH . 'modules/apps/services/Build.php';
 require_once APPPATH . 'modules/apps/services/Build_commands.php';
 require_once APPPATH . 'modules/apps/services/Trongate_config.php';
+require_once APPPATH . 'modules/registry/services/Module_spec.php';
 
 class Apps_model extends Model {
     use Encrypted_credentials, Job_queue;
@@ -265,6 +266,19 @@ class Apps_model extends Model {
                 $existing_dests[] = $dest;
             }
             $updates['mounts'] = $mounts;
+        }
+        $app_record = $this->records->_find(['kind' => 'app', 'id' => (string) $launch['app']]);
+        $panel_modules = is_array($app_record['modules'] ?? null) ? array_values($app_record['modules']) : [];
+        $manifest_modules = is_array($result['declared_modules'] ?? null) ? $result['declared_modules'] : [];
+        if ($manifest_modules !== [] || $panel_modules !== []) {
+            $merged_modules = Module_spec::merge_app_modules($manifest_modules, $panel_modules);
+            $updates['modules'] = array_map(
+                static function (array $m): array {
+                    unset($m['secret_refs']);
+                    return $m;
+                },
+                $merged_modules
+            );
         }
         $spec = Validate::release(array_replace($launch['release'], $updates));
 
@@ -608,6 +622,113 @@ class Apps_model extends Model {
         $this->records->_put(['kind' => 'app', 'id' => $app_id, 'data' => $app]);
     }
 
+    function _save_app_module(string $id, array $input): array {
+        $app_id = Validate::id($id);
+        $app = $this->records->_get(['kind' => 'app', 'id' => $app_id]);
+        $ns = Module_spec::validate_namespace((string) ($input['namespace'] ?? ''));
+        $name = Module_spec::validate_name((string) ($input['name'] ?? ''));
+        $version = Module_spec::validate_version((string) ($input['version'] ?? ''));
+        $slug = $ns . '/' . $name;
+
+        $modules = is_array($app['modules'] ?? null) ? $app['modules'] : [];
+        $existing = is_array($modules[$name] ?? null) ? $modules[$name] : [];
+
+        $autowire = array_key_exists('autowire', $input)
+            ? (!empty($input['autowire']) && (string) $input['autowire'] !== '0')
+            : (!empty($existing['autowire']) || Module_spec::can_autowire($name));
+
+        $preserve_config = !empty($input['preserve_config']);
+        $config = $preserve_config && is_array($existing['config'] ?? null) ? $existing['config'] : [];
+        $secret_refs = is_array($existing['secret_refs'] ?? null) ? $existing['secret_refs'] : [];
+
+        if (!$preserve_config) {
+            if (isset($input['schema_config']) && is_array($input['schema_config'])) {
+                foreach ($input['schema_config'] as $k => $v) {
+                    if (!is_string($k) || preg_match('/^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/D', $k) !== 1) {
+                        continue;
+                    }
+                    $config[$k] = is_string($v) ? trim($v) : $v;
+                }
+            }
+            if (isset($input['extra_config']) && is_string($input['extra_config']) && trim($input['extra_config']) !== '') {
+                $config = array_replace($config, Module_spec::parse_config_lines($input['extra_config']));
+            }
+            $config = Module_spec::sanitize_config($config);
+
+            if (isset($input['schema_secrets']) && is_array($input['schema_secrets'])) {
+                foreach ($input['schema_secrets'] as $sk => $sv) {
+                    if (!is_string($sk) || preg_match('/^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/D', $sk) !== 1) {
+                        continue;
+                    }
+                    if (is_string($sv) && trim($sv) !== '') {
+                        $ref = 'mod-' . substr(hash('sha256', $app_id . ':' . $name . ':' . $sk), 0, 32);
+                        $this->secret($ref, trim($sv));
+                        $secret_refs[$sk] = $ref;
+                    }
+                }
+            }
+        }
+
+        $ver_rec = $this->records->_find(['kind' => 'registry-version', 'id' => $slug . '@' . $version]);
+        $entry = [
+            'namespace' => $ns,
+            'name' => $name,
+            'version' => $version,
+            'autowire' => $autowire,
+            'config' => $config,
+            'secret_refs' => $secret_refs,
+            'updated_at' => time(),
+        ];
+        if (is_array($ver_rec) && !empty($ver_rec['digest'])) {
+            $entry['digest'] = (string) $ver_rec['digest'];
+        }
+
+        $modules[$name] = $entry;
+        ksort($modules, SORT_STRING);
+        if (count($modules) > Module_spec::MAX_APP_MODULES) {
+            throw new RuntimeException('An app can attach at most ' . Module_spec::MAX_APP_MODULES . ' registry modules.');
+        }
+
+        unset($app['id']);
+        $app['modules'] = $modules;
+        $this->records->_put(['kind' => 'app', 'id' => $app_id, 'data' => $app]);
+        return $entry;
+    }
+
+    function _remove_app_module(string $id, string $name): void {
+        $app_id = Validate::id($id);
+        $name = Module_spec::validate_name($name);
+        $app = $this->records->_get(['kind' => 'app', 'id' => $app_id]);
+        $modules = is_array($app['modules'] ?? null) ? $app['modules'] : [];
+        unset($modules[$name]);
+        unset($app['id']);
+        $app['modules'] = $modules;
+        $this->records->_put(['kind' => 'app', 'id' => $app_id, 'data' => $app]);
+    }
+
+    /**
+     * Returns the merged list of modules attached to an app (panel-configured + manifest-declared).
+     *
+     * @return list<array<string, mixed>>
+     */
+    function _app_modules(array $app, ?array $latest_release): array {
+        $by_name = [];
+        $rel_mods = is_array($latest_release['spec']['modules'] ?? null) ? $latest_release['spec']['modules'] : [];
+        foreach ($rel_mods as $rm) {
+            if (is_array($rm) && !empty($rm['name'])) {
+                $by_name[(string) $rm['name']] = $rm + ['source' => 'manifest'];
+            }
+        }
+        $panel_mods = is_array($app['modules'] ?? null) ? $app['modules'] : [];
+        foreach ($panel_mods as $pm) {
+            if (is_array($pm) && !empty($pm['name'])) {
+                $by_name[(string) $pm['name']] = $pm + ['source' => 'panel'];
+            }
+        }
+        ksort($by_name, SORT_STRING);
+        return array_values($by_name);
+    }
+
     private function _effective_secret_refs(array $app, ?array $latest_release): array {
         if (array_key_exists('secrets', $app) && is_array($app['secrets'])) {
             return $app['secrets'];
@@ -685,8 +806,17 @@ class Apps_model extends Model {
         $effective_migration = $migration_raw !== ''
             ? (preg_split('/\s+/', $migration_raw, -1, PREG_SPLIT_NO_EMPTY) ?: [])
             : [];
+        $effective_modules = [];
+        foreach (is_array($app['modules'] ?? null) ? array_values($app['modules']) : [] as $pm) {
+            if (!is_array($pm)) {
+                continue;
+            }
+            $copy = $pm;
+            unset($copy['secret_refs'], $copy['updated_at'], $copy['source']);
+            $effective_modules[] = $copy;
+        }
 
-        // Reuse an already-built immutable release if commit, extensions, health, secrets, and migration all match.
+        // Reuse an already-built immutable release if commit, extensions, health, secrets, migration, and modules all match.
         foreach ($releases as $existing) {
             $rel_spec = is_array($existing['spec'] ?? null) ? $existing['spec'] : [];
             $rel_commit = (string) ($rel_spec['commit'] ?? $existing['metadata']['commit'] ?? '');
@@ -695,7 +825,8 @@ class Apps_model extends Model {
             $same_health = ($rel_spec['health'] ?? '/') === $effective_health;
             $same_secrets = ($rel_spec['secrets'] ?? []) === $effective_secrets;
             $same_migration = ($rel_spec['migration'] ?? []) === $effective_migration;
-            if ($rel_commit === $commit && $artifact !== '' && $artifact !== 'pending' && $same_ext && $same_health && $same_secrets && $same_migration) {
+            $same_modules = ($rel_spec['modules'] ?? []) === $effective_modules;
+            if ($rel_commit === $commit && $artifact !== '' && $artifact !== 'pending' && $same_ext && $same_health && $same_secrets && $same_migration && $same_modules) {
                 $this->module('deployments');
                 $payload = ['app' => $app_id, 'release' => (string) $existing['id']];
                 if ($trigger !== 'manual') {
@@ -721,6 +852,7 @@ class Apps_model extends Model {
             'mounts' => is_array($base_spec['mounts'] ?? null) ? $base_spec['mounts'] : [],
             'secrets' => $effective_secrets,
             'file_secrets' => is_array($base_spec['file_secrets'] ?? null) ? $base_spec['file_secrets'] : [],
+            'modules' => $effective_modules,
             'commit' => $commit,
         ];
         if ($effective_migration !== []) {

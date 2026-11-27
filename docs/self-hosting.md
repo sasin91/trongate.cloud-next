@@ -33,14 +33,21 @@ command="/usr/local/bin/doas /usr/local/libexec/tc-runtime",no-port-forwarding,n
 
 ```sh
 TC_STATE=/var/db/tc/panel
-TC_KEY_FILE=/var/db/tc/panel/key
 TC_BASE_URL=https://control.example.com
 TC_DSN=mysql:unix_socket=/var/run/tc/mariadb/mysqld.sock;dbname=tc_panel;charset=utf8mb4
 TC_DB_USER=tc_panel
 # TC_DB_PASSWORD is stored in /var/db/tc/panel/db.env (0600, owned by www).
 ```
 
-4. Initialize the encryption key, MariaDB schema, and local administrator:
+Generate a unique 32-byte key with
+`php -r 'echo base64_encode(random_bytes(32)), PHP_EOL;'` and set it as `APP_KEY`
+in the control plane's untracked `.env` file before production use. For an
+existing installation, use the exact contents of `/var/db/tc/panel/key` as
+`APP_KEY`; a new key cannot decrypt existing data. Local testing can omit
+`APP_KEY` and uses a fixed development-only key. Existing installations without
+`APP_KEY` continue to read their key from `/var/db/tc/panel/key`.
+
+4. Initialize the MariaDB schema and local administrator:
 
 ```sh
 # Create /tmp/tc-admin.json inside tc_panel with mode 0600:
@@ -50,9 +57,9 @@ jexec tc_panel rm -f /tmp/tc-admin.json
 jexec tc_panel service tc_worker restart
 ```
 
-5. Back up `/var/db/tc/panel/key` immediately. Losing this key loses access to
-   all encrypted SSH keys, application environment secrets, and config-file
-   secrets stored in MariaDB.
+5. Back up `APP_KEY` (or the legacy key file) securely with the control-plane
+   database. Losing this key loses access to all encrypted SSH keys, application
+   environment secrets, and config-file secrets stored in MariaDB.
 
 6. Enroll Host #1 in the panel as `10.99.0.1` (port `22`, user `tc-agent`). The
    enrollment flow pins the server's Ed25519 host key on first connect and runs
@@ -89,7 +96,8 @@ MariaDB dump) to take a consistent backup:
 
 - **Control-plane database**: `mariadb-dump --single-transaction tc_panel`
   (inventory, encrypted credentials, jobs, steps, locks, and admin hashes).
-- **Control-plane state & key**: `/var/db/tc/panel/key` and `/var/db/tc/panel/`.
+- **Control-plane state & key**: the `.env` file containing `APP_KEY` and
+  `/var/db/tc/panel/`.
 - **Host runtime metadata & TLS state**: `/var/db/tc/runtime` (state, jobs,
   `ips.json`, `resources.json`, `Caddyfile`), `/etc/jail.conf.d/`,
   `/etc/tc-resources.json`, and Caddy's ACME data directory.
@@ -110,9 +118,9 @@ jexec tc_panel service tc_worker start
 ```
 
 When restoring:
-1. Restore the database and the **exact matching** `/var/db/tc/panel/key` with
-   `0600` permissions. Never run a fresh `init.php` with a new key over restored
-   ciphertext.
+1. Restore the database and the **exact matching** `APP_KEY`. For legacy
+   installations, restore `/var/db/tc/panel/key` with `0600` permissions. Never
+   run a fresh `init.php` with a new key over restored ciphertext.
 2. Inspect any `uncertain` jobs before restarting `tc_worker`.
 3. Existing application jails and host Caddy continue serving traffic while
    `tc_panel` is offline or being restored.

@@ -12,7 +12,7 @@ try {
     if (count($argv) !== 1) {
         throw new RuntimeException('Usage: php modules/monitoring/collect.php');
     }
-    Encryptor::validate_key(installation_key());
+    Encryptor::validate_key(APP_KEY);
     Modules::run('monitoring/_collect');
     echo "Monitoring collected\n";
 } catch (Throwable $error) {

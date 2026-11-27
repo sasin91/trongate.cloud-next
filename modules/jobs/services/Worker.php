@@ -44,6 +44,9 @@ class Worker {
             'destroy-app' => 'deployments/_destroy',
             'deploy-service' => 'services/_deploy',
             'destroy-service' => 'services/_destroy',
+            'registry-init-repo' => 'registry/_init_repo',
+            'registry-publish' => 'registry/_publish',
+            'registry-yank' => 'registry/_yank',
             default => throw new RuntimeException('Unsupported job kind'),
         };
         return Modules::run($action, $context);

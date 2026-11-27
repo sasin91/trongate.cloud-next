@@ -14,7 +14,7 @@ try {
     if (count($argv) > 2 || (isset($argv[1]) && $argv[1] !== '--once')) {
         throw new RuntimeException('Usage: php modules/jobs/worker.php [--once]');
     }
-    Encryptor::validate_key(installation_key());
+    Encryptor::validate_key(APP_KEY);
     $worker = new Worker((new Jobs('jobs'))->model);
     do {
         $worker->once();

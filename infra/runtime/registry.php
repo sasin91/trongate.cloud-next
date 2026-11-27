@@ -467,6 +467,7 @@ final class Registry_runtime {
             'category' => 'general',
             'php' => '>=8.2',
             'autowire' => self::default_autowire($name),
+            'config_schema' => self::default_config_schema($name),
             'readme' => '',
         ];
 
@@ -490,6 +491,33 @@ final class Registry_runtime {
                 }
                 if (isset($decoded['autowire']) && is_array($decoded['autowire'])) {
                     $meta['autowire'] = $decoded['autowire'];
+                }
+                if (isset($decoded['config_schema']) && is_array($decoded['config_schema'])) {
+                    $schema = [];
+                    foreach (array_slice($decoded['config_schema'], 0, 32) as $field_def) {
+                        if (!is_array($field_def) || !is_string($field_def['key'] ?? null)) {
+                            continue;
+                        }
+                        $key = trim($field_def['key']);
+                        if (preg_match('/\A[a-zA-Z_][a-zA-Z0-9_]{0,63}\z/', $key) !== 1) {
+                            continue;
+                        }
+                        $type = in_array($field_def['type'] ?? 'string', ['string', 'bool', 'int', 'select'], true)
+                            ? (string) $field_def['type']
+                            : 'string';
+                        $schema[] = [
+                            'key' => $key,
+                            'label' => substr(trim((string) ($field_def['label'] ?? $key)), 0, 120),
+                            'type' => $type,
+                            'default' => is_scalar($field_def['default'] ?? null) ? $field_def['default'] : '',
+                            'secret' => !empty($field_def['secret']),
+                            'hint' => substr(trim((string) ($field_def['hint'] ?? '')), 0, 240),
+                            'options' => is_array($field_def['options'] ?? null)
+                                ? array_values(array_filter(array_slice($field_def['options'], 0, 20), 'is_string'))
+                                : [],
+                        ];
+                    }
+                    $meta['config_schema'] = $schema;
                 }
             }
         }
@@ -531,6 +559,48 @@ final class Registry_runtime {
         }
         if ($name === 'log') {
             return ['preload' => 'Log.php', 'helper' => 'tc_log'];
+        }
+        return [];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private static function default_config_schema(string $name): array {
+        if ($name === 'error_pages') {
+            return [
+                [
+                    'key' => 'error_404_route',
+                    'label' => '404 handler route',
+                    'type' => 'string',
+                    'default' => 'error_pages/not_found',
+                    'secret' => false,
+                    'hint' => 'Patched into ERROR_404 when auto-wiring is enabled.',
+                    'options' => [],
+                ],
+                [
+                    'key' => 'retry_after_seconds',
+                    'label' => '503 Retry-After (seconds)',
+                    'type' => 'int',
+                    'default' => 60,
+                    'secret' => false,
+                    'hint' => 'Returned on schema-updating and timeout 503 responses.',
+                    'options' => [],
+                ],
+            ];
+        }
+        if ($name === 'log') {
+            return [
+                [
+                    'key' => 'channel_prefix',
+                    'label' => 'Default log channel',
+                    'type' => 'string',
+                    'default' => 'app',
+                    'secret' => false,
+                    'hint' => 'Default prefix passed to tc_log() and Error_log_writer.',
+                    'options' => [],
+                ],
+            ];
         }
         return [];
     }

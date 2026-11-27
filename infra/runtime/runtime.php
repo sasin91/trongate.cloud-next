@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../modules/error_pages/Error_report.php';
+require_once __DIR__ . '/environment.php';
 
 /**
  * Root-owned FreeBSD host runtime (protocol v2).
@@ -41,6 +42,7 @@ class Runtime {
     public string $bases_root;
     public string $runtimes_root;
     public bool $behind_tunnel;
+    public Runtime_environment $environment;
 
     public function __construct(
         public string $root = '/var/db/tc/runtime',
@@ -54,8 +56,13 @@ class Runtime {
         ?string $bases_root = null,
         ?string $runtimes_root = null,
         ?bool $behind_tunnel = null,
+        ?Runtime_environment $environment = null,
     ) {
-        $production = $root === '/var/db/tc/runtime';
+        $this->environment = $environment ?? Runtime_environment::for_root($root);
+        if ($this->environment->root !== $root) {
+            throw new InvalidArgumentException('Runtime environment root mismatch');
+        }
+        $production = $this->environment->production;
         $pool = $pool ?? ($production ? self::configured_pool() : self::DEFAULT_POOL);
         $this->pool = $pool;
         $this->behind_tunnel = $behind_tunnel ?? ($production ? self::configured_behind_tunnel() : false);
@@ -747,7 +754,9 @@ class Runtime {
         // Resolve and verify ZFS-backed registry modules for zero-copy read-only nullfs mounting.
         $resolved_modules = [];
         $autowire_error_pages = false;
+        $autowire_error_404 = 'error_pages/not_found';
         $autowire_log = false;
+        $autowire_log_channel = 'app';
         if (!empty($spec['modules']) && is_array($spec['modules'])) {
             require_once __DIR__ . '/registry.php';
             $registry = new Registry_runtime($this);
@@ -761,12 +770,25 @@ class Runtime {
                     throw new InvalidArgumentException('Duplicate registry module mount: ' . $mod['name']);
                 }
                 $seen_mod_names[$mod['name']] = true;
+                $mod_config = is_array($mod_entry['config'] ?? null) ? $mod_entry['config'] : [];
+                $mod['config'] = $mod_config;
                 $resolved_modules[] = $mod;
                 if ($mod['autowire'] && $mod['name'] === 'error_pages') {
                     $autowire_error_pages = true;
+                    if (isset($mod_config['error_404_route']) && is_string($mod_config['error_404_route']) && trim($mod_config['error_404_route']) !== '') {
+                        $autowire_error_404 = trim($mod_config['error_404_route']);
+                    }
                 }
                 if ($mod['autowire'] && $mod['name'] === 'log') {
                     $autowire_log = true;
+                    if (isset($mod_config['channel_prefix']) && is_string($mod_config['channel_prefix']) && trim($mod_config['channel_prefix']) !== '') {
+                        $autowire_log_channel = trim($mod_config['channel_prefix']);
+                    }
+                }
+                // Materialize per-module PHP config file in /app/config/<module>.php when configured.
+                $cfg_target = '/app/config/' . $mod['name'] . '.php';
+                if ($mod_config !== [] && !array_key_exists($cfg_target, $files) && !in_array($mod['name'], ['config', 'database', 'custom_routing', 'site_owner'], true)) {
+                    $files[$cfg_target] = self::render_module_config_php($mod['namespace'] . '/' . $mod['name'] . '@' . $mod['version'], $mod_config);
                 }
             }
         }
@@ -785,7 +807,7 @@ class Runtime {
                     $domain,
                     $trongate_env,
                     true,
-                    $autowire_error_pages ? 'error_pages/not_found' : null
+                    $autowire_error_pages ? $autowire_error_404 : null
                 );
             }
         }
@@ -869,7 +891,7 @@ class Runtime {
         // Optional auto-prepend bootstrap for auto-wired registry modules (error_pages, log).
         $auto_prepend = null;
         if ($autowire_error_pages || $autowire_log) {
-            $boot_code = self::render_modules_boot_php($autowire_error_pages, $autowire_log);
+            $boot_code = self::render_modules_boot_php($autowire_error_pages, $autowire_log, $autowire_log_channel);
             $this->write($jail_root . '/etc/tc/tc_modules_boot.php', $boot_code, 0444);
             $auto_prepend = '/etc/tc/tc_modules_boot.php';
         }
@@ -1538,7 +1560,7 @@ class Runtime {
 
     public function builder(): Builder {
         require_once __DIR__ . '/builder.php';
-        $production = $this->root === '/var/db/tc/runtime';
+        $production = $this->environment->production;
         return new Builder(
             root: $production ? '/var/db/tc/builds' : $this->root . '/builds',
             pool: $this->pool,
@@ -1860,7 +1882,7 @@ class Runtime {
         $data_dataset = $this->pool . '/tc/services/custom/' . $name;
         $jail_root = $this->jails_root . '/svc-' . $name;
         $data_root = '/' . $data_dataset;
-        if ($this->root !== '/var/db/tc/runtime') {
+        if (!$this->environment->production) {
             $data_root = $this->root . '/services/' . $name . '/data';
         }
         $base_dir = $this->resolve_base_dir();
@@ -1872,7 +1894,7 @@ class Runtime {
                 $this->run(['jail', '-r', $jail_name], 60);
             }
             $this->remove_service_rctl($jail_name);
-            if ($this->root === '/var/db/tc/runtime') {
+            if ($this->environment->production) {
                 foreach ([$jail_root . '/dev', $jail_root . '/.base', $jail_root . '/var/db/service'] as $mnt) {
                     $this->probe(['umount', '-f', $mnt], 15);
                 }
@@ -1897,7 +1919,7 @@ class Runtime {
                 $mounted_dev = false;
                 $repos_dir = null;
                 try {
-                    if ($this->root === '/var/db/tc/runtime') {
+                    if ($this->environment->production) {
                         $this->run(['mount', '-t', 'nullfs', '-o', 'ro', $base_dir, $jail_root . '/.base'], 30);
                         $mounted_base = true;
                         $this->run(['mount', '-t', 'devfs', 'devfs', $jail_root . '/dev'], 30);
@@ -2117,7 +2139,7 @@ class Runtime {
     }
 
     public function tcp_ready(string $ip, int $port, int $attempts = 90): bool {
-        $context = $this->root === '/var/db/tc/runtime'
+        $context = $this->environment->production
             ? stream_context_create(['socket' => ['bindto' => '10.99.0.1:0']])
             : null;
         for ($i = 0; $i < $attempts; $i++) {
@@ -2861,21 +2883,35 @@ class Runtime {
         return implode("\n", $lines) . "\n";
     }
 
-    public static function render_modules_boot_php(bool $error_pages, bool $log): string {
+    public static function render_module_config_php(string $label, array $config): string {
+        $clean = [];
+        foreach ($config as $k => $v) {
+            if (!is_string($k) || preg_match('/\A[a-zA-Z_][a-zA-Z0-9_]{0,63}\z/', $k) !== 1) {
+                continue;
+            }
+            if (is_string($v) && str_contains($v, "\0")) {
+                throw new InvalidArgumentException('Invalid module configuration value');
+            }
+            if (is_scalar($v) || $v === null) {
+                $clean[$k] = $v;
+            }
+        }
+        return "<?php\n// Managed by trongate.cloud for module " . preg_replace('/[\r\n]/', '', $label) . "\nreturn " . var_export($clean, true) . ";\n";
+    }
+
+    public static function render_modules_boot_php(bool $error_pages, bool $log, string $default_log_channel = 'app'): string {
         $code = "<?php\n// Managed by trongate.cloud ZFS module registry auto-wiring.\n";
         if ($log) {
-            $code .= <<<'PHP'
-if (is_file('/app/modules/log/Log.php')) {
-    require_once '/app/modules/log/Log.php';
-    if (!function_exists('tc_log')) {
-        function tc_log(string $channel = 'app'): Log {
-            static $loggers = [];
-            return $loggers[$channel] ??= new Log([new Error_log_writer('[' . $channel . '] ')]);
-        }
-    }
-}
-
-PHP;
+            $ch = var_export($default_log_channel, true);
+            $code .= "if (is_file('/app/modules/log/Log.php')) {\n"
+                . "    require_once '/app/modules/log/Log.php';\n"
+                . "    if (!function_exists('tc_log')) {\n"
+                . "        function tc_log(string \$channel = " . $ch . "): Log {\n"
+                . "            static \$loggers = [];\n"
+                . "            return \$loggers[\$channel] ??= new Log([new Error_log_writer('[' . \$channel . '] ')]);\n"
+                . "        }\n"
+                . "    }\n"
+                . "}\n\n";
         }
         if ($error_pages) {
             $code .= <<<'PHP'
@@ -2977,7 +3013,7 @@ PHP;
         if (PHP_OS_FAMILY === 'Windows') {
             return;
         }
-        if ($this->root === '/var/db/tc/runtime') {
+        if ($this->environment->production) {
             if ($writable && !chown($path, 'www')) {
                 throw new RuntimeException('Cannot set www owner on runtime path');
             }
@@ -3021,7 +3057,7 @@ PHP;
     }
 
     private static function configured_pool(string $config_path = '/etc/tc-resources.json'): string {
-        $env_pool = getenv('TC_POOL');
+        $env_pool = 'zroot';
         if (is_string($env_pool) && $env_pool !== '' && preg_match('/\A[A-Za-z][A-Za-z0-9_.:-]{0,63}\z/', $env_pool) === 1) {
             return $env_pool;
         }

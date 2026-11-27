@@ -7,6 +7,7 @@ require_once APPPATH . 'modules/security/services/Encryptor.php';
 require_once APPPATH . 'modules/apps/services/Build.php';
 require_once APPPATH . 'modules/apps/services/Build_commands.php';
 require_once APPPATH . 'modules/services/services/Service_spec.php';
+require_once APPPATH . 'modules/registry/services/Module_spec.php';
 require_once APPPATH . 'modules/login/github/services/Github_app.php';
 
 class Apps extends Trongate {
@@ -675,6 +676,150 @@ class Apps extends Trongate {
         }
     }
 
+    function modules(): void {
+        $this->trongate_security->make_sure_allowed('apps');
+        $id = (string) segment(3);
+        $this->_require_app($id, 'view');
+        try {
+            $overview = $this->model->_overview($id);
+        } catch (Throwable) {
+            http_response_code(404);
+            $this->workspace->_render_panel('apps', 'dashboard', 'dashboard', [
+                'app_summaries' => $this->_visible_summaries(),
+                'message' => 'Application not found.',
+            ]);
+            return;
+        }
+
+        $app = $overview['app'];
+        $app_id = (string) $app['id'];
+        $attached = $this->model->_app_modules($app, $overview['latest_release']);
+
+        $this->module('registry');
+        $q = trim((string) ($_GET['q'] ?? ''));
+        $cat = trim((string) ($_GET['category'] ?? ''));
+        $search = $this->registry->model->_search($q, $cat, 'hybrid', $this->registry->_embeddings_client());
+
+        $versions_map = [];
+        $schemas_map = [];
+        foreach ($this->registry->model->_all_modules() as $rmod) {
+            $slug = (string) ($rmod['slug'] ?? '');
+            if ($slug !== '') {
+                $versions_map[$slug] = $this->registry->model->_versions_for((string) $rmod['namespace'], (string) $rmod['name']);
+                $schemas_map[$slug] = is_array($rmod['config_schema'] ?? null) ? $rmod['config_schema'] : [];
+            }
+        }
+
+        $live_mods = is_array($overview['latest_release']['spec']['modules'] ?? null)
+            ? $overview['latest_release']['spec']['modules']
+            : [];
+        $panel_norm = [];
+        foreach ($attached as $item) {
+            $panel_norm[$item['name']] = [
+                'namespace' => $item['namespace'] ?? '',
+                'version' => $item['version'] ?? '',
+                'autowire' => !empty($item['autowire']),
+                'config' => $item['config'] ?? [],
+            ];
+        }
+        $live_norm = [];
+        foreach ($live_mods as $item) {
+            if (is_array($item) && !empty($item['name'])) {
+                $live_norm[$item['name']] = [
+                    'namespace' => $item['namespace'] ?? '',
+                    'version' => $item['version'] ?? '',
+                    'autowire' => !empty($item['autowire']),
+                    'config' => $item['config'] ?? [],
+                ];
+            }
+        }
+        $pending_deploy = $panel_norm !== $live_norm;
+
+        $saved = (string) ($_GET['saved'] ?? '');
+        $saved_notice = match ($saved) {
+            'inserted' => 'Module inserted. Deploy now to mount its immutable ZFS snapshot.',
+            'updated' => 'Module version and configuration saved. Deploy now to apply.',
+            'removed' => 'Module removed from app. Deploy now to apply.',
+            default => null,
+        };
+        $err_flash = $_SESSION['app_modules_error'] ?? null;
+        unset($_SESSION['app_modules_error']);
+
+        $this->workspace->_render_panel('apps', 'modules', 'app-modules', [
+            'overview' => $overview,
+            'app_modules' => $attached,
+            'registry_results' => $search['results'],
+            'registry_versions' => $versions_map,
+            'registry_schemas' => $schemas_map,
+            'registry_categories' => Module_spec::CATEGORIES,
+            'registry_query' => $q,
+            'registry_category' => $cat,
+            'registry_fallback_notice' => $search['fallback_notice'],
+            'modules_pending_deploy' => $pending_deploy,
+            'saved_notice' => $saved_notice,
+            'message' => is_string($err_flash) ? $err_flash : null,
+            'crumbs' => [
+                ['/apps', 'Apps'],
+                ['/apps/show/' . rawurlencode($app_id), (string) ($app['label'] ?? $app_id)],
+                ['/apps/modules/' . rawurlencode($app_id), 'Modules'],
+            ],
+        ]);
+    }
+
+    function insert_module(): void {
+        $this->trongate_security->make_sure_allowed('apps');
+        $this->trongate_security->_csrf();
+        $raw_app = trim((string) ($_POST['app'] ?? ''));
+        $this->_require_app($raw_app, 'settings', 'You do not have permission to manage modules for this app.');
+        $app_id = '';
+        try {
+            $app_id = Validate::id($raw_app);
+            $this->model->_save_app_module($app_id, $_POST);
+            header('Location: /apps/modules/' . rawurlencode($app_id) . '?saved=inserted', true, 303);
+            exit;
+        } catch (Throwable $e) {
+            $_SESSION['app_modules_error'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not insert module.';
+            header('Location: ' . ($app_id !== '' ? '/apps/modules/' . rawurlencode($app_id) : '/apps'), true, 303);
+            exit;
+        }
+    }
+
+    function update_module(): void {
+        $this->trongate_security->make_sure_allowed('apps');
+        $this->trongate_security->_csrf();
+        $raw_app = trim((string) ($_POST['app'] ?? ''));
+        $this->_require_app($raw_app, 'settings', 'You do not have permission to configure modules for this app.');
+        $app_id = '';
+        try {
+            $app_id = Validate::id($raw_app);
+            $this->model->_save_app_module($app_id, $_POST);
+            header('Location: /apps/modules/' . rawurlencode($app_id) . '?saved=updated', true, 303);
+            exit;
+        } catch (Throwable $e) {
+            $_SESSION['app_modules_error'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not update module.';
+            header('Location: ' . ($app_id !== '' ? '/apps/modules/' . rawurlencode($app_id) : '/apps'), true, 303);
+            exit;
+        }
+    }
+
+    function remove_module(): void {
+        $this->trongate_security->make_sure_allowed('apps');
+        $this->trongate_security->_csrf();
+        $raw_app = trim((string) ($_POST['app'] ?? ''));
+        $this->_require_app($raw_app, 'settings', 'You do not have permission to remove modules from this app.');
+        $app_id = '';
+        try {
+            $app_id = Validate::id($raw_app);
+            $this->model->_remove_app_module($app_id, (string) ($_POST['name'] ?? ''));
+            header('Location: /apps/modules/' . rawurlencode($app_id) . '?saved=removed', true, 303);
+            exit;
+        } catch (Throwable $e) {
+            $_SESSION['app_modules_error'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not remove module.';
+            header('Location: ' . ($app_id !== '' ? '/apps/modules/' . rawurlencode($app_id) : '/apps'), true, 303);
+            exit;
+        }
+    }
+
     private function _render_settings_error(string $app_id, string $message): void {
         if ($app_id !== '') {
             try {
@@ -779,7 +924,7 @@ class Apps extends Trongate {
                 $message = $e instanceof RuntimeException ? $e->getMessage() : 'Invalid input';
             }
         } elseif (isset($_SESSION['app_draft'])) {
-            $_POST = json_decode(Encryptor::decrypt($_SESSION['app_draft'], installation_key()), true, 512, JSON_THROW_ON_ERROR);
+            $_POST = json_decode(Encryptor::decrypt($_SESSION['app_draft'], APP_KEY), true, 512, JSON_THROW_ON_ERROR);
             if (isset($_SESSION['draft_server'])) {
                 $_POST['server'] = $_SESSION['draft_server'];
                 unset($_SESSION['draft_server']);
@@ -828,7 +973,7 @@ class Apps extends Trongate {
             $this->trongate_security->_json(['error' => 'Draft is too large.'], 422);
             return;
         }
-        $_SESSION['app_draft'] = Encryptor::encrypt(self::_encode_json($draft), installation_key());
+        $_SESSION['app_draft'] = Encryptor::encrypt(self::_encode_json($draft), APP_KEY);
         $_SESSION['launch_request'] ??= bin2hex(random_bytes(16));
         $this->model->_save_draft($this->_draft_owner(), $_SESSION['app_draft'], $_SESSION['launch_request']);
         $this->trongate_security->_json(['saved' => true]);
@@ -1055,7 +1200,7 @@ class Apps extends Trongate {
         }
         $draft['wizard_step'] = $attrs['data-next-step'];
         if (strlen(self::_encode_json($draft)) <= 131072) {
-            $_SESSION['app_draft'] = Encryptor::encrypt(self::_encode_json($draft), installation_key());
+            $_SESSION['app_draft'] = Encryptor::encrypt(self::_encode_json($draft), APP_KEY);
             $_SESSION['launch_request'] ??= bin2hex(random_bytes(16));
             $this->model->_save_draft($this->_draft_owner(), $_SESSION['app_draft'], $_SESSION['launch_request']);
         }
