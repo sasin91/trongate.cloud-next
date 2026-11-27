@@ -5,9 +5,44 @@ window.panelMxTimeout = function () {
     window.resourceRelease?.();
 };
 
+window.deploymentLogOpenState ??= new Map();
+
+document.addEventListener('toggle', event => {
+    const details = event.target;
+    if (!details || details.tagName !== 'DETAILS' || !details.classList.contains('step-about')) {
+        return;
+    }
+
+    const timeline = details.closest('#deployment-content[data-timeline]');
+    if (!timeline) {
+        return;
+    }
+
+    const logs = [...timeline.querySelectorAll('details.step-about')];
+    const index = logs.indexOf(details);
+    if (index < 0) {
+        return;
+    }
+
+    const state = window.deploymentLogOpenState.get(timeline.dataset.timeline) ?? [];
+    state[index] = details.open;
+    window.deploymentLogOpenState.set(timeline.dataset.timeline, state);
+}, true);
+
 window.timelineRefresh = function () {
     const timeline = document.getElementById('deployment-content');
     const poll = document.getElementById('timeline-poll');
+    const state = timeline
+        ? window.deploymentLogOpenState.get(timeline.dataset.timeline)
+        : null;
+    if (timeline && state) {
+        timeline.querySelectorAll('details.step-about').forEach((details, index) => {
+            if (state[index] !== undefined) {
+                details.open = state[index];
+            }
+        });
+    }
+
     if (timeline && poll && !['pending', 'running'].includes(timeline.dataset.status)) {
         TrongateMX.stopPolling(poll);
     } else if (poll) {
