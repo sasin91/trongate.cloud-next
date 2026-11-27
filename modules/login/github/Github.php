@@ -17,9 +17,19 @@ require_once APPPATH . 'modules/login/github/services/Github_app.php';
 require_once APPPATH . 'modules/login/github/services/Github_client.php';
 
 class Github extends Trongate {
+    private ?Http_client $http_override = null;
+
     function make_sure_allowed(): void {
         block_url('login-github/make_sure_allowed');
         $this->workspace->_actor();
+    }
+
+    function _use_http_client(Http_client $client): void {
+        $this->http_override = $client;
+    }
+
+    private function _http_client(): Http_client {
+        return $this->http_override ?? $this->http;
     }
 
     public const STATE_COOKIE = 'tc_github_state';
@@ -57,7 +67,7 @@ class Github extends Trongate {
         $app = $this->_app();
         try {
             $token = $app->exchange_code($code, self::callback_url());
-            $github = new Github_client($token['token'], $this->http);
+            $github = new Github_client($token['token'], $this->_http_client());
             $user = $github->user();
         } catch (Throwable) {
             $this->_fail('GitHub did not let us sign you in. Please try again.');
@@ -196,7 +206,7 @@ class Github extends Trongate {
             }
         }
 
-        return new Github_client((string) $token['token'], $this->http);
+        return new Github_client((string) $token['token'], $this->_http_client());
     }
 
     /**
@@ -228,7 +238,7 @@ class Github extends Trongate {
             $installation_token = $this->_installation_token($repository, $permissions);
             if ($installation_token !== null && $installation_token !== '') {
                 return [
-                    'client' => new Github_client($installation_token, $this->http),
+                    'client' => new Github_client($installation_token, $this->_http_client()),
                     'source' => 'installation',
                     'token' => $installation_token,
                 ];
@@ -249,7 +259,7 @@ class Github extends Trongate {
         }
 
         return [
-            'client' => Github_client::anonymous($this->http),
+            'client' => Github_client::anonymous($this->_http_client()),
             'source' => 'anonymous',
             'token' => '',
         ];
