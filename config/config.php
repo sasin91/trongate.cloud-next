@@ -1,9 +1,10 @@
 <?php
 $environment = strtolower(trim((string) (getenv('TC_ENV') ?: 'dev')));
+$is_production = in_array($environment, ['prod', 'production'], true);
 $base_url = trim((string) (getenv('TC_BASE_URL') ?: ''));
 $app_key = trim((string) (getenv('APP_KEY') ?: ''));
 
-if ($environment === 'prod') {
+if ($is_production) {
     if ($base_url === '') {
         throw new RuntimeException('TC_BASE_URL must be configured for production.');
     }
@@ -31,7 +32,7 @@ if ($app_key === '') {
 }
 
 if ($app_key === '') {
-    if ($environment === 'prod') {
+    if ($is_production) {
         throw new RuntimeException('APP_KEY or a readable TC_STATE/key file is required in production.');
     }
     $app_key = 'tgcloud-local-dev-key-0123456789';

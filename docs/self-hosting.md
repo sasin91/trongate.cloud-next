@@ -34,14 +34,14 @@ command="/usr/local/bin/doas /usr/local/libexec/tc-runtime",no-port-forwarding,n
 ```sh
 TC_STATE=/var/db/tc/panel
 TC_BASE_URL=https://control.example.com
-TC_ENV=prod
+TC_ENV=production
 TC_DSN=mysql:unix_socket=/var/run/tc/mariadb/mysqld.sock;dbname=tc_panel;charset=utf8mb4
 TC_DB_USER=tc_panel
 # TC_DB_PASSWORD is stored in /var/db/tc/panel/db.env (0600, owned by www).
 ```
 
 Set `PANEL_DOMAIN` when running `infra/scripts/platform-jails.sh`; it writes the
-HTTPS `TC_BASE_URL` and `TC_ENV=prod` into the panel PHP-FPM environment. With a
+HTTPS `TC_BASE_URL` and `TC_ENV=production` into the panel PHP-FPM environment. With a
 Cloudflare Tunnel, keep the public URL HTTPS and route the tunnel to Caddy over
 HTTP on port 80. The application uses the `TC_STATE/key` file for `APP_KEY`,
 which `platform-jails.sh` creates only when absent. Preserve the existing

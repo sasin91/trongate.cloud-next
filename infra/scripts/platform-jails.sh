@@ -374,7 +374,7 @@ clear_env = yes
 env[PATH] = /usr/local/bin:/usr/bin:/bin
 env[PHP_INI_SCAN_DIR] = /usr/local/etc/php-base:/etc/tc/php.d
 env[TC_STATE] = /var/db/tc/panel
-env[TC_ENV] = prod
+env[TC_ENV] = production
 EOF
 
 printf 'env[TC_BASE_URL] = "%s"\n' "$PANEL_BASE_URL" >> "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"

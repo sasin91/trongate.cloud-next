@@ -19,6 +19,7 @@ tc_worker_start() {
     [ -f /var/db/tc/panel/github.env ] && . /var/db/tc/panel/github.env
     set +a
     export PHP_INI_SCAN_DIR="/usr/local/etc/php-base:/etc/tc/php.d"
+    export TC_ENV="production"
     export TC_STATE="/var/db/tc/panel"
     /usr/sbin/daemon -f -r -P "$pidfile" -u www /usr/local/bin/php /app/modules/jobs/worker.php
 }
