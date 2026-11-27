@@ -2,6 +2,9 @@
 declare(strict_types=1);
 
 class Apps extends Trongate {
+    /** @var array<string, array{token: string, source: string}> */
+    private array $github_repo_tokens = [];
+
     function index(): void {
         $this->trongate_security->make_sure_allowed();
         $actor = $this->trongate_security->_actor();
@@ -537,15 +540,24 @@ class Apps extends Trongate {
             'env-deleted' => 'Environment variable removed. Deploy now to apply the change.',
             default => null,
         };
+        $gh_flash = $_SESSION['github_auth_flash'] ?? null;
+        $gh_error = $_SESSION['github_auth_error'] ?? null;
+        unset($_SESSION['github_auth_flash'], $_SESSION['github_auth_error']);
+        if ($saved_notice === null && is_string($gh_flash)) {
+            $saved_notice = $gh_flash;
+        }
 
         $app = $overview['app'];
+        $app_id = (string) $app['id'];
         $this->templates->_render('apps', 'settings', 'app-settings', [
             'overview' => $overview,
             'saved_notice' => $saved_notice,
+            'message' => is_string($gh_error) ? $gh_error : null,
+            'github' => $this->_github_ui('apps/settings/' . rawurlencode($app_id), false),
             'crumbs' => [
                 ['/apps', 'Apps'],
-                ['/apps/show/' . rawurlencode((string) $app['id']), (string) ($app['label'] ?? $app['id'])],
-                ['/apps/settings/' . rawurlencode((string) $app['id']), 'Settings'],
+                ['/apps/show/' . rawurlencode($app_id), (string) ($app['label'] ?? $app_id)],
+                ['/apps/settings/' . rawurlencode($app_id), 'Settings'],
             ],
         ]);
     }
@@ -606,6 +618,7 @@ class Apps extends Trongate {
                 $this->templates->_render('apps', 'settings', 'app-settings', [
                     'overview' => $overview,
                     'message' => $message,
+                    'github' => $this->_github_ui('apps/settings/' . rawurlencode($app_id), false),
                     'crumbs' => [
                         ['/apps', 'Apps'],
                         ['/apps/show/' . rawurlencode($app_id), (string) ($overview['app']['label'] ?? $app_id)],
@@ -708,14 +721,44 @@ class Apps extends Trongate {
                 unset($_SESSION['draft_server']);
             }
         }
-        $this->templates->_render('apps', 'wizard', 'new-app', ['message' => $message]);
+        $gh_flash = $_SESSION['github_auth_flash'] ?? null;
+        $gh_error = $_SESSION['github_auth_error'] ?? null;
+        unset($_SESSION['github_auth_flash'], $_SESSION['github_auth_error']);
+        if ($message === null && is_string($gh_error)) {
+            $message = $gh_error;
+        }
+        $this->templates->_render('apps', 'wizard', 'new-app', [
+            'message' => $message,
+            'saved_notice' => is_string($gh_flash) ? $gh_flash : null,
+            'github' => $this->_github_ui('apps/create', true),
+        ]);
+    }
+
+    function branches(): void {
+        $this->trongate_security->make_sure_allowed();
+        $this->trongate_security->_require_workspace('apps.create', 'You do not have permission to list repository branches.');
+        try {
+            $repository = self::_repository((string) ($_GET['repository'] ?? ''));
+            $raw = $this->_github($repository . '/branches?per_page=30');
+            $names = [];
+            if (is_array($raw) && array_is_list($raw)) {
+                foreach ($raw as $entry) {
+                    if (is_array($entry) && is_string($entry['name'] ?? null) && $entry['name'] !== '') {
+                        $names[] = $entry['name'];
+                    }
+                }
+            }
+            $this->trongate_security->_json(['branches' => $names]);
+        } catch (Throwable) {
+            $this->trongate_security->_json(['branches' => []]);
+        }
     }
 
     function draft(): void {
         $this->trongate_security->make_sure_allowed();
         $this->trongate_security->_csrf();
         $this->trongate_security->_require_workspace('apps.create', 'You do not have permission to create new apps.');
-        $fields = ['repository', 'branch', 'environment', 'label', 'php_version', 'build_commands', 'php_extensions', 'health', 'wizard_step'];
+        $fields = ['repository', 'branch', 'auto_deploy', 'environment', 'label', 'php_version', 'build_commands', 'php_extensions', 'health', 'wizard_step'];
         $draft = array_intersect_key($_POST, array_flip($fields));
         if (strlen(self::_encode_json($draft)) > 131072) {
             $this->trongate_security->_json(['error' => 'Draft is too large.'], 422);
@@ -768,12 +811,34 @@ class Apps extends Trongate {
             $attrs['data-repository'] = $repository;
             $draft_updates['repository'] = $repository;
 
+            $repo_auth = $this->_github_repo_auth($repository);
+            if ($repo_auth['source'] === 'installation') {
+                $attrs['data-github-installed'] = '1';
+            }
+
             $suggested_branch = $parsed['branch'] ?? (is_string($repo_info['default_branch'] ?? null) ? $repo_info['default_branch'] : '');
             if ($suggested_branch !== '') {
                 $attrs['data-branch'] = $suggested_branch;
                 if ($parsed['branch'] !== null) {
                     $attrs['data-branch-explicit'] = '1';
                 }
+            }
+
+            try {
+                $branch_rows = $this->_github($repository . '/branches?per_page=30');
+                if (is_array($branch_rows) && array_is_list($branch_rows)) {
+                    $branch_names = [];
+                    foreach ($branch_rows as $entry) {
+                        if (is_array($entry) && is_string($entry['name'] ?? null) && $entry['name'] !== '') {
+                            $branch_names[] = $entry['name'];
+                        }
+                    }
+                    if ($branch_names !== []) {
+                        $attrs['data-branches'] = implode("\n", $branch_names);
+                    }
+                }
+            } catch (RuntimeException) {
+                // Branch suggestions are optional; manual entry always works.
             }
 
             $suggested_label = self::_suggest_label($repository);
@@ -906,7 +971,7 @@ class Apps extends Trongate {
         }
 
         // Persist the validated draft state so leaving and returning keeps progress.
-        $fields = ['repository', 'branch', 'environment', 'label', 'php_version', 'build_commands', 'php_extensions', 'health'];
+        $fields = ['repository', 'branch', 'auto_deploy', 'environment', 'label', 'php_version', 'build_commands', 'php_extensions', 'health'];
         $draft = array_intersect_key($_POST, array_flip($fields));
         foreach ($draft_updates as $k => $v) {
             $draft[$k] = $v;
@@ -995,6 +1060,16 @@ class Apps extends Trongate {
             throw new RuntimeException('This launch form has expired. Reload and try again.');
         }
         $operation = $this->_plan_launch($_POST, $_SESSION['launch_request']);
+        $actor = $this->trongate_security->_optional_actor();
+        if (is_array($actor) && empty($actor['is_owner']) && empty($actor['is_admin']) && (int) ($actor['member_id'] ?? 0) > 0) {
+            $app_id = Validate::id(trim((string) ($_POST['label'] ?? '')));
+            $this->module('team');
+            $this->team->model->_set_member_app_permissions(
+                (int) $actor['member_id'],
+                $app_id,
+                Access_policy::APP_PRESETS['maintainer']['permissions']
+            );
+        }
         $this->model->_delete_draft($this->_draft_owner());
         unset($_SESSION['app_draft']);
         $_SESSION['launch_complete'] = true;
@@ -1154,22 +1229,104 @@ class Apps extends Trongate {
     }
 
     function _github(string $path): array {
+        $headers = [
+            'Accept' => 'application/vnd.github+json',
+            'User-Agent' => 'Trongate-Cloud-Next',
+        ];
+        $repo = '';
+        if (preg_match('~^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:[/?]|$)~', ltrim($path, '/'), $match) === 1) {
+            $repo = $match[1];
+        }
+        $auth = $repo !== '' ? $this->_github_repo_auth($repo) : ['token' => '', 'source' => 'anonymous'];
+        if ($auth['token'] !== '') {
+            $headers['Authorization'] = 'Bearer ' . $auth['token'];
+        }
+        $is_authenticated = $auth['token'] !== '';
+
         try {
             $response = $this->http->request(
                 'GET',
                 'https://api.github.com/repos/' . $path,
-                ['Accept' => 'application/vnd.github+json', 'User-Agent' => 'Trongate-Cloud-Next'],
+                $headers,
                 null,
                 5,
                 15
             );
         } catch (RuntimeException) {
-            throw new RuntimeException('Could not read the public GitHub repository. Check connectivity and try again.');
+            throw new RuntimeException(
+                $is_authenticated
+                    ? 'Could not read the GitHub repository. Check connectivity and try again.'
+                    : 'Could not read the public GitHub repository. Check connectivity and try again.'
+            );
         }
         if ($response['status'] !== 200) {
-            throw new RuntimeException('Could not read the public GitHub repository. Check the repository and branch, or try again after the API rate limit resets.');
+            throw new RuntimeException(
+                $is_authenticated
+                    ? 'Could not read the GitHub repository. Check that the trongate.cloud GitHub App has access to this repository and branch.'
+                    : 'Could not read the public GitHub repository. Check the repository and branch, or try again after the API rate limit resets.'
+            );
         }
         return json_decode($response['body'], true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Resolves an optional GitHub bearer token (App installation token or connected user token)
+     * without touching the database when GitHub App is unconfigured and no user session exists.
+     *
+     * @return array{token: string, source: string}
+     */
+    private function _github_repo_auth(string $repository): array {
+        $key = strtolower($repository);
+        if (isset($this->github_repo_tokens[$key])) {
+            return $this->github_repo_tokens[$key];
+        }
+
+        $app = Github_app::from_env($this->http);
+        if ($app->can_mint_installation_tokens()) {
+            try {
+                $token = $app->repository_token($repository, ['contents' => 'read']);
+                if ($token !== '') {
+                    return $this->github_repo_tokens[$key] = ['token' => $token, 'source' => 'installation'];
+                }
+            } catch (Throwable) {
+                // Fall through to user token or anonymous public read.
+            }
+        }
+
+        $has_session_token = !empty($_SESSION['trongatetoken'])
+            || !empty($_COOKIE['trongatetoken'])
+            || !empty($_SERVER['HTTP_TRONGATETOKEN']);
+        if ($has_session_token && $app->can_sign_in()) {
+            try {
+                $actor = $this->trongate_security->_optional_actor();
+                $user_id = is_array($actor) ? (int) ($actor['user_id'] ?? 0) : 0;
+                if ($user_id > 0) {
+                    $this->module('github_auth');
+                    $this->github_auth->_use_http_client($this->http);
+                    $token_data = $this->github_auth->model->_load_token($user_id);
+                    if (is_array($token_data) && !empty($token_data['token'])) {
+                        if (!empty($token_data['expires_at']) && (int) $token_data['expires_at'] < time() + 60) {
+                            $token_data = $this->github_auth->_refresh_user_token($user_id, $token_data);
+                        }
+                        if (is_array($token_data) && !empty($token_data['token'])) {
+                            return $this->github_repo_tokens[$key] = ['token' => (string) $token_data['token'], 'source' => 'user'];
+                        }
+                    }
+                }
+            } catch (Throwable) {
+                // Fall through to anonymous public read.
+            }
+        }
+
+        return $this->github_repo_tokens[$key] = ['token' => '', 'source' => 'anonymous'];
+    }
+
+    private function _github_ui(string $return_path, bool $load_repositories): array {
+        $actor = $this->trongate_security->_optional_actor();
+        $user_id = is_array($actor) ? (int) ($actor['user_id'] ?? 0) : 0;
+        $this->module('github_auth');
+        $this->github_auth->_use_http_client($this->http);
+        return $this->github_auth->_ui_context($user_id, $return_path, $load_repositories);
     }
 
     function _release_metadata(string $repository, array $commit, string $branch = ''): array {
@@ -1231,6 +1388,22 @@ class Apps extends Trongate {
         $heartbeat = $context->heartbeat(...);
         $server = $this->records->_get(['kind' => 'server', 'id' => $p['builder']]);
         $input = $p['plan'] + ['action' => 'build', 'operation' => $id];
+        $repository = (string) ($p['plan']['repository'] ?? '');
+        if ($repository !== '') {
+            $app = Github_app::from_env($this->http);
+            if ($app->can_mint_installation_tokens()) {
+                try {
+                    $token = $app->repository_token($repository, ['contents' => 'read']);
+                    if ($token !== '') {
+                        $input['github_token'] = $token;
+                    }
+                } catch (Github_api_error $e) {
+                    if ($e->getCode() !== 404) {
+                        throw new RuntimeException('Could not authenticate with GitHub for ' . $repository . '.');
+                    }
+                }
+            }
+        }
         $r = (new Ssh($this->model))->command($server, 'tc-runtime', self::_encode_json($input), 3600, $heartbeat);
         $result = json_decode($r['out'], true);
         if ($r['exit'] !== 0 || !is_array($result)) {

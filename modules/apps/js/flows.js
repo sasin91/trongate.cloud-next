@@ -21,10 +21,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const edited = {
         branch: false,
+        auto_deploy: false,
         label: Boolean((form.elements.label?.value || '').trim()),
         build_commands: Boolean((form.elements.build_commands?.value || '').trim()),
         php_extensions: Boolean((form.elements.php_extensions?.value || '').trim()),
     };
+
+    const branchList = document.getElementById('wz-branch-list');
+    if (branchList && form.elements.branch) {
+        form.elements.branch.setAttribute('list', 'wz-branch-list');
+    }
+
+    const repoFilter = form.querySelector('[data-repo-filter]');
+    if (repoFilter) {
+        repoFilter.addEventListener('input', () => {
+            const needle = repoFilter.value.trim().toLowerCase();
+            form.querySelectorAll('.wz-choice[data-name]').forEach(card => {
+                const name = card.dataset.name || '';
+                card.hidden = needle !== '' && !name.includes(needle);
+            });
+        });
+    }
+
+    form.querySelectorAll('input[data-repo-choice]').forEach(radio => {
+        radio.addEventListener('change', () => {
+            if (!radio.checked) {
+                return;
+            }
+            if (form.elements.repository) {
+                form.elements.repository.value = radio.value;
+            }
+            const defaultBranch = radio.dataset.defaultBranch || '';
+            if (defaultBranch && form.elements.branch && !edited.branch) {
+                form.elements.branch.value = defaultBranch;
+            }
+            const autoCheckbox = form.querySelector('input[type="checkbox"][name="auto_deploy"]');
+            if (autoCheckbox && !edited.auto_deploy) {
+                autoCheckbox.checked = true;
+            }
+            summary();
+            scheduleSave();
+        });
+    });
 
     const status = document.createElement('span');
     status.className = 'draft-save';
@@ -166,6 +204,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.dataset.branch && form.elements.branch) {
             if (!edited.branch || state.dataset.branchExplicit === '1') {
                 form.elements.branch.value = state.dataset.branch;
+            }
+        }
+        if (state.dataset.branches && branchList) {
+            const names = state.dataset.branches.split('\n').filter(Boolean);
+            branchList.replaceChildren(...names.map(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                return opt;
+            }));
+        }
+        if (state.dataset.githubInstalled === '1' && !edited.auto_deploy) {
+            const autoCheckbox = form.querySelector('input[type="checkbox"][name="auto_deploy"]');
+            if (autoCheckbox) {
+                autoCheckbox.checked = true;
             }
         }
         if (state.dataset.label && form.elements.label && !edited.label && !form.elements.label.value.trim()) {

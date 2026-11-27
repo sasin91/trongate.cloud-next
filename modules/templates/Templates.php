@@ -66,6 +66,7 @@ class Templates extends Trongate {
             'app_summaries' => [],
             'overview' => null,
             'saved_notice' => null,
+            'github' => null,
             'app_logs' => null,
             'log_rates' => null,
             'inventory' => [

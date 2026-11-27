@@ -38,7 +38,26 @@ $can_delete = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id,
                         <div class="settings-field">
                             <label for="branch">Branch</label>
                             <input type="text" id="branch" name="branch" class="mono" value="<?= $e($settings['branch']) ?>" required autocomplete="off">
-                            <p class="form-hint">Branch or commit resolved when you press <strong>Deploy now</strong>.</p>
+                            <p class="form-hint">Branch or commit resolved on push or when you press <strong>Deploy now</strong>.</p>
+                        </div>
+
+                        <div class="settings-field">
+                            <input type="hidden" name="auto_deploy" value="0">
+                            <label class="settings-checkbox">
+                                <input type="checkbox" name="auto_deploy" value="1"<?= !empty($settings['auto_deploy']) ? ' checked' : '' ?>>
+                                <span>Deploy on push</span>
+                            </label>
+                            <p class="form-hint">
+                                Pushes to the branch deploy automatically through the trongate.cloud GitHub App. Turn this off to deploy only when you press <strong>Deploy now</strong>.
+                                <?php $gh = is_array($github ?? null) ? $github : []; ?>
+                                <?php if (!empty($gh['configured'])): ?>
+                                    <?php if (!empty($gh['connected']) && !empty($gh['install_url'])): ?>
+                                        <a href="<?= $e($gh['install_url']) ?>">Manage GitHub repository access ↗</a>
+                                    <?php elseif (empty($gh['connected']) && !empty($gh['connect_url'])): ?>
+                                        <a href="<?= $e($gh['connect_url']) ?>">Connect GitHub</a>
+                                    <?php endif ?>
+                                <?php endif ?>
+                            </p>
                         </div>
 
                         <div class="settings-field">

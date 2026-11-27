@@ -366,6 +366,17 @@ while IFS='=' read -r k v; do
     v="${v%\"}"
     printf 'env[%s] = "%s"\n' "$k" "$v" >> "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"
 done < /var/db/tc/runtime/panel-db.env
+
+if [ -f "$PANEL_STATE_DIR/github.env" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in
+            ''|'#'*) continue ;;
+        esac
+        v="${v#\"}"
+        v="${v%\"}"
+        printf 'env[%s] = "%s"\n' "$k" "$v" >> "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"
+    done < "$PANEL_STATE_DIR/github.env"
+fi
 chmod 0600 "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"
 
 install -o root -g wheel -m 0755 "$CONFIG_DIR/tc_panel_fpm.rc" "$PANEL_JAIL_DIR/etc/rc.d/tc_panel_fpm"

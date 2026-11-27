@@ -166,6 +166,7 @@ class Apps_model extends Model {
 
         $this->db->connection()->beginTransaction();
         try {
+            $auto_deploy = !empty($p['auto_deploy']) && (string) $p['auto_deploy'] !== '0';
             // Unique records reject concurrent submissions instead of replacing another app.
             $this->records->_insert([
                 'kind' => 'app',
@@ -176,6 +177,7 @@ class Apps_model extends Model {
                     'domain' => $spec['domain'],
                     'repository' => $repository,
                     'branch' => $branch,
+                    'auto_deploy' => $auto_deploy,
                     'php_version' => $spec['php_version'],
                     'database' => $spec['database'],
                     'build_commands' => (string) ($p['build_commands'] ?? ''),
@@ -274,6 +276,9 @@ class Apps_model extends Model {
                 'app' => $launch['app'],
                 'release' => $release,
             ];
+            if (!empty($launch['trigger']) && is_string($launch['trigger'])) {
+                $deploy_payload['trigger'] = $launch['trigger'];
+            }
             if (!empty($launch['canary'])) {
                 $deploy_payload['canary'] = true;
                 $deploy_payload['canary_weight'] = max(0, min(90, (int) ($launch['canary_weight'] ?? 10)));
@@ -380,8 +385,12 @@ class Apps_model extends Model {
                 ?? $result['canary']['slot']
                 ?? ''
             );
+            $source_trigger = (string) ($payload['trigger'] ?? $payload['launch']['trigger'] ?? '');
             $trigger = match ($job['kind']) {
-                'deploy' => !empty($payload['canary']) ? 'canary ' . (int) ($payload['canary_weight'] ?? 10) . '%' : 'deploy',
+                'deploy' => !empty($payload['canary'])
+                    ? 'canary ' . (int) ($payload['canary_weight'] ?? 10) . '%'
+                    : ($source_trigger === 'webhook' ? 'push' : 'deploy'),
+                'build' => $source_trigger === 'webhook' ? 'push' : 'build',
                 'canary-promote' => 'promote',
                 'canary-abort' => 'abort canary',
                 'canary-weight' => 'split ' . (int) ($payload['weight'] ?? 0) . '%',
@@ -459,6 +468,7 @@ class Apps_model extends Model {
             'database_name' => 'tc_' . str_replace('-', '_', $app_id),
             'settings' => [
                 'branch' => (string) ($app['branch'] ?? 'main'),
+                'auto_deploy' => !empty($app['auto_deploy']),
                 'health' => $health !== '' ? $health : '/',
                 'extensions' => $extensions,
                 'build_commands' => $build_commands,
@@ -516,6 +526,9 @@ class Apps_model extends Model {
 
         unset($app['id']);
         $app['branch'] = $branch;
+        if (array_key_exists('auto_deploy', $input)) {
+            $app['auto_deploy'] = !empty($input['auto_deploy']) && (string) $input['auto_deploy'] !== '0';
+        }
         $app['health'] = $health;
         $app['build_commands'] = $build_commands;
         $app['migration_command'] = $migration_command;
@@ -603,7 +616,13 @@ class Apps_model extends Model {
         return '';
     }
 
-    function _queue_redeploy_latest(string $id, array $source_data, bool $canary = false, int $canary_weight = 10): string {
+    function _queue_redeploy_latest(
+        string $id,
+        array $source_data,
+        bool $canary = false,
+        int $canary_weight = 10,
+        string $trigger = 'manual',
+    ): string {
         $app_id = Validate::id($id);
         $app = $this->records->_get(['kind' => 'app', 'id' => $app_id]);
         if (!empty($app['canary'])) {
@@ -611,6 +630,21 @@ class Apps_model extends Model {
         }
 
         $commit = Validate::match((string) ($source_data['commit'] ?? ''), '/^[a-f0-9]{40}$/D', 'source commit');
+        if ($trigger === 'webhook') {
+            $active_builds = $this->db->query_bind(
+                "SELECT id, payload FROM jobs WHERE kind='build' AND status IN ('pending','running') ORDER BY created DESC LIMIT 20",
+                [],
+                'statement'
+            )->fetchAll();
+            foreach ($active_builds as $active) {
+                $ap = json_decode((string) ($active['payload'] ?? ''), true) ?: [];
+                $target_app = (string) ($ap['launch']['app'] ?? $ap['plan']['app'] ?? '');
+                $target_commit = (string) ($ap['plan']['commit'] ?? '');
+                if ($target_app === $app_id && $target_commit === $commit) {
+                    return (string) $active['id'];
+                }
+            }
+        }
         $releases = array_values(array_filter(
             $this->records->_all('release'),
             static fn($r) => ($r['app'] ?? '') === $app_id
@@ -647,6 +681,9 @@ class Apps_model extends Model {
             if ($rel_commit === $commit && $artifact !== '' && $artifact !== 'pending' && $same_ext && $same_health && $same_secrets && $same_migration) {
                 $this->module('deployments');
                 $payload = ['app' => $app_id, 'release' => (string) $existing['id']];
+                if ($trigger !== 'manual') {
+                    $payload['trigger'] = $trigger;
+                }
                 if ($canary) {
                     $payload['canary'] = true;
                     $payload['canary_weight'] = max(0, min(90, $canary_weight));
@@ -690,19 +727,27 @@ class Apps_model extends Model {
             'release' => $spec,
             'metadata' => $source_data,
         ];
+        if ($trigger !== 'manual') {
+            $launch['trigger'] = $trigger;
+        }
         if ($canary) {
             $launch['canary'] = true;
             $launch['canary_weight'] = max(0, min(90, $canary_weight));
         }
 
+        $build_payload = [
+            'builder' => $target['builder'],
+            'plan' => $plan,
+            'launch' => $launch,
+        ];
+        if ($trigger !== 'manual') {
+            $build_payload['trigger'] = $trigger;
+        }
+
         return $this->enqueue(
             'build',
             'builder:' . $target['builder'],
-            [
-                'builder' => $target['builder'],
-                'plan' => $plan,
-                'launch' => $launch,
-            ]
+            $build_payload
         );
     }
 

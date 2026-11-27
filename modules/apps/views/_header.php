@@ -69,7 +69,7 @@ if ($can_team) {
                     <?php if ($repository !== ''): ?>
                         <span><?= $e($repository) ?> &middot; <?= $e($branch) ?></span>
                     <?php endif ?>
-                    <span>PHP <?= $e($php_version) ?> &middot; Manual deploys</span>
+                    <span>PHP <?= $e($php_version) ?> &middot; <?= !empty($app['auto_deploy']) ? 'Deploy on push' : 'Manual deploys' ?></span>
                 </div>
             </div>
             <?php if ($can_deploy): ?>

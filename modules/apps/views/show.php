@@ -334,6 +334,7 @@ $can_delete = $actor_ctx === null || Access_policy::can_app($actor_ctx, $app_id,
                     <dl class="ov-settings">
                         <div><dt>PHP</dt><dd><?= $e($php_version) ?></dd></div>
                         <div><dt>Branch</dt><dd><code class="ov-sha"><?= $e($branch) ?></code></dd></div>
+                        <div><dt>Deploy on push</dt><dd><?= !empty($overview['settings']['auto_deploy']) ? 'On' : 'Off' ?></dd></div>
                         <div><dt>Health check</dt><dd><code class="ov-sha"><?= $e($health_path) ?></code></dd></div>
                         <div><dt>Database</dt><dd><code class="ov-sha"><?= $e($database_name) ?></code></dd></div>
                         <div><dt>Canary</dt><dd><?= $canary !== null ? ((int) ($canary['weight'] ?? 0) . '%') : 'Off' ?></dd></div>

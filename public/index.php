@@ -35,6 +35,16 @@ if ($trimmed === 'login') {
     $path = '/apps/create';
 } elseif ($trimmed === 'dashboard') {
     $path = '/apps';
+} elseif ($trimmed === 'auth/github') {
+    $path = '/github_auth/start';
+} elseif ($trimmed === 'auth/github/callback') {
+    $path = '/github_auth/callback';
+} elseif ($trimmed === 'auth/github/installed') {
+    $path = '/github_auth/installed';
+} elseif ($trimmed === 'auth/github/disconnect') {
+    $path = '/github_auth/disconnect';
+} elseif ($trimmed === 'webhooks/github') {
+    $path = '/webhooks/github';
 } elseif ($trimmed === 'news/changelog') {
     $path = '/news/index/changelog';
 } elseif ($trimmed === 'news/writing') {
@@ -56,7 +66,7 @@ foreach (['flashdata', 'form', 'string', 'url', 'utilities'] as $helper) {
 header("Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-ancestors 'none'; form-action 'self'");
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
-session_set_cookie_params(['secure' => str_starts_with(BASE_URL, 'https://'), 'httponly' => true, 'samesite' => 'Strict']);
+session_set_cookie_params(['secure' => str_starts_with(BASE_URL, 'https://'), 'httponly' => true, 'samesite' => 'Lax']);
 ini_set('session.use_strict_mode', '1');
 session_start();
 chdir(__DIR__);

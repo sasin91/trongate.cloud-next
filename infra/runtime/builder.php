@@ -336,6 +336,10 @@ class Builder {
         $extensions = array_values(array_unique($extensions));
 
         $commands = $this->validate_commands($request['commands'] ?? '');
+        $github_token = '';
+        if (isset($request['github_token']) && $request['github_token'] !== '') {
+            $github_token = self::match($request['github_token'], '[\x21-\x7E]{10,512}');
+        }
 
         self::directory($this->root, 0700);
         $result_path = $this->root . '/' . $operation . '.json';
@@ -368,7 +372,27 @@ class Builder {
                 $source = $work . '/src';
                 $this->run(['git', 'init', $source], 120);
                 $this->run(['git', '-C', $source, 'remote', 'add', 'origin', 'https://github.com/' . $repository . '.git'], 60);
-                $this->run(['git', '-C', $source, '-c', 'protocol.file.allow=never', 'fetch', '--depth=1', 'origin', $commit], 600);
+                $fetch_cmd = ['git', '-C', $source, '-c', 'protocol.file.allow=never'];
+                $auth_config = null;
+                if ($github_token !== '') {
+                    $auth_config = $work . '/git-auth.conf';
+                    $basic = base64_encode('x-access-token:' . $github_token);
+                    $this->write_raw(
+                        $auth_config,
+                        "[http \"https://github.com/\"]\n\textraHeader = Authorization: Basic {$basic}\n",
+                        0600
+                    );
+                    $fetch_cmd[] = '-c';
+                    $fetch_cmd[] = 'include.path=' . $auth_config;
+                }
+                $fetch_cmd = array_merge($fetch_cmd, ['fetch', '--depth=1', 'origin', $commit]);
+                try {
+                    $this->run($fetch_cmd, 600);
+                } finally {
+                    if ($auth_config !== null) {
+                        self::remove_file($auth_config);
+                    }
+                }
                 $this->run(['git', '-C', $source, 'checkout', '--detach', 'FETCH_HEAD'], 120);
 
                 if ($this->run(['git', '-C', $source, 'rev-parse', 'HEAD'], 60) !== $commit) {
@@ -835,6 +859,7 @@ class Builder {
         $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text) ?? $text;
         $text = preg_replace('~(https?://)[^\s/@]+:[^\s/@]+@~i', '$1[redacted]@', $text) ?? $text;
         $text = preg_replace('/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*/i', '$1 [redacted]', $text) ?? $text;
+        $text = preg_replace('/\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{10,}\b/', '[redacted]', $text) ?? $text;
         $lines = array_values(array_filter(array_map('trim', preg_split('/\r?\n/', $text) ?: []), static fn(string $l): bool => $l !== ''));
         if ($lines === []) {
             return '';

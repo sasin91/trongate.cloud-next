@@ -29,6 +29,7 @@ $viewData += [
     'app_summaries' => $app_summaries ?? [],
     'overview' => $overview ?? null,
     'saved_notice' => $saved_notice ?? null,
+    'github' => $github ?? null,
     'app_logs' => $app_logs ?? null,
     'log_rates' => $log_rates ?? null,
     'db_info' => $db_info ?? null,

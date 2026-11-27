@@ -8,7 +8,7 @@ $dir = sys_get_temp_dir() . '/tc-team-web-' . bin2hex(random_bytes(6));
 mkdir($dir);
 putenv('TC_DSN=sqlite:' . $dir . '/state.db');
 putenv('TC_STATE=' . $dir);
-putenv('TC_BASE_URL=http://127.0.0.1:18782');
+putenv('TC_BASE_URL=http://127.0.0.1:18783');
 putenv('TC_SMTP_HOST=');
 
 $model = new Test_model('jobs');
@@ -59,7 +59,7 @@ $slopJob = $model->enqueue('deploy', 'app:slop', ['app' => 'slop', 'server' => '
 $secretJob = $model->enqueue('deploy', 'app:secret-app', ['app' => 'secret-app', 'server' => 'web', 'release' => 'rel-secret']);
 
 $proc = proc_open(
-    [PHP_BINARY, '-S', '127.0.0.1:18782', '-t', dirname(__DIR__, 3) . '/public', dirname(__DIR__, 3) . '/public/index.php'],
+    [PHP_BINARY, '-S', '127.0.0.1:18783', '-t', dirname(__DIR__, 3) . '/public', dirname(__DIR__, 3) . '/public/index.php'],
     [0 => ['pipe', 'r'], 1 => ['file', $dir . '/server.log', 'w'], 2 => ['file', $dir . '/server.log', 'a']],
     $pipes
 );
@@ -67,7 +67,7 @@ $adminCookie = $dir . '/admin.cookies';
 $tbjCookie = $dir . '/tbj.cookies';
 
 function req(string $cookieFile, ?array $body = null, string $path = '/login/login/1', bool $mx = false): array {
-    $c = curl_init('http://127.0.0.1:18782' . $path);
+    $c = curl_init('http://127.0.0.1:18783' . $path);
     curl_setopt_array($c, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HEADER => true,
@@ -158,7 +158,7 @@ try {
     }
 
     [$code, $accessAfter] = req($adminCookie, null, '/apps/access/slop');
-    if ($code !== 200 || !preg_match('~http://127\.0\.0\.1:18782(/team/accept/[a-f0-9]{64})~', $accessAfter, $m)) {
+    if ($code !== 200 || !preg_match('~http://127\.0\.0\.1:18783(/team/accept/[a-f0-9]{64})~', $accessAfter, $m)) {
         throw new RuntimeException('One-time invite URL missing after creation');
     }
     $acceptPath = $m[1];
