@@ -56,6 +56,10 @@ class Trongate {
             return $this->instances['model'] ??= new Model($this->module_name);
         }
 
+        if ($key === 'http') {
+            return $this->instances['http'] ??= new Http_client();
+        }
+
         // 3. Check if it's a previously loaded module
         if (isset($this->loaded_modules[$key])) {
             return $this->loaded_modules[$key];
