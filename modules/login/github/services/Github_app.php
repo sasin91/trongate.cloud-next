@@ -36,17 +36,23 @@ final class Github_app {
     public static function from_config(): self {
         require_once APPPATH . 'config/github.php';
 
-        $private_key = is_file(GITHUB_APP_PRIVATE_KEY_FILE) && is_readable(GITHUB_APP_PRIVATE_KEY_FILE)
-            ? (string) file_get_contents(GITHUB_APP_PRIVATE_KEY_FILE)
-            : GITHUB_APP_PRIVATE_KEY;
+        $private_key_file = self::config_value('GITHUB_APP_PRIVATE_KEY_FILE', GITHUB_APP_PRIVATE_KEY_FILE);
+        $private_key = is_file($private_key_file) && is_readable($private_key_file)
+            ? (string) file_get_contents($private_key_file)
+            : self::config_value('GITHUB_APP_PRIVATE_KEY', GITHUB_APP_PRIVATE_KEY);
 
         return new self(
-            GITHUB_APP_CLIENT_ID,
-            GITHUB_APP_CLIENT_SECRET,
+            self::config_value('GITHUB_APP_CLIENT_ID', GITHUB_APP_CLIENT_ID),
+            self::config_value('GITHUB_APP_CLIENT_SECRET', GITHUB_APP_CLIENT_SECRET),
             str_replace(['\\r\\n', '\\n', "\r\n", "\r"], "\n", trim($private_key)),
-            GITHUB_APP_SLUG,
-            GITHUB_APP_WEBHOOK_SECRET,
+            self::config_value('GITHUB_APP_SLUG', GITHUB_APP_SLUG),
+            self::config_value('GITHUB_APP_WEBHOOK_SECRET', GITHUB_APP_WEBHOOK_SECRET),
         );
+    }
+
+    private static function config_value(string $name, string $fallback): string {
+        $value = getenv($name);
+        return $value === false || $value === '' ? $fallback : $value;
     }
 
     public function slug(): string {
