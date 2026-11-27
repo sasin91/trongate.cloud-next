@@ -9,8 +9,6 @@ class Trongate {
 
     // Instance cache for lazy loading
     private array $instances = [];
-
-    private ?Closure $database_connection = null;
     
     // Loaded modules cache
     private array $loaded_modules = [];
@@ -19,22 +17,6 @@ class Trongate {
     protected ?string $module_name = '';
     protected string $parent_module = '';
     protected string $child_module = '';
-
-    /** Internal dependency hook; normal access uses the lazy http property. */
-    public function _use_http_client(?Http_client $client): void {
-        unset($this->instances['http']);
-        if ($client !== null) {
-            $this->instances['http'] = $client;
-        }
-    }
-
-    /** Internal loader hook: resolve the shared connection only when persistence is used. */
-    public function _share_database(Closure $connection): void {
-        if (isset($this->instances['model'])) {
-            throw new LogicException('Cannot change a loaded module database connection');
-        }
-        $this->database_connection = $connection;
-    }
 
     /**
      * Constructor for Trongate class.
@@ -71,11 +53,7 @@ class Trongate {
 
         // 2. Handle Model with standard lazy loading
         if ($key === 'model') {
-            return $this->instances['model'] ??= new Model($this->module_name, $this->database_connection);
-        }
-
-        if ($key === 'http') {
-            return $this->instances['http'] ??= new Http_client;
+            return $this->instances['model'] ??= new Model($this->module_name);
         }
 
         // 3. Check if it's a previously loaded module
@@ -105,7 +83,7 @@ class Trongate {
 
         // Build the controller path and class name
         $controller_class = ucfirst($target_module);
-        $controller_path = APPPATH . 'modules/' . $target_module . '/' . $controller_class . '.php';
+        $controller_path = '../modules/' . $target_module . '/' . $controller_class . '.php';
         $is_child_module = false;
 
         // If standard path doesn't exist, try child module
@@ -127,7 +105,6 @@ class Trongate {
         if (is_subclass_of($controller_class, 'Trongate') || $controller_class === 'Trongate') {
             // Trongate-extending module - pass module name to constructor
             $module_instance = new $controller_class($target_module);
-            $module_instance->_share_database($this->model->_database_source());
         } else {
             // Standalone utility class (e.g., Image, Calculator) - no framework dependencies
             $module_instance = new $controller_class();
@@ -161,7 +138,7 @@ class Trongate {
             $child_module = strtolower($bits[1]);
             $controller_class = ucfirst($child_module);
 
-            $controller_path = APPPATH . 'modules/' . $parent_module . '/' . $child_module . '/' . $controller_class . '.php';
+            $controller_path = '../modules/' . $parent_module . '/' . $child_module . '/' . $controller_class . '.php';
 
             if (file_exists($controller_path)) {
                 return [

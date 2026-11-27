@@ -22,26 +22,13 @@ class Model {
     // The module that instantiated this Model instance
     private ?string $current_module = null;
 
-    private Closure $connection;
-
     /**
      * Constructor for Model class.
      *
      * @param string|null $module_name The name of the module calling this model.
-     * @param PDO|Closure|null $connection Shared connection for a transaction spanning module models.
      */
-    public function __construct(?string $module_name = null, PDO|Closure|null $connection = null) {
+    public function __construct(?string $module_name = null) {
         $this->current_module = $module_name;
-        // Share a lazy connection source, not closures retaining parent modules.
-        $this->connection = $connection instanceof Closure ? $connection : static function () use ($connection): PDO {
-            static $resolved = null;
-            return $resolved ??= $connection ?? (new Db())->connection();
-        };
-    }
-
-    /** Internal loader hook; obtaining the source does not open the database. */
-    public function _database_source(): Closure {
-        return $this->connection;
     }
 
     /**
@@ -70,7 +57,7 @@ class Model {
 
         // Handle primary database (always accessible)
         if ($key === 'db') {
-            return $this->db_instances[$key] = new Db($this->current_module, null, ($this->connection)());
+            return $this->db_instances[$key] = new Db($this->current_module);
         }
 
         // Handle alternative database groups
@@ -117,7 +104,7 @@ class Model {
 
         // Build the controller path and class name
         $controller_class = ucfirst($target_module);
-        $controller_path = APPPATH . 'modules/' . $target_module . '/' . $controller_class . '.php';
+        $controller_path = '../modules/' . $target_module . '/' . $controller_class . '.php';
         $is_child_module = false;
 
         // If standard path doesn't exist, try child module
@@ -137,9 +124,6 @@ class Model {
         
         // Create the module instance
         $module_instance = new $controller_class($target_module);
-        if ($module_instance instanceof Trongate) {
-            $module_instance->_share_database($this->connection);
-        }
         
         // Store the module instance using the original target_module as key
         $this->loaded_modules[$target_module] = $module_instance;
@@ -169,7 +153,7 @@ class Model {
             $child_module = strtolower($bits[1]);
             $controller_class = ucfirst($child_module);
 
-            $controller_path = APPPATH . 'modules/' . $parent_module . '/' . $child_module . '/' . $controller_class . '.php';
+            $controller_path = '../modules/' . $parent_module . '/' . $child_module . '/' . $controller_class . '.php';
 
             if (file_exists($controller_path)) {
                 return [
@@ -236,7 +220,7 @@ class Model {
      * @return bool True if it looks like a module might exist, false otherwise.
      */
     private function is_potential_module(string $key): bool {
-        $module_path = APPPATH . 'modules/' . strtolower($key) . '/' . ucfirst($key) . '.php';
+        $module_path = '../modules/' . strtolower($key) . '/' . ucfirst($key) . '.php';
         return file_exists($module_path);
     }
 
@@ -284,7 +268,7 @@ class Model {
         }
 
         // Instantiate the model and cache it
-        $this->loaded_models[$module_name] = new $model_class($module_name, $this->connection);
+        $this->loaded_models[$module_name] = new $model_class($module_name);
     }
 
     /**
@@ -299,7 +283,7 @@ class Model {
         $possible_paths = [];
 
         // Priority 1: Standard module path
-        $possible_paths[] = APPPATH . 'modules/' . $module_name . '/' . $model_class . '.php';
+        $possible_paths[] = '../modules/' . $module_name . '/' . $model_class . '.php';
 
         // Priority 2: Child module path (for parent-child module structure)
         if (strpos($module_name, '-') !== false) {
@@ -309,7 +293,7 @@ class Model {
                 $parent_module = strtolower($bits[0]);
                 $child_module = strtolower($bits[1]);
                 $model_class_name = ucfirst($child_module) . '_model';
-                $possible_paths[] = APPPATH . 'modules/' . $parent_module . '/' . $child_module . '/' . $model_class_name . '.php';
+                $possible_paths[] = '../modules/' . $parent_module . '/' . $child_module . '/' . $model_class_name . '.php';
             }
         }
 
