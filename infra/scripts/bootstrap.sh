@@ -226,6 +226,7 @@ install_runtime_file() {
 }
 
 install_runtime_file "$RUNTIME_SRC_DIR/runtime.php" "/usr/local/libexec/tc/runtime.php" 0644
+install_runtime_file "$RUNTIME_SRC_DIR/environment.php" "/usr/local/libexec/tc/environment.php" 0644
 install_runtime_file "$RUNTIME_SRC_DIR/builder.php" "/usr/local/libexec/tc/builder.php" 0644
 install_runtime_file "$RUNTIME_SRC_DIR/resources.php" "/usr/local/libexec/tc/resources.php" 0644
 install_runtime_file "$RUNTIME_SRC_DIR/metrics.php" "/usr/local/libexec/tc/metrics.php" 0644

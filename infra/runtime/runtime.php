@@ -1,6 +1,5 @@
 <?php
 declare(strict_types=1);
-require_once __DIR__ . '/../../modules/error_pages/Error_report.php';
 require_once __DIR__ . '/environment.php';
 
 /**
@@ -3149,7 +3148,7 @@ PHP;
     }
 
     private static function configured_pool(string $config_path = '/etc/tc-resources.json'): string {
-        $env_pool = 'zroot';
+        $env_pool = getenv('TC_POOL');
         if (is_string($env_pool) && $env_pool !== '' && preg_match('/\A[A-Za-z][A-Za-z0-9_.:-]{0,63}\z/', $env_pool) === 1) {
             return $env_pool;
         }
