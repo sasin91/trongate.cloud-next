@@ -47,6 +47,9 @@ foreach ($jobs as $job) {
     </div>
 
     <?php if ($message !== null): ?><p role="status" class="card" style="padding:14px 18px"><?= $e($message) ?></p><?php endif ?>
+    <?php if (is_array($inspection_error ?? null)): ?>
+        <p role="alert" class="notice wz-errors">Inspection error: <?= $e($inspection_error['type'] . ' at ' . $inspection_error['file'] . ':' . $inspection_error['line']) ?></p>
+    <?php endif ?>
 
     <?php if ($worker_diagnostics !== null):
         $queue = $worker_diagnostics['queue'];

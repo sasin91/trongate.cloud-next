@@ -43,6 +43,7 @@ class Jobs extends Trongate {
         }
         $message = null;
         $worker_diagnostics = null;
+        $inspection_error = null;
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->trongate_security->_csrf();
             $action = (string) ($_POST['action'] ?? '');
@@ -93,11 +94,28 @@ class Jobs extends Trongate {
             } catch (RuntimeException $error) {
                 http_response_code(422);
                 $message = $error->getMessage();
+            } catch (Throwable $error) {
+                if ($action !== 'inspect-worker') {
+                    throw $error;
+                }
+                $type_parts = explode('\\', get_class($error));
+                $path = str_replace('\\', '/', $error->getFile());
+                $app_path = strrpos($path, '/app/');
+                $file = $app_path === false ? basename($path) : substr($path, $app_path + 5);
+                $inspection_error = [
+                    'type' => end($type_parts),
+                    'file' => $file,
+                    'line' => $error->getLine(),
+                ];
+                error_log('Worker inspection failed: ' . $inspection_error['type'] . ' in ' . $file . ':' . $error->getLine());
+                http_response_code(422);
+                $message = 'Worker inspection failed unexpectedly.';
             }
         }
         $this->workspace->_render_panel('jobs', 'index', 'jobs', [
             'message' => $message,
             'worker_diagnostics' => $worker_diagnostics,
+            'inspection_error' => $inspection_error,
             'crumbs' => [['/jobs', 'Jobs']],
         ]);
     }
