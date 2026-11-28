@@ -18,11 +18,11 @@ class Panel_worker_test_model extends Model {
 }
 
 class Panel_worker_test_process extends Process {
-    function __construct(private string $response) {
+    function __construct(private string $response, private int $exit = 0, private string $error = '') {
     }
 
     function run(array $argv, string $input = '', int $timeout = 60, ?callable $heartbeat = null, array $extra_env = []): array {
-        return ['exit' => 0, 'out' => $this->response, 'err' => ''];
+        return ['exit' => $this->exit, 'out' => $this->response, 'err' => $this->error];
     }
 }
 
@@ -67,7 +67,21 @@ if (!$rejected) {
     throw new RuntimeException('Invalid PHP error location was accepted.');
 }
 
+$ssh = new Ssh(
+    new Panel_worker_test_model('servers'),
+    new Panel_worker_test_process('', 255, 'Permission denied (publickey).')
+);
+try {
+    $ssh->inspect_panel_worker($server);
+} catch (RuntimeException $error) {
+    if ($error->getMessage() !== 'The server rejected the SSH key. Check the SSH username and use the private key matching the public key installed on this server.') {
+        throw $error;
+    }
+    echo "SSH error classified\n";
+}
+
 echo "sanitized PHP error transport passed\n";
 ?>
 --EXPECT--
+SSH error classified
 sanitized PHP error transport passed

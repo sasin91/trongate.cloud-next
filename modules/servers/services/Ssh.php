@@ -90,16 +90,10 @@ final class Ssh {
     function inspect(array $s): array {
         $r = $this->command($s, 'tc-runtime', self::_encode_json(['action' => 'inspect-host']), 30);
         if ($r['exit'] !== 0) {
-            $error = strtolower($r['err']);
-            $message = match (true) {
-                str_contains($error, 'invalid format'), str_contains($error, 'error in libcrypto') => 'The SSH private key could not be read. Paste the complete private key, including its BEGIN and END lines.',
-                str_contains($error, 'permission denied') => 'The server rejected the SSH key. Check the SSH username and use the private key matching the public key installed on this server.',
-                str_contains($error, 'host key verification failed'), str_contains($error, 'remote host identification has changed') => 'The server SSH identity has changed. Reconnect the server to check its new identity.',
-                str_contains($error, 'connection refused') => 'The server refused the SSH connection. Check its SSH port and that SSH is running.',
-                str_contains($error, 'timed out'), str_contains($error, 'no route to host') => 'The SSH server could not be reached. Check its address, firewall, and SSH port.',
-                default => 'The server readiness check failed. Check SSH access and the tc-runtime forced command.',
-            };
-            throw new RuntimeException($message);
+            throw new RuntimeException($this->ssh_failure_message(
+                $r['err'],
+                'The server readiness check failed. Check SSH access and the tc-runtime forced command.'
+            ));
         }
 
         $data = json_decode($r['out'], true);
@@ -194,7 +188,10 @@ final class Ssh {
         Validate::server($server);
         $r = $this->command($server, 'tc-runtime', self::_encode_json(['action' => 'inspect-panel-worker']), 30);
         if ($r['exit'] !== 0) {
-            throw new RuntimeException('Could not inspect the panel worker over the pinned SSH connection.');
+            throw new RuntimeException($this->ssh_failure_message(
+                $r['err'],
+                'Could not inspect the panel worker over the pinned SSH connection.'
+            ));
         }
 
         $data = json_decode($r['out'], true);
@@ -250,6 +247,18 @@ final class Ssh {
             'worker_source_sha256' => $source_hash,
             'latest_php_error' => $latest_php_error,
         ];
+    }
+
+    private function ssh_failure_message(string $stderr, string $fallback): string {
+        $error = strtolower($stderr);
+        return match (true) {
+            str_contains($error, 'invalid format'), str_contains($error, 'error in libcrypto') => 'The SSH private key could not be read. Paste the complete private key, including its BEGIN and END lines.',
+            str_contains($error, 'permission denied') => 'The server rejected the SSH key. Check the SSH username and use the private key matching the public key installed on this server.',
+            str_contains($error, 'host key verification failed'), str_contains($error, 'remote host identification has changed') => 'The server SSH identity has changed. Reconnect the server to check its new identity.',
+            str_contains($error, 'connection refused') => 'The server refused the SSH connection. Check its SSH port and that SSH is running.',
+            str_contains($error, 'timed out'), str_contains($error, 'no route to host') => 'The SSH server could not be reached. Check its address, firewall, and SSH port.',
+            default => $fallback,
+        };
     }
 
     function runtime(array $server, array $request, ?callable $heartbeat = null): array {
