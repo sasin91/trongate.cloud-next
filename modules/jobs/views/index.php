@@ -60,6 +60,8 @@ foreach ($jobs as $job) {
             <p>tc_panel jail: <?= $worker['panel_jail_running'] ? 'running' : 'not running' ?>; tc_worker service: <?= $worker['worker_service_active'] ? 'active' : 'inactive' ?>.</p>
             <p>PHP worker process counts across three samples: <?= $samples ? $e(implode(', ', $samples)) : 'not sampled (panel jail is stopped)' ?>.</p>
             <p>Deployed worker file matches this panel deployment: <?= $worker['worker_source_matches_panel'] === null ? 'unavailable' : ($worker['worker_source_matches_panel'] ? 'yes' : 'no') ?>.</p>
+            <?php $php_error = $worker['latest_php_error'] ?? null; ?>
+            <p>Latest uncaught panel PHP error: <?= $php_error === null ? 'not found in the log' : $e($php_error['type'] . ' at ' . $php_error['file'] . ':' . $php_error['line']) ?>.</p>
         </section>
     <?php endif ?>
 

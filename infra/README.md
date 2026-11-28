@@ -94,7 +94,8 @@ printf '{"action":"inspect-host"}\n' | jexec tc_panel ssh -i /var/db/tc/panel/ho
 # Expected: JSON with "status":"succeeded", "protocol":2, "os":"freebsd", "application_ready":true
 
 printf '{"action":"inspect-panel-worker"}\n' | jexec tc_panel ssh -i /var/db/tc/panel/host-key tc-agent@10.99.0.1
-# Expected: read-only tc_panel jail, tc_worker service, PHP worker process, and deployed worker fingerprint status
+# Expected: read-only tc_panel jail, tc_worker service, PHP worker process, and deployed worker fingerprint
+# plus the latest uncaught PHP error type/source location (never its message)
 
 jexec tc_panel ssh -i /var/db/tc/panel/host-key tc-agent@10.99.0.1 "id" </dev/null
 # Expected: JSON error from tc-runtime (never shell output)

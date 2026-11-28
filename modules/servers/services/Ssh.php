@@ -198,6 +198,7 @@ final class Ssh {
             || !is_bool($data['panel_jail_running'] ?? null)
             || !is_bool($data['worker_service_active'] ?? null)
             || !is_array($data['worker_process_samples'] ?? null)
+            || !array_key_exists('latest_php_error', $data)
         ) {
             throw new RuntimeException('The host returned an invalid panel-worker inspection response.');
         }
@@ -215,11 +216,33 @@ final class Ssh {
             throw new RuntimeException('The host returned an invalid worker source fingerprint.');
         }
 
+        $latest_php_error = $data['latest_php_error'];
+        if ($latest_php_error !== null) {
+            if (
+                !is_array($latest_php_error)
+                || !is_string($latest_php_error['type'] ?? null)
+                || preg_match('/\A[A-Za-z_][A-Za-z0-9_]*\z/D', $latest_php_error['type']) !== 1
+                || !is_string($latest_php_error['file'] ?? null)
+                || preg_match('/\A[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_.-]+)*\z/D', $latest_php_error['file']) !== 1
+                || preg_match('~(?:\A|/)\.\.?(/|\z)~', $latest_php_error['file']) === 1
+                || !is_int($latest_php_error['line'] ?? null)
+                || $latest_php_error['line'] < 1
+            ) {
+                throw new RuntimeException('The host returned an invalid panel PHP error location.');
+            }
+            $latest_php_error = [
+                'type' => $latest_php_error['type'],
+                'file' => $latest_php_error['file'],
+                'line' => $latest_php_error['line'],
+            ];
+        }
+
         return [
             'panel_jail_running' => $data['panel_jail_running'],
             'worker_service_active' => $data['worker_service_active'],
             'worker_process_samples' => $samples,
             'worker_source_sha256' => $source_hash,
+            'latest_php_error' => $latest_php_error,
         ];
     }
 

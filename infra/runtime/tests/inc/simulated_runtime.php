@@ -33,6 +33,9 @@ class Freebsd_simulated_runtime extends Runtime {
         $worker_source = $this->jails_root . '/tc_panel/app/modules/jobs/worker.php';
         self::directory(dirname($worker_source), 0755);
         file_put_contents($worker_source, 'worker source');
+        $panel_log = $this->jails_root . '/tc_panel/var/log/php-fpm.log';
+        self::directory(dirname($panel_log), 0755);
+        file_put_contents($panel_log, '');
     }
 
     public function path_exists(string $path): bool {

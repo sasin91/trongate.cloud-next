@@ -324,6 +324,7 @@ class Runtime {
     }
 
     public function inspect_panel_worker(): array {
+        $latest_php_error = $this->latest_panel_php_error();
         if ($this->probe(['jls', '-j', 'tc_panel', 'name'], 5) === null) {
             return [
                 'status' => 'succeeded',
@@ -331,6 +332,7 @@ class Runtime {
                 'worker_service_active' => false,
                 'worker_process_samples' => [],
                 'worker_source_sha256' => null,
+                'latest_php_error' => $latest_php_error,
             ];
         }
 
@@ -369,7 +371,45 @@ class Runtime {
             'worker_service_active' => $service_active,
             'worker_process_samples' => $process_samples,
             'worker_source_sha256' => $source_hash,
+            'latest_php_error' => $latest_php_error,
         ];
+    }
+
+    private function latest_panel_php_error(): ?array {
+        $path = $this->jails_root . '/tc_panel/var/log/php-fpm.log';
+        if (!is_file($path)) {
+            return null;
+        }
+        if (!is_readable($path)) {
+            throw new RuntimeException('Could not read the panel PHP-FPM error log.');
+        }
+
+        $lines = preg_split('/\r\n|\n|\r/', self::read_tail($path, 262144)) ?: [];
+        for ($index = count($lines) - 1; $index >= 0; $index--) {
+            $line = $lines[$index];
+            $patterns = [
+                '/\bUncaught\s+([A-Za-z_\\\\][A-Za-z0-9_\\\\]*)\b.*\s+in\s+\/app\/([A-Za-z0-9_.\/-]+):([0-9]+)\s*$/D',
+                '/\bUncaught\s+([A-Za-z_\\\\][A-Za-z0-9_\\\\]*)\b.*\s+in\s+\/app\/([A-Za-z0-9_.\/-]+)\s+on line\s+([0-9]+)\s*$/D',
+            ];
+            foreach ($patterns as $pattern) {
+                if (preg_match($pattern, $line, $matches) !== 1) {
+                    continue;
+                }
+
+                $file = $matches[2];
+                if (preg_match('~(?:\A|/)\.\.?(/|\z)~', $file) === 1) {
+                    continue;
+                }
+                $type_parts = explode('\\', $matches[1]);
+                return [
+                    'type' => end($type_parts),
+                    'file' => $file,
+                    'line' => (int) $matches[3],
+                ];
+            }
+        }
+
+        return null;
     }
 
     public function allocate_ip(string $app, string $slot): string {
