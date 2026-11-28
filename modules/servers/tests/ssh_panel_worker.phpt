@@ -109,7 +109,9 @@ try {
 $ssh = new Ssh(
     new Panel_worker_test_model('servers'),
     new Panel_worker_test_process(
-        json_encode(['status' => 'uncertain', 'error' => 'RuntimeException', 'reason' => 'private failure detail']),
+        "PHP Warning: sanitized startup warning\n"
+            . json_encode(['status' => 'uncertain', 'error' => 'RuntimeException', 'reason' => 'private failure detail'])
+            . "\n",
         1
     )
 );

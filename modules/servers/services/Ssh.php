@@ -189,6 +189,18 @@ final class Ssh {
         $r = $this->command($server, 'tc-runtime', self::_encode_json(['action' => 'inspect-panel-worker']), 30);
         if ($r['exit'] !== 0) {
             $remote = json_decode($r['out'], true);
+            if (!is_array($remote)) {
+                $lines = preg_split('/\r\n|\n|\r/', trim($r['out'])) ?: [];
+                for ($index = count($lines) - 1; $index >= 0; $index--) {
+                    if (trim($lines[$index]) === '') {
+                        continue;
+                    }
+                    $remote = json_decode($lines[$index], true);
+                    if (is_array($remote)) {
+                        break;
+                    }
+                }
+            }
             if (
                 is_array($remote)
                 && is_string($remote['error'] ?? null)
