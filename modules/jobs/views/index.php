@@ -53,18 +53,22 @@ foreach ($jobs as $job) {
 
     <?php if ($worker_diagnostics !== null):
         $queue = $worker_diagnostics['queue'];
-        $worker = $worker_diagnostics['worker'];
+        $worker = is_array($worker_diagnostics['worker'] ?? null) ? $worker_diagnostics['worker'] : null;
         $samples = array_map('intval', $worker['worker_process_samples'] ?? []);
     ?>
         <section class="ov-card ov-pad" aria-labelledby="worker-diagnostics-heading">
             <h2 id="worker-diagnostics-heading">Worker diagnostics</h2>
             <p>Queue: <?= $e($queue['status']) ?>; claim attempts: <?= (int) $queue['attempts'] ?>; lease active: <?= $queue['lease_active'] ? 'yes' : 'no' ?>.</p>
             <p>Resource lock: <?= $e($queue['resource_lock']) ?><?= $queue['blocking_job_status'] !== null ? ' (blocking job: ' . $e($queue['blocking_job_status']) . ')' : '' ?>.</p>
-            <p>tc_panel jail: <?= $worker['panel_jail_running'] ? 'running' : 'not running' ?>; tc_worker service: <?= $worker['worker_service_active'] ? 'active' : 'inactive' ?>.</p>
-            <p>PHP worker process counts across three samples: <?= $samples ? $e(implode(', ', $samples)) : 'not sampled (panel jail is stopped)' ?>.</p>
-            <p>Deployed worker file matches this panel deployment: <?= $worker['worker_source_matches_panel'] === null ? 'unavailable' : ($worker['worker_source_matches_panel'] ? 'yes' : 'no') ?>.</p>
-            <?php $php_error = $worker['latest_php_error'] ?? null; ?>
-            <p>Latest uncaught panel PHP error: <?= $php_error === null ? 'not found in the log' : $e($php_error['type'] . ' at ' . $php_error['file'] . ':' . $php_error['line']) ?>.</p>
+            <?php if ($worker === null): ?>
+                <p>tc_panel jail and worker process details: unavailable because the pinned SSH inspection failed.</p>
+            <?php else: ?>
+                <p>tc_panel jail: <?= $worker['panel_jail_running'] ? 'running' : 'not running' ?>; tc_worker service: <?= $worker['worker_service_active'] ? 'active' : 'inactive' ?>.</p>
+                <p>PHP worker process counts across three samples: <?= $samples ? $e(implode(', ', $samples)) : 'not sampled (panel jail is stopped)' ?>.</p>
+                <p>Deployed worker file matches this panel deployment: <?= $worker['worker_source_matches_panel'] === null ? 'unavailable' : ($worker['worker_source_matches_panel'] ? 'yes' : 'no') ?>.</p>
+                <?php $php_error = $worker['latest_php_error'] ?? null; ?>
+                <p>Latest uncaught panel PHP error: <?= $php_error === null ? 'not found in the log' : $e($php_error['type'] . ' at ' . $php_error['file'] . ':' . $php_error['line']) ?>.</p>
+            <?php endif ?>
         </section>
     <?php endif ?>
 

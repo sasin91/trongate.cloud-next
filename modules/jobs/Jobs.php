@@ -72,7 +72,9 @@ class Jobs extends Trongate {
                     }
 
                     $queue = $this->model->_diagnostics($operation);
+                    $worker_diagnostics = ['queue' => $queue, 'worker' => null];
                     $worker = Modules::run('servers/_inspect_panel_worker', $server_id[1]);
+                    $worker_diagnostics['worker'] = $worker;
                     $local_source_hash = hash_file('sha256', APPPATH . 'modules/jobs/worker.php');
                     if ($local_source_hash === false) {
                         throw new RuntimeException('Could not read the deployed worker source file.');
