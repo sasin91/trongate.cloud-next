@@ -16,6 +16,7 @@ tc_monitor_start() {
     fi
     set -a
     [ -f /var/db/tc/panel/db.env ] && . /var/db/tc/panel/db.env
+    [ -f /var/db/tc/panel/panel.env ] && . /var/db/tc/panel/panel.env
     set +a
     export PHP_INI_SCAN_DIR="/usr/local/etc/php-base:/etc/tc/php.d"
     export TC_ENV="production"

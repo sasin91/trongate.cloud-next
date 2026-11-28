@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require APPPATH . '/engine/cli_bootstrap.php';
+require dirname(__DIR__, 2) . '/engine/cli_bootstrap.php';
 require_once APPPATH . '/modules/security/services/Encryptor.php';
 require_once APPPATH . '/modules/log/Log.php';
 umask(0077);

@@ -353,6 +353,11 @@ cp /var/db/tc/runtime/panel-db.env "$PANEL_STATE_DIR/db.env"
 chown 80:80 "$PANEL_STATE_DIR/db.env"
 chmod 0600 "$PANEL_STATE_DIR/db.env"
 
+# CLI services (tc_worker, tc_monitor) need the same base URL as PHP-FPM.
+printf 'TC_BASE_URL="%s"\n' "$PANEL_BASE_URL" > "$PANEL_STATE_DIR/panel.env"
+chown 80:80 "$PANEL_STATE_DIR/panel.env"
+chmod 0600 "$PANEL_STATE_DIR/panel.env"
+
 cat <<EOF > "$PANEL_JAIL_DIR/etc/tc/php-fpm.conf"
 [global]
 pid = /var/run/php-fpm/php-fpm.pid
