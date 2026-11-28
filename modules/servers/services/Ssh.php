@@ -188,6 +188,15 @@ final class Ssh {
         Validate::server($server);
         $r = $this->command($server, 'tc-runtime', self::_encode_json(['action' => 'inspect-panel-worker']), 30);
         if ($r['exit'] !== 0) {
+            $remote = json_decode($r['out'], true);
+            if (
+                is_array($remote)
+                && is_string($remote['error'] ?? null)
+                && preg_match('/\A[A-Za-z_][A-Za-z0-9_\\\\]*\z/D', $remote['error']) === 1
+            ) {
+                $type_parts = explode('\\', $remote['error']);
+                throw new RuntimeException('The remote tc-runtime inspection failed (' . end($type_parts) . ').');
+            }
             throw new RuntimeException($this->ssh_failure_message(
                 $r['err'],
                 'Could not inspect the panel worker over the pinned SSH connection.'
@@ -257,6 +266,7 @@ final class Ssh {
             str_contains($error, 'host key verification failed'), str_contains($error, 'remote host identification has changed') => 'The server SSH identity has changed. Reconnect the server to check its new identity.',
             str_contains($error, 'connection refused') => 'The server refused the SSH connection. Check its SSH port and that SSH is running.',
             str_contains($error, 'timed out'), str_contains($error, 'no route to host') => 'The SSH server could not be reached. Check its address, firewall, and SSH port.',
+            str_contains($error, 'operation not permitted'), str_contains($error, 'administratively prohibited') => 'The panel jail cannot open the SSH connection. Check the host PF rule and the panel-to-host route.',
             default => $fallback,
         };
     }

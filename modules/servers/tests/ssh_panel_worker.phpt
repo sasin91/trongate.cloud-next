@@ -80,8 +80,39 @@ try {
     echo "SSH error classified\n";
 }
 
+$ssh = new Ssh(
+    new Panel_worker_test_model('servers'),
+    new Panel_worker_test_process('', 255, 'connect to host 10.99.0.1 port 22: Operation not permitted')
+);
+try {
+    $ssh->inspect_panel_worker($server);
+} catch (RuntimeException $error) {
+    if ($error->getMessage() !== 'The panel jail cannot open the SSH connection. Check the host PF rule and the panel-to-host route.') {
+        throw $error;
+    }
+    echo "panel route error classified\n";
+}
+
+$ssh = new Ssh(
+    new Panel_worker_test_model('servers'),
+    new Panel_worker_test_process(
+        json_encode(['status' => 'uncertain', 'error' => 'RuntimeException', 'reason' => 'private failure detail']),
+        1
+    )
+);
+try {
+    $ssh->inspect_panel_worker($server);
+} catch (RuntimeException $error) {
+    if ($error->getMessage() !== 'The remote tc-runtime inspection failed (RuntimeException).') {
+        throw $error;
+    }
+    echo "remote runtime error classified\n";
+}
+
 echo "sanitized PHP error transport passed\n";
 ?>
 --EXPECT--
 SSH error classified
+panel route error classified
+remote runtime error classified
 sanitized PHP error transport passed
