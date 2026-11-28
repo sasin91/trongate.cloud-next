@@ -8,10 +8,6 @@ require APPPATH . 'engine/Process.php';
 require APPPATH . 'modules/validation/services/Validate.php';
 require APPPATH . 'modules/servers/services/Ssh.php';
 
-function state_dir(): string {
-    return sys_get_temp_dir();
-}
-
 class Panel_worker_test_model extends Model {
     public function __call(string $method, array $arguments): mixed {
         if ($method === 'secret') {

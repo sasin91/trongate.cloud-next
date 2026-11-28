@@ -38,8 +38,14 @@ final class Ssh {
         if (!preg_match('/^ssh-ed25519 [A-Za-z0-9+\/=]+$/D', $s['host_key'] ?? '')) {
             throw new RuntimeException('Host identity not confirmed');
         }
-        $dir = state_dir() . '/ssh-' . bin2hex(random_bytes(12));
-        mkdir($dir, 0700);
+        $dir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'tc-ssh-' . bin2hex(random_bytes(12));
+        if (!mkdir($dir, 0700)) {
+            throw new RuntimeException('Could not create a private SSH credentials directory.');
+        }
+        if (!chmod($dir, 0700)) {
+            rmdir($dir);
+            throw new RuntimeException('Could not secure the SSH credentials directory.');
+        }
         try {
             $key = str_replace(["\r\n", "\r"], "\n", $this->model->secret($s['credential']));
             file_put_contents($dir . '/identity', trim($key) . "\n");
