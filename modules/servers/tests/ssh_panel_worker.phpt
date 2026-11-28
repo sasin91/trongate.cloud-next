@@ -122,6 +122,32 @@ try {
     echo "remote runtime error classified\n";
 }
 
+$ssh = new Ssh(
+    new Panel_worker_test_model('servers'),
+    new Panel_worker_test_process('unexpected banner text', 255)
+);
+try {
+    $ssh->inspect_panel_worker($server);
+} catch (RuntimeException $error) {
+    if ($error->getMessage() !== 'SSH returned a non-protocol response (exit code 255, stdout 22 bytes).') {
+        throw $error;
+    }
+    echo "non-protocol output classified\n";
+}
+
+$ssh = new Ssh(
+    new Panel_worker_test_model('servers'),
+    new Panel_worker_test_process('', 255)
+);
+try {
+    $ssh->inspect_panel_worker($server);
+} catch (RuntimeException $error) {
+    if ($error->getMessage() !== 'SSH exited with code 255 without a response (stderr 0 bytes).') {
+        throw $error;
+    }
+    echo "silent exit classified\n";
+}
+
 echo "sanitized PHP error transport passed\n";
 ?>
 --EXPECT--
@@ -129,4 +155,6 @@ SSH error classified
 panel route error classified
 doas error classified
 remote runtime error classified
+non-protocol output classified
+silent exit classified
 sanitized PHP error transport passed

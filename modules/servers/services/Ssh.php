@@ -197,9 +197,15 @@ final class Ssh {
                 $type_parts = explode('\\', $remote['error']);
                 throw new RuntimeException('The remote tc-runtime inspection failed (' . end($type_parts) . ').');
             }
+            if ($r['out'] !== '') {
+                throw new RuntimeException(
+                    'SSH returned a non-protocol response (exit code ' . $r['exit']
+                    . ', stdout ' . strlen($r['out']) . ' bytes).'
+                );
+            }
             throw new RuntimeException($this->ssh_failure_message(
                 $r['err'],
-                'Could not inspect the panel worker over the pinned SSH connection.'
+                'SSH exited with code ' . $r['exit'] . ' without a response (stderr ' . strlen($r['err']) . ' bytes).'
             ));
         }
 
@@ -270,7 +276,6 @@ final class Ssh {
             str_contains($error, 'operation not permitted'), str_contains($error, 'administratively prohibited') => 'The panel jail cannot open the SSH connection. Check the host PF rule and the panel-to-host route.',
             str_contains($error, 'could not resolve hostname') => 'The panel jail could not resolve the SSH host name.',
             str_contains($error, 'no such file or directory'), str_contains($error, 'not found') => 'The tc-runtime forced command or its PHP executable is missing on the host.',
-            $error === '' => 'SSH exited without returning a diagnostic response.',
             default => $fallback,
         };
     }
