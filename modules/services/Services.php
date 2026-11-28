@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once APPPATH . 'modules/trongate_security/Trongate_security.php';
 require_once APPPATH . 'modules/services/services/Service_spec.php';
+require_once APPPATH . 'modules/servers/services/Ssh.php';
 
 class Services extends Trongate {
     function make_sure_allowed(): void {

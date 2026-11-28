@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once APPPATH . 'modules/security/traits/Encrypted_credentials.php';
 require_once APPPATH . 'modules/validation/services/Validate.php';
+require_once APPPATH . 'modules/servers/services/Ssh.php';
 
 class Servers_model extends Model {
     use Encrypted_credentials;

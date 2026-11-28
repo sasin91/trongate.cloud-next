@@ -9,6 +9,7 @@ require_once APPPATH . 'modules/apps/services/Build_commands.php';
 require_once APPPATH . 'modules/services/services/Service_spec.php';
 require_once APPPATH . 'modules/registry/services/Module_spec.php';
 require_once APPPATH . 'modules/login/github/services/Github_app.php';
+require_once APPPATH . 'modules/servers/services/Ssh.php';
 
 class Apps extends Trongate {
     /** @var array<string, array{token: string, source: string}> */
