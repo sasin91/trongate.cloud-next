@@ -7,22 +7,23 @@
     <link rel="stylesheet" href="/css/trongate.css">
     <link rel="stylesheet" href="/templates_module/css/wizard.css">
     <link rel="stylesheet" href="/templates_module/css/panel.css">
-    <link rel="stylesheet" href="/registry_module/css/registry.css">
+    <link rel="stylesheet" href="/harbour_module/css/harbour.css">
+    <script src="/harbour_module/js/harbour.js" defer></script>
 </head>
 <body class="reg-body">
     <header class="wz-top tc-header">
         <div class="wz-top-row tc-header-row">
             <div class="tc-header-left">
-                <a class="wz-brand" href="/registry"><?php require APPPATH . 'modules/templates/views/_mark.php'; ?><span>trongate<b>.cloud</b></span></a>
+                <a class="wz-brand" href="/harbour"><?php require APPPATH . 'modules/templates/views/_mark.php'; ?><span>trongate<b>.cloud</b></span></a>
                 <span class="tc-header-sep" aria-hidden="true"></span>
                 <nav class="tc-crumbs" aria-label="Breadcrumb">
-                    <a href="/registry" aria-current="page">Module Registry</a>
+                    <a href="/harbour" aria-current="page">Module Harbour</a>
                 </nav>
             </div>
             <nav class="tc-nav">
-                <a href="/registry" aria-current="page">Marketplace</a>
+                <a href="/harbour" aria-current="page">Harbour</a>
                 <?php if ($actor !== null): ?>
-                    <a href="/registry/manage">Manage &amp; Publish</a>
+                    <a href="<?= $e($panel_url) ?>/harbour/manage">Manage &amp; Publish</a>
                     <a href="<?= $e(($panel_url !== '' ? $panel_url : '') . '/apps') ?>">Apps</a>
                 <?php else: ?>
                     <a href="<?= $e(($panel_url !== '' ? $panel_url : '') . '/login') ?>">Sign in</a>
@@ -35,9 +36,9 @@
         <section class="reg-hero">
             <div class="reg-hero-top">
                 <div>
-                    <p class="eyebrow" style="margin:0 0 6px">THE TRONGATE MODULE MARKETPLACE</p>
-                    <h1>Modules for your apps</h1>
-                    <p>Find ready-to-use modules, install a version into an app, and keep track of updates from its Modules tab. You can also publish your own module for others to use.</p>
+                    <p class="eyebrow" style="margin:0 0 6px">THE TRONGATE MODULE HARBOUR</p>
+                    <h1>Ahoy! Welcome to the Module Harbour</h1>
+                    <p>Every crate in this harbour is free and open source. Find a module, haul it aboard your app, and its Modules tab keeps a lookout for newer versions. Built something handy? Moor your own crate here for the rest of the crew.</p>
                 </div>
                 <div class="reg-badges">
                     <?php if (!empty($embeddings_configured)): ?>
@@ -48,18 +49,18 @@
                         <span class="reg-pill reg-pill-keyword">Keyword search</span>
                     <?php endif ?>
                     <?php if ($actor !== null): ?>
-                        <a href="/registry/manage" class="btn-secondary">Publish module</a>
+                        <a href="<?= $e($panel_url) ?>/harbour/manage" class="btn-secondary">Publish module</a>
                     <?php endif ?>
                 </div>
             </div>
 
-            <form method="get" action="/registry" class="reg-search-form">
+            <form method="get" action="/harbour" class="reg-search-form" data-helm="Searching the seas…">
                 <input
                     type="search"
                     name="q"
                     value="<?= $e($query) ?>"
                     class="reg-search-input"
-                    placeholder="Search by intent or name — e.g. friendly 500 error page, structured logging, rate limiting…"
+                    placeholder="What be ye looking for? e.g. friendly 500 error page, structured logging, rate limiting…"
                     autocomplete="off"
                 >
                 <?php if ($category !== ''): ?>
@@ -78,9 +79,9 @@
                 $base_q = $query !== '' ? '&q=' . rawurlencode($query) : '';
                 $mode_q = $mode !== 'hybrid' ? '&mode=' . rawurlencode($mode) : '';
                 ?>
-                <a href="/registry<?= ($base_q !== '' || $mode_q !== '') ? '?' . ltrim($base_q . $mode_q, '&') : '' ?>" class="reg-cat"<?= $category === '' ? ' aria-current="page"' : '' ?>>All</a>
+                <a href="/harbour<?= ($base_q !== '' || $mode_q !== '') ? '?' . ltrim($base_q . $mode_q, '&') : '' ?>" class="reg-cat"<?= $category === '' ? ' aria-current="page"' : '' ?>>All</a>
                 <?php foreach ($categories as $cat_key => $cat_label): ?>
-                    <a href="/registry?category=<?= $e(rawurlencode($cat_key)) . $e($base_q . $mode_q) ?>" class="reg-cat"<?= $category === $cat_key ? ' aria-current="page"' : '' ?>><?= $e($cat_label) ?></a>
+                    <a href="/harbour?category=<?= $e(rawurlencode($cat_key)) . $e($base_q . $mode_q) ?>" class="reg-cat"<?= $category === $cat_key ? ' aria-current="page"' : '' ?>><?= $e($cat_label) ?></a>
                 <?php endforeach ?>
             </nav>
         </section>
@@ -92,16 +93,16 @@
         <?php if ($results === []): ?>
             <section class="ov-card">
                 <div class="ov-pad">
-                    <h2 style="margin:0"><?= $query !== '' ? 'No modules matched "' . $e($query) . '"' : 'No modules published yet' ?></h2>
+                    <h2 style="margin:0"><?= $query !== '' ? 'No crates matched "' . $e($query) . '"' : 'The harbour is quiet. No crates have docked yet' ?></h2>
                     <p class="muted" style="font-size:14px">
                         <?php if ($query !== ''): ?>
-                            Try a broader phrase, switch search modes, or clear the category filter.
+                            Try a broader phrase, switch search modes, or clear the category filter. The right crate may be moored under another name.
                         <?php else: ?>
-                            Register a namespaced module repository (for example <code>sasin91/error_pages</code> or <code>sasin91/log</code>) and push a semver tag to publish your first immutable ZFS module release.
+                            Register a namespaced module repository (for example <code>sasin91/error_pages</code> or <code>sasin91/log</code>) and push a semver tag to dock the first crate.
                         <?php endif ?>
                     </p>
                     <?php if ($actor !== null): ?>
-                        <div><a href="/registry/manage" class="btn-primary">Open Registry Management</a></div>
+                        <div><a href="<?= $e($panel_url) ?>/harbour/manage" class="btn-primary">Manage &amp; Publish</a></div>
                     <?php endif ?>
                 </div>
             </section>
@@ -116,7 +117,7 @@
                     $sem = $mod['semantic_score'] ?? null;
                     $tags = is_array($mod['tags'] ?? null) ? $mod['tags'] : [];
                     ?>
-                    <a class="reg-card" href="/registry/show/<?= $e(rawurlencode($ns)) ?>/<?= $e(rawurlencode($name)) ?>">
+                    <a class="reg-card" href="/harbour/show/<?= $e(rawurlencode($ns)) ?>/<?= $e(rawurlencode($name)) ?>">
                         <div class="reg-card-head">
                             <div>
                                 <div class="reg-slug"><?= $e($ns) ?> / <?= $e($name) ?></div>
@@ -137,9 +138,6 @@
                             <?php elseif ($match === 'keyword'): ?>
                                 <span class="reg-pill reg-pill-keyword">Keyword</span>
                             <?php endif ?>
-                            <?php if (!empty($mod['autowire'])): ?>
-                                <span class="reg-pill reg-pill-autowire">Auto-wire</span>
-                            <?php endif ?>
                         </div>
                         <div class="reg-tags">
                             <span><?= $e($mod['license'] ?? 'MIT') ?></span>
@@ -154,5 +152,6 @@
             </div>
         <?php endif ?>
     </main>
+    <?php require __DIR__ . '/_footer.php'; ?>
 </body>
 </html>

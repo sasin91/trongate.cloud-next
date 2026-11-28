@@ -62,14 +62,13 @@ $viewData += [
     'embeddings_health' => $embeddings_health ?? null,
     'embedding_stats' => $embedding_stats ?? null,
     'new_token' => $new_token ?? null,
-    'app_modules' => $app_modules ?? [],
     'registry_results' => $registry_results ?? [],
-    'registry_versions' => $registry_versions ?? [],
-    'registry_schemas' => $registry_schemas ?? [],
+    'modules_scanned' => $modules_scanned ?? false,
+    'harbour_installed' => $harbour_installed ?? [],
+    'own_modules' => $own_modules ?? [],
     'registry_query' => $registry_query ?? '',
     'registry_category' => $registry_category ?? '',
     'registry_fallback_notice' => $registry_fallback_notice ?? null,
-    'modules_pending_deploy' => $modules_pending_deploy ?? false,
 ];
 $can_services_nav = !empty($can_services_nav);
 $can_jobs_nav = !empty($can_jobs_nav);
@@ -94,6 +93,7 @@ $can_create_apps = !empty($can_create_apps);
     <script src="/apps_module/js/app_traffic.js" defer></script>
     <script src="/services_module/js/services.js" defer></script>
     <script src="/team_module/js/team.js" defer></script>
+    <script src="/harbour_module/js/harbour.js" defer></script>
 </head>
 <body class="wz-body">
     <aside id="mx-feedback" role="status" aria-live="polite"></aside>
@@ -115,7 +115,7 @@ $can_create_apps = !empty($can_create_apps);
             <?php if ($signedIn): ?>
                 <nav class="tc-nav">
                     <a href="/apps"<?= $page === 'dashboard' ? ' aria-current="page"' : '' ?>>Apps</a>
-                    <a href="/registry"<?= $page === 'registry-manage' ? ' aria-current="page"' : '' ?>>Registry</a>
+                    <a href="/harbour"<?= $page === 'harbour-manage' ? ' aria-current="page"' : '' ?>>Harbour</a>
                     <?php if ($can_services_nav): ?>
                         <a href="/services"<?= $page === 'services' ? ' aria-current="page"' : '' ?>>Services</a>
                     <?php endif ?>

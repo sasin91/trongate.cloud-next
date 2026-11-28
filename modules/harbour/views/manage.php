@@ -6,7 +6,7 @@ $categories = is_array($registry_categories ?? null) ? $registry_categories : Mo
 $emb_health = is_array($embeddings_health ?? null) ? $embeddings_health : ['configured' => false, 'ok' => false];
 $emb_stats = is_array($embedding_stats ?? null) ? $embedding_stats : ['total' => 0, 'indexed' => 0, 'outdated' => 0];
 ?>
-<link rel="stylesheet" href="/registry_module/css/registry.css">
+<link rel="stylesheet" href="/harbour_module/css/harbour.css">
 <main class="panel tc-panel">
     <div class="section-header">
         <div>
@@ -14,7 +14,7 @@ $emb_stats = is_array($embedding_stats ?? null) ? $embedding_stats : ['total' =>
             <h1>Manage Registry &amp; Publishers</h1>
         </div>
         <div class="ov-actions">
-            <a href="/registry" class="btn-secondary">Browse Marketplace &rarr;</a>
+            <a href="/harbour" class="btn-secondary">Browse the Harbour &rarr;</a>
         </div>
     </div>
 
@@ -61,7 +61,7 @@ $emb_stats = is_array($embedding_stats ?? null) ? $embedding_stats : ['total' =>
                                     ?>
                                     <tr>
                                         <td>
-                                            <a href="/registry/show/<?= $e(rawurlencode($ns)) ?>/<?= $e(rawurlencode($name)) ?>"><strong><?= $e($ns) ?>/<?= $e($name) ?></strong></a>
+                                            <a href="/harbour/show/<?= $e(rawurlencode($ns)) ?>/<?= $e(rawurlencode($name)) ?>"><strong><?= $e($ns) ?>/<?= $e($name) ?></strong></a>
                                             <div class="muted" style="font-size:12px"><?= !empty($mod['repo_ready']) ? $e(Module_spec::git_url($ns, $name)) : 'Uploaded package' ?></div>
                                         </td>
                                         <td>
@@ -74,7 +74,7 @@ $emb_stats = is_array($embedding_stats ?? null) ? $embedding_stats : ['total' =>
                                         <td><?= $e($mod['license'] ?? 'MIT') ?></td>
                                         <td>
                                             <?php if (!empty($mod['repo_ready'])): ?>
-                                                <form method="post" action="/registry/publish" style="display:flex;gap:6px;align-items:center;margin:0">
+                                                <form method="post" action="/harbour/publish" data-helm="Setting sail…" style="display:flex;gap:6px;align-items:center;margin:0">
                                                     <?= $csrf() ?>
                                                     <input type="hidden" name="namespace" value="<?= $e($ns) ?>">
                                                     <input type="hidden" name="name" value="<?= $e($name) ?>">
@@ -101,7 +101,7 @@ $emb_stats = is_array($embedding_stats ?? null) ? $embedding_stats : ['total' =>
                 <div class="ov-pad">
                     <p class="form-hint" style="margin-top:0">Each author publishes only to their own namespace (<code>/git/&lt;namespace&gt;/&lt;module&gt;.git</code>). Pushing a semver tag (<code>v1.0.0</code>) automatically queues a root-verified ZFS dataset &amp; archive release.</p>
 
-                    <form method="post" action="/registry/create_token" class="settings-form" style="margin-bottom:14px">
+                    <form method="post" action="/harbour/create_token" class="settings-form" style="margin-bottom:14px">
                         <?= $csrf() ?>
                         <div class="service-row-2">
                             <div class="settings-field">
@@ -146,7 +146,7 @@ $emb_stats = is_array($embedding_stats ?? null) ? $embedding_stats : ['total' =>
                                             </td>
                                             <td>
                                                 <?php if (!$revoked): ?>
-                                                    <form method="post" action="/registry/revoke_token" style="margin:0" data-confirm="Revoke token <?= $e($tok['token_prefix']) ?>…?">
+                                                    <form method="post" action="/harbour/revoke_token" style="margin:0" data-confirm="Revoke token <?= $e($tok['token_prefix']) ?>…?">
                                                         <?= $csrf() ?>
                                                         <input type="hidden" name="id" value="<?= $e($tok['id']) ?>">
                                                         <button type="submit" class="btn-link">Revoke</button>
@@ -167,11 +167,11 @@ $emb_stats = is_array($embedding_stats ?? null) ? $embedding_stats : ['total' =>
             <section class="ov-card">
                 <div class="ov-card-head">
                     <h2>Upload a module</h2>
-                    <span class="muted">Publish to Marketplace</span>
+                    <span class="muted">Publish to the Harbour</span>
                 </div>
                 <div class="ov-pad">
                     <p class="form-hint" style="margin-top:0">Upload a <code>.tar.gz</code> archive containing your module files at its root. Archives are limited to 512 KiB and are verified before becoming an immutable release.</p>
-                    <form method="post" action="/registry/upload" enctype="multipart/form-data" class="settings-form">
+                    <form method="post" action="/harbour/upload" enctype="multipart/form-data" class="settings-form" data-helm="Loading the crate…">
                         <?= $csrf() ?>
                         <input type="hidden" name="MAX_FILE_SIZE" value="<?= Module_spec::MAX_UPLOAD_BYTES ?>">
                         <div class="service-row-2">
@@ -215,7 +215,7 @@ $emb_stats = is_array($embedding_stats ?? null) ? $embedding_stats : ['total' =>
                     <span class="muted">ZFS bare Git</span>
                 </div>
                 <div class="ov-pad">
-                    <form method="post" action="/registry/create_repo" class="settings-form">
+                    <form method="post" action="/harbour/create_repo" class="settings-form" data-helm="Building the dock…">
                         <?= $csrf() ?>
                         <div class="service-row-2">
                             <div class="settings-field">
@@ -291,14 +291,14 @@ $emb_stats = is_array($embedding_stats ?? null) ? $embedding_stats : ['total' =>
                         </div>
                     </dl>
                     <?php if (empty($emb_health['configured'])): ?>
-                        <p class="form-hint">Start the FreeBSD-native <strong>EmbeddingGemma 2</strong> service preset on <a href="/services">Services</a> (or set <code>EMBEDDINGS_URL</code>) to enable semantic search in the Marketplace.</p>
+                        <p class="form-hint">Start the FreeBSD-native <strong>EmbeddingGemma 2</strong> service preset on <a href="/services">Services</a> (or set <code>EMBEDDINGS_URL</code>) to enable semantic search in the Harbour.</p>
                     <?php else: ?>
                         <div class="form-actions">
-                            <form method="post" action="/registry/reindex" style="margin:0">
+                            <form method="post" action="/harbour/reindex" style="margin:0" data-helm="Charting the seas…">
                                 <?= $csrf() ?>
                                 <button type="submit" class="btn-primary">Embed missing</button>
                             </form>
-                            <form method="post" action="/registry/reindex" style="margin:0">
+                            <form method="post" action="/harbour/reindex" style="margin:0" data-helm="Charting the seas…">
                                 <?= $csrf() ?>
                                 <input type="hidden" name="force" value="1">
                                 <button type="submit" class="btn-secondary">Re-embed all</button>

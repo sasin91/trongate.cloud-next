@@ -448,7 +448,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3b. ZFS Module Registry & Marketplace Jail (tc_registry on lo1 10.99.0.3)
+# 3b. Trongate Module Harbour Jail (tc_registry on lo1 10.99.0.3)
 # ---------------------------------------------------------------------------
 JAIL_LIST="tc_mariadb tc_valkey tc_panel"
 if [ -n "$REGISTRY_DOMAIN" ]; then
@@ -481,7 +481,7 @@ if [ -n "$REGISTRY_DOMAIN" ]; then
     fi
 
     if [ -n "$PANEL_SRC_DIR" ] && [ -d "$PANEL_SRC_DIR" ]; then
-        info "Syncing registry marketplace source from $PANEL_SRC_DIR into $REG_JAIL_DIR/app"
+        info "Syncing Module Harbour source from $PANEL_SRC_DIR into $REG_JAIL_DIR/app"
         tar -cf - -C "$PANEL_SRC_DIR" --exclude='.git' --exclude='var' --exclude='tests' . | tar -xf - -C "$REG_JAIL_DIR/app"
     fi
 
@@ -582,7 +582,7 @@ EOF
         jexec tc_registry service tc_registry_fpm restart
     fi
 
-    info "Adding registry marketplace route for $REGISTRY_DOMAIN (immutable archives served from ZFS ARC)"
+    info "Adding Module Harbour route for $REGISTRY_DOMAIN (immutable archives served from ZFS ARC)"
     cat <<EOF > /var/db/tc/runtime/routes/01-tc_registry.caddy
 ${REGISTRY_DOMAIN} {
     encode zstd gzip

@@ -25,7 +25,7 @@ class Team extends Trongate {
         'services.view' => ['label' => 'View shared services', 'description' => 'View server-wide private services.'],
         'services.manage' => ['label' => 'Manage shared services', 'description' => 'Add, redeploy, and remove server-wide private services.'],
         'servers.manage' => ['label' => 'Manage servers', 'description' => 'View, inspect, connect servers, and edit resource limits.'],
-        'registry.manage' => ['label' => 'Manage module registry', 'description' => 'Register modules, mint namespace tokens, publish archives, and yank releases.'],
+        'registry.manage' => ['label' => 'Manage Module Harbour', 'description' => 'Register modules, mint namespace tokens, publish archives, and yank releases.'],
         'jobs.reconcile' => ['label' => 'Reconcile jobs', 'description' => 'Reconcile uncertain background jobs.'],
         'team.manage' => ['label' => 'Manage team', 'description' => 'Invite members and manage roles and access.'],
     ];

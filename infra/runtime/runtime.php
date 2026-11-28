@@ -839,49 +839,7 @@ class Runtime {
         self::directory($data_root, 0755);
         $this->ensure_mode($data_root, 0755);
 
-        // Resolve and verify ZFS-backed registry modules for zero-copy read-only nullfs mounting.
-        $resolved_modules = [];
-        $autowire_error_pages = false;
-        $autowire_error_404 = 'error_pages/not_found';
-        $autowire_log = false;
-        $autowire_log_channel = 'app';
-        if (!empty($spec['modules']) && is_array($spec['modules'])) {
-            require_once __DIR__ . '/registry.php';
-            $registry = new Registry_runtime($this);
-            $seen_mod_names = [];
-            foreach ($spec['modules'] as $mod_entry) {
-                if (!is_array($mod_entry)) {
-                    throw new InvalidArgumentException('Invalid registry module entry');
-                }
-                $mod = $registry->resolve_mount($mod_entry);
-                if (isset($seen_mod_names[$mod['name']])) {
-                    throw new InvalidArgumentException('Duplicate registry module mount: ' . $mod['name']);
-                }
-                $seen_mod_names[$mod['name']] = true;
-                $mod_config = is_array($mod_entry['config'] ?? null) ? $mod_entry['config'] : [];
-                $mod['config'] = $mod_config;
-                $resolved_modules[] = $mod;
-                if ($mod['autowire'] && $mod['name'] === 'error_pages') {
-                    $autowire_error_pages = true;
-                    if (isset($mod_config['error_404_route']) && is_string($mod_config['error_404_route']) && trim($mod_config['error_404_route']) !== '') {
-                        $autowire_error_404 = trim($mod_config['error_404_route']);
-                    }
-                }
-                if ($mod['autowire'] && $mod['name'] === 'log') {
-                    $autowire_log = true;
-                    if (isset($mod_config['channel_prefix']) && is_string($mod_config['channel_prefix']) && trim($mod_config['channel_prefix']) !== '') {
-                        $autowire_log_channel = trim($mod_config['channel_prefix']);
-                    }
-                }
-                // Materialize per-module PHP config file in /app/config/<module>.php when configured.
-                $cfg_target = '/app/config/' . $mod['name'] . '.php';
-                if ($mod_config !== [] && !array_key_exists($cfg_target, $files) && !in_array($mod['name'], ['config', 'database', 'custom_routing', 'site_owner'], true)) {
-                    $files[$cfg_target] = self::render_module_config_php($mod['namespace'] . '/' . $mod['name'] . '@' . $mod['version'], $mod_config);
-                }
-            }
-        }
-
-        // Patch only BASE_URL, ENV (and ERROR_404 when error_pages is auto-wired) in config/config.php.
+        // Patch only BASE_URL and ENV in config/config.php.
         if (!array_key_exists('/app/config/config.php', $files)) {
             $source_config = $release_dir . '/config/config.php';
             if (is_file($source_config)) {
@@ -894,8 +852,7 @@ class Runtime {
                     $raw_config,
                     $domain,
                     $trongate_env,
-                    true,
-                    $autowire_error_pages ? $autowire_error_404 : null
+                    true
                 );
             }
         }
@@ -976,16 +933,8 @@ class Runtime {
         $this->write($jail_root . '/var/log/php-fpm.log', '', 0640);
         $this->grant_www($jail_root . '/var/log/php-fpm.log', 0640, writable: true);
 
-        // Optional auto-prepend bootstrap for auto-wired registry modules (error_pages, log).
-        $auto_prepend = null;
-        if ($autowire_error_pages || $autowire_log) {
-            $boot_code = self::render_modules_boot_php($autowire_error_pages, $autowire_log, $autowire_log_channel);
-            $this->write($jail_root . '/etc/tc/tc_modules_boot.php', $boot_code, 0444);
-            $auto_prepend = '/etc/tc/tc_modules_boot.php';
-        }
-
         // Write jail-local php-fpm.conf with ondemand PM, socket bindings, and secrets.
-        $php_fpm_conf = $this->render_php_fpm_conf($memory_mb, $secrets, $valkey, $auto_prepend);
+        $php_fpm_conf = $this->render_php_fpm_conf($memory_mb, $secrets, $valkey);
         $this->write($jail_root . '/etc/tc/php-fpm.conf', $php_fpm_conf, 0600);
 
         // Build nullfs fstab for the jail.
@@ -1002,23 +951,6 @@ class Runtime {
                 self::directory($release_dir . '/config', 0755);
             }
             $fstab_lines[] = $overlay_dir . ' ' . $jail_root . '/app/config nullfs ro 0 0';
-        }
-        foreach ($resolved_modules as $mod) {
-            $mod_target = '/app/modules/' . $mod['name'];
-            self::directory($jail_root . $mod_target, 0755);
-            if (is_dir($release_dir)) {
-                $release_mod_dir = $release_dir . '/modules/' . $mod['name'];
-                if (is_dir($release_mod_dir)) {
-                    $has_entries = (new FilesystemIterator($release_mod_dir, FilesystemIterator::SKIP_DOTS))->valid();
-                    if ($has_entries) {
-                        throw new RuntimeException('Cannot mount registry module "' . $mod['name'] . '": release already contains modules/' . $mod['name']);
-                    }
-                } else {
-                    self::directory($release_mod_dir, 0755);
-                    $this->ensure_mode($release_mod_dir, 0755);
-                }
-            }
-            $fstab_lines[] = $mod['path'] . ' ' . $jail_root . $mod_target . ' nullfs ro 0 0';
         }
         foreach (($spec['mounts'] ?? []) as $volume => $target) {
             self::match($volume, '[a-z][a-z0-9-]{0,39}');
@@ -1062,16 +994,6 @@ class Runtime {
             'health' => $health,
             'php_version' => $php_version,
             'extensions' => $extensions,
-            'modules' => array_map(
-                static fn(array $m): array => [
-                    'namespace' => $m['namespace'],
-                    'name' => $m['name'],
-                    'version' => $m['version'],
-                    'digest' => $m['digest'],
-                    'autowire' => $m['autowire'],
-                ],
-                $resolved_modules
-            ),
             'release_path' => $release_dir,
             'memory_mb' => $memory_mb,
             'cpu_percent' => $cpu_percent,
@@ -2797,7 +2719,7 @@ class Runtime {
         ];
     }
 
-    public static function patch_config_php(string $source, string $domain, string $env = 'production', bool $https = true, ?string $error_404 = null): string {
+    public static function patch_config_php(string $source, string $domain, string $env = 'production', bool $https = true): string {
         $domain = trim($domain);
         if ($domain === '' || str_contains($domain, "\0") || str_contains($env, "\0")) {
             throw new InvalidArgumentException('Invalid Trongate configuration value.');
@@ -2806,12 +2728,6 @@ class Runtime {
             'BASE_URL' => ($https ? 'https' : 'http') . '://' . trim($domain, '/') . '/',
             'ENV' => $env,
         ];
-        if ($error_404 !== null && trim($error_404) !== '') {
-            if (str_contains($error_404, "\0")) {
-                throw new InvalidArgumentException('Invalid Trongate ERROR_404 value.');
-            }
-            $replacements['ERROR_404'] = trim($error_404);
-        }
         $found = [];
         $tokens = token_get_all($source);
         $count = count($tokens);
@@ -2914,7 +2830,7 @@ class Runtime {
             . "define('DATABASE', " . $database . ");\n";
     }
 
-    private function render_php_fpm_conf(int $memory_mb, array $secrets, ?array $valkey, ?string $auto_prepend = null): string {
+    private function render_php_fpm_conf(int $memory_mb, array $secrets, ?array $valkey): string {
         $max_children = max(2, min(64, intdiv($memory_mb, 32)));
         $worker_memory = max(32, min(256, intdiv($memory_mb, 2)));
 
@@ -2948,9 +2864,6 @@ class Runtime {
             'php_admin_value[mysqli.default_socket] = /var/run/tc/mariadb/mysqld.sock',
         ];
 
-        if ($auto_prepend !== null) {
-            $lines[] = 'php_admin_value[auto_prepend_file] = ' . $auto_prepend;
-        }
 
         if ($valkey !== null) {
             $save_path = 'unix:///var/run/tc/valkey/valkey.sock'
@@ -2974,90 +2887,6 @@ class Runtime {
         return implode("\n", $lines) . "\n";
     }
 
-    public static function render_module_config_php(string $label, array $config): string {
-        $clean = [];
-        foreach ($config as $k => $v) {
-            if (!is_string($k) || preg_match('/\A[a-zA-Z_][a-zA-Z0-9_]{0,63}\z/', $k) !== 1) {
-                continue;
-            }
-            if (is_string($v) && str_contains($v, "\0")) {
-                throw new InvalidArgumentException('Invalid module configuration value');
-            }
-            if (is_scalar($v) || $v === null) {
-                $clean[$k] = $v;
-            }
-        }
-        return "<?php\n// Managed by trongate.cloud for module " . preg_replace('/[\r\n]/', '', $label) . "\nreturn " . var_export($clean, true) . ";\n";
-    }
-
-    public static function render_modules_boot_php(bool $error_pages, bool $log, string $default_log_channel = 'app'): string {
-        $code = "<?php\n// Managed by trongate.cloud ZFS module registry auto-wiring.\n";
-        if ($log) {
-            $ch = var_export($default_log_channel, true);
-            $code .= "if (is_file('/app/modules/log/Log.php')) {\n"
-                . "    require_once '/app/modules/log/Log.php';\n"
-                . "    if (!function_exists('tc_log')) {\n"
-                . "        function tc_log(string \$channel = " . $ch . "): Log {\n"
-                . "            static \$loggers = [];\n"
-                . "            return \$loggers[\$channel] ??= new Log([new Error_log_writer('[' . \$channel . '] ')]);\n"
-                . "        }\n"
-                . "    }\n"
-                . "}\n\n";
-        }
-        if ($error_pages) {
-            $code .= <<<'PHP'
-if (is_file('/app/modules/error_pages/Error_report.php')) {
-    require_once '/app/modules/error_pages/Error_report.php';
-    $tc_send_error = static function (Error_report $report): void {
-        if (!headers_sent()) {
-            http_response_code($report->status);
-            if ($report->status === 503) {
-                header('Retry-After: 60');
-            }
-        }
-        if (Error_report::wants_json($_SERVER)) {
-            if (!headers_sent()) {
-                header('Content-Type: application/json');
-            }
-            echo json_encode(['error' => $report->message]);
-            return;
-        }
-        if (!headers_sent()) {
-            header('Content-Type: text/html; charset=utf-8');
-        }
-        $home = defined('BASE_URL') ? BASE_URL : '/';
-        $view = '/app/modules/error_pages/views/server_error.php';
-        if (is_file($view)) {
-            ob_start();
-            try {
-                require $view;
-                echo ob_get_clean();
-                return;
-            } catch (Throwable) {
-                ob_end_clean();
-            }
-        }
-        echo htmlspecialchars($report->title . '. ' . $report->message, ENT_QUOTES, 'UTF-8');
-    };
-    set_exception_handler(static function (Throwable $e) use ($tc_send_error): void {
-        error_log('Uncaught ' . get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
-        $detail = Error_report::shows_detail(defined('ENV') ? ENV : '', $_SERVER);
-        $tc_send_error(Error_report::from_exception($e, $detail));
-    });
-    register_shutdown_function(static function () use ($tc_send_error): void {
-        $error = error_get_last();
-        if ($error === null || ($error['type'] & Error_report::FATAL) === 0 || headers_sent()) {
-            return;
-        }
-        $detail = Error_report::shows_detail(defined('ENV') ? ENV : '', $_SERVER);
-        $tc_send_error(Error_report::from_fatal($error, $detail));
-    });
-}
-
-PHP;
-        }
-        return $code;
-    }
 
     private function render_jail_conf(
         string $jail_name,

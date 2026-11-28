@@ -7,7 +7,7 @@ require_once APPPATH . 'modules/security/services/Encryptor.php';
 require_once APPPATH . 'modules/apps/services/Build.php';
 require_once APPPATH . 'modules/apps/services/Build_commands.php';
 require_once APPPATH . 'modules/services/services/Service_spec.php';
-require_once APPPATH . 'modules/registry/services/Module_spec.php';
+require_once APPPATH . 'modules/harbour/services/Module_spec.php';
 require_once APPPATH . 'modules/login/github/services/Github_app.php';
 require_once APPPATH . 'modules/servers/services/Ssh.php';
 
@@ -694,132 +694,30 @@ class Apps extends Trongate {
 
         $app = $overview['app'];
         $app_id = (string) $app['id'];
-        $attached = $this->model->_app_modules($app, $overview['latest_release']);
+        $metadata = is_array($overview['latest_release']['metadata'] ?? null) ? $overview['latest_release']['metadata'] : [];
 
-        $this->module('registry');
+        $this->module('harbour');
+        $aboard = $this->harbour->model->_identify(is_array($metadata['modules'] ?? null) ? $metadata['modules'] : []);
         $q = trim((string) ($_GET['q'] ?? ''));
         $cat = trim((string) ($_GET['category'] ?? ''));
-        $search = $this->registry->model->_search($q, $cat, 'hybrid', $this->registry->_embeddings_client());
-
-        $versions_map = [];
-        $schemas_map = [];
-        foreach ($this->registry->model->_all_modules() as $rmod) {
-            $slug = (string) ($rmod['slug'] ?? '');
-            if ($slug !== '') {
-                $versions_map[$slug] = $this->registry->model->_versions_for((string) $rmod['namespace'], (string) $rmod['name']);
-                $schemas_map[$slug] = is_array($rmod['config_schema'] ?? null) ? $rmod['config_schema'] : [];
-            }
-        }
-
-        $live_mods = is_array($overview['latest_release']['spec']['modules'] ?? null)
-            ? $overview['latest_release']['spec']['modules']
-            : [];
-        $panel_norm = [];
-        foreach ($attached as $item) {
-            $panel_norm[$item['name']] = [
-                'namespace' => $item['namespace'] ?? '',
-                'version' => $item['version'] ?? '',
-                'autowire' => !empty($item['autowire']),
-                'config' => $item['config'] ?? [],
-            ];
-        }
-        $live_norm = [];
-        foreach ($live_mods as $item) {
-            if (is_array($item) && !empty($item['name'])) {
-                $live_norm[$item['name']] = [
-                    'namespace' => $item['namespace'] ?? '',
-                    'version' => $item['version'] ?? '',
-                    'autowire' => !empty($item['autowire']),
-                    'config' => $item['config'] ?? [],
-                ];
-            }
-        }
-        $pending_deploy = $panel_norm !== $live_norm;
-
-        $saved = (string) ($_GET['saved'] ?? '');
-        $saved_notice = match ($saved) {
-            'inserted' => 'Module inserted. Deploy now to mount its immutable ZFS snapshot.',
-            'updated' => 'Module version and configuration saved. Deploy now to apply.',
-            'removed' => 'Module removed from app. Deploy now to apply.',
-            default => null,
-        };
-        $err_flash = $_SESSION['app_modules_error'] ?? null;
-        unset($_SESSION['app_modules_error']);
+        $search = $this->harbour->model->_search($q, $cat, 'hybrid', $this->harbour->_embeddings_client());
 
         $this->workspace->_render_panel('apps', 'modules', 'app-modules', [
             'overview' => $overview,
-            'app_modules' => $attached,
-            'live_app_modules' => $live_mods,
+            'modules_scanned' => array_key_exists('modules', $metadata),
+            'harbour_installed' => $aboard['installed'],
+            'own_modules' => $aboard['own'],
             'registry_results' => $search['results'],
-            'registry_versions' => $versions_map,
-            'registry_schemas' => $schemas_map,
             'registry_categories' => Module_spec::CATEGORIES,
             'registry_query' => $q,
             'registry_category' => $cat,
             'registry_fallback_notice' => $search['fallback_notice'],
-            'modules_pending_deploy' => $pending_deploy,
-            'saved_notice' => $saved_notice,
-            'message' => is_string($err_flash) ? $err_flash : null,
             'crumbs' => [
                 ['/apps', 'Apps'],
                 ['/apps/show/' . rawurlencode($app_id), (string) ($app['label'] ?? $app_id)],
                 ['/apps/modules/' . rawurlencode($app_id), 'Modules'],
             ],
         ]);
-    }
-
-    function insert_module(): void {
-        $this->trongate_security->make_sure_allowed('apps');
-        $this->trongate_security->_csrf();
-        $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->_require_app($raw_app, 'settings', 'You do not have permission to manage modules for this app.');
-        $app_id = '';
-        try {
-            $app_id = Validate::id($raw_app);
-            $this->model->_save_app_module($app_id, $_POST);
-            header('Location: /apps/modules/' . rawurlencode($app_id) . '?saved=inserted', true, 303);
-            exit;
-        } catch (Throwable $e) {
-            $_SESSION['app_modules_error'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not insert module.';
-            header('Location: ' . ($app_id !== '' ? '/apps/modules/' . rawurlencode($app_id) : '/apps'), true, 303);
-            exit;
-        }
-    }
-
-    function update_module(): void {
-        $this->trongate_security->make_sure_allowed('apps');
-        $this->trongate_security->_csrf();
-        $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->_require_app($raw_app, 'settings', 'You do not have permission to configure modules for this app.');
-        $app_id = '';
-        try {
-            $app_id = Validate::id($raw_app);
-            $this->model->_save_app_module($app_id, $_POST);
-            header('Location: /apps/modules/' . rawurlencode($app_id) . '?saved=updated', true, 303);
-            exit;
-        } catch (Throwable $e) {
-            $_SESSION['app_modules_error'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not update module.';
-            header('Location: ' . ($app_id !== '' ? '/apps/modules/' . rawurlencode($app_id) : '/apps'), true, 303);
-            exit;
-        }
-    }
-
-    function remove_module(): void {
-        $this->trongate_security->make_sure_allowed('apps');
-        $this->trongate_security->_csrf();
-        $raw_app = trim((string) ($_POST['app'] ?? ''));
-        $this->_require_app($raw_app, 'settings', 'You do not have permission to remove modules from this app.');
-        $app_id = '';
-        try {
-            $app_id = Validate::id($raw_app);
-            $this->model->_remove_app_module($app_id, (string) ($_POST['name'] ?? ''));
-            header('Location: /apps/modules/' . rawurlencode($app_id) . '?saved=removed', true, 303);
-            exit;
-        } catch (Throwable $e) {
-            $_SESSION['app_modules_error'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not remove module.';
-            header('Location: ' . ($app_id !== '' ? '/apps/modules/' . rawurlencode($app_id) : '/apps'), true, 303);
-            exit;
-        }
     }
 
     private function _render_settings_error(string $app_id, string $message): void {

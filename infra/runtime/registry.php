@@ -248,14 +248,6 @@ final class Registry_runtime {
         $name = Runtime::match($request['name'] ?? null, self::MODULE_REGEX);
         $version = Runtime::match($request['version'] ?? null, self::VERSION_REGEX);
 
-        $in_use = $this->apps_using_module($namespace, $name, $version);
-        if ($in_use !== []) {
-            return [
-                'status' => 'failed',
-                'error' => 'Module version is currently mounted by active apps: ' . implode(', ', $in_use),
-            ];
-        }
-
         $dataset = $this->module_dataset($namespace, $name, $version);
         if ($this->dataset_exists($dataset)) {
             $this->runtime->run(['zfs', 'set', 'readonly=off', $dataset], 30);
@@ -273,45 +265,6 @@ final class Registry_runtime {
             'namespace' => $namespace,
             'name' => $name,
             'version' => $version,
-        ];
-    }
-
-    /**
-     * Resolves and verifies a pinned registry module dataset path for zero-copy
-     * read-only nullfs mounting into an application jail.
-     *
-     * @return array{namespace: string, name: string, version: string, path: string, digest: string, autowire: bool}
-     */
-    public function resolve_mount(array $entry): array {
-        $namespace = Runtime::match($entry['namespace'] ?? null, self::NAMESPACE_REGEX);
-        $name = Runtime::match($entry['name'] ?? null, self::MODULE_REGEX);
-        $version = Runtime::match($entry['version'] ?? null, self::VERSION_REGEX);
-        $expected_digest = isset($entry['digest']) && is_string($entry['digest']) && $entry['digest'] !== ''
-            ? Runtime::match($entry['digest'], 'sha256:[a-f0-9]{64}')
-            : null;
-        $autowire = (bool) ($entry['autowire'] ?? false);
-
-        $module_path = $this->module_path($namespace, $name, $version);
-        if (!is_dir($module_path)) {
-            throw new RuntimeException("Registry module {$namespace}/{$name}@{$version} is not materialized on this host");
-        }
-
-        $actual_digest = self::manifest_digest($module_path);
-        $meta = $this->runtime->read($this->meta_path($namespace, $name, $version));
-        if (is_array($meta) && isset($meta['digest']) && $meta['digest'] !== $actual_digest) {
-            throw new RuntimeException("Registry module {$namespace}/{$name}@{$version} failed ZFS integrity check");
-        }
-        if ($expected_digest !== null && !hash_equals($expected_digest, $actual_digest)) {
-            throw new RuntimeException("Registry module {$namespace}/{$name}@{$version} digest mismatch");
-        }
-
-        return [
-            'namespace' => $namespace,
-            'name' => $name,
-            'version' => $version,
-            'path' => $module_path,
-            'digest' => $actual_digest,
-            'autowire' => $autowire,
         ];
     }
 
@@ -564,8 +517,6 @@ final class Registry_runtime {
             'tags' => [],
             'category' => 'general',
             'php' => '>=8.2',
-            'autowire' => self::default_autowire($name),
-            'config_schema' => self::default_config_schema($name),
             'readme' => '',
         ];
 
@@ -586,36 +537,6 @@ final class Registry_runtime {
                         }
                     }
                     $meta['tags'] = array_values(array_unique(array_slice($tags, 0, 12)));
-                }
-                if (isset($decoded['autowire']) && is_array($decoded['autowire'])) {
-                    $meta['autowire'] = $decoded['autowire'];
-                }
-                if (isset($decoded['config_schema']) && is_array($decoded['config_schema'])) {
-                    $schema = [];
-                    foreach (array_slice($decoded['config_schema'], 0, 32) as $field_def) {
-                        if (!is_array($field_def) || !is_string($field_def['key'] ?? null)) {
-                            continue;
-                        }
-                        $key = trim($field_def['key']);
-                        if (preg_match('/\A[a-zA-Z_][a-zA-Z0-9_]{0,63}\z/', $key) !== 1) {
-                            continue;
-                        }
-                        $type = in_array($field_def['type'] ?? 'string', ['string', 'bool', 'int', 'select'], true)
-                            ? (string) $field_def['type']
-                            : 'string';
-                        $schema[] = [
-                            'key' => $key,
-                            'label' => substr(trim((string) ($field_def['label'] ?? $key)), 0, 120),
-                            'type' => $type,
-                            'default' => is_scalar($field_def['default'] ?? null) ? $field_def['default'] : '',
-                            'secret' => !empty($field_def['secret']),
-                            'hint' => substr(trim((string) ($field_def['hint'] ?? '')), 0, 240),
-                            'options' => is_array($field_def['options'] ?? null)
-                                ? array_values(array_filter(array_slice($field_def['options'], 0, 20), 'is_string'))
-                                : [],
-                        ];
-                    }
-                    $meta['config_schema'] = $schema;
                 }
             }
         }
@@ -649,85 +570,6 @@ final class Registry_runtime {
             $buf[] = $trimmed;
         }
         return substr(implode(' ', $buf), 0, 280);
-    }
-
-    private static function default_autowire(string $name): array {
-        if ($name === 'error_pages') {
-            return ['error_404' => 'error_pages/not_found', 'register_handlers' => true];
-        }
-        if ($name === 'log') {
-            return ['preload' => 'Log.php', 'helper' => 'tc_log'];
-        }
-        return [];
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private static function default_config_schema(string $name): array {
-        if ($name === 'error_pages') {
-            return [
-                [
-                    'key' => 'error_404_route',
-                    'label' => '404 handler route',
-                    'type' => 'string',
-                    'default' => 'error_pages/not_found',
-                    'secret' => false,
-                    'hint' => 'Patched into ERROR_404 when auto-wiring is enabled.',
-                    'options' => [],
-                ],
-                [
-                    'key' => 'retry_after_seconds',
-                    'label' => '503 Retry-After (seconds)',
-                    'type' => 'int',
-                    'default' => 60,
-                    'secret' => false,
-                    'hint' => 'Returned on schema-updating and timeout 503 responses.',
-                    'options' => [],
-                ],
-            ];
-        }
-        if ($name === 'log') {
-            return [
-                [
-                    'key' => 'channel_prefix',
-                    'label' => 'Default log channel',
-                    'type' => 'string',
-                    'default' => 'app',
-                    'secret' => false,
-                    'hint' => 'Default prefix passed to tc_log() and Error_log_writer.',
-                    'options' => [],
-                ],
-            ];
-        }
-        return [];
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function apps_using_module(string $namespace, string $name, string $version): array {
-        $apps = [];
-        foreach (glob($this->runtime->root . '/apps/*/state.json') ?: [] as $state_file) {
-            $app_id = basename(dirname($state_file));
-            $state = $this->runtime->read($state_file, []);
-            foreach (['active', 'previous', 'canary'] as $slot_key) {
-                $rel = is_array($state[$slot_key] ?? null) ? $state[$slot_key] : null;
-                if ($rel === null || !is_array($rel['modules'] ?? null)) {
-                    continue;
-                }
-                foreach ($rel['modules'] as $mod) {
-                    if (
-                        ($mod['namespace'] ?? '') === $namespace
-                        && ($mod['name'] ?? '') === $name
-                        && ($mod['version'] ?? '') === $version
-                    ) {
-                        $apps[$app_id] = true;
-                    }
-                }
-            }
-        }
-        return array_keys($apps);
     }
 
     private function ensure_dataset(string $dataset, array $props = []): void {

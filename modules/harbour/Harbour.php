@@ -5,25 +5,25 @@ require_once APPPATH . 'modules/trongate_security/Trongate_security.php';
 require_once APPPATH . 'modules/validation/services/Validate.php';
 require_once APPPATH . 'modules/servers/services/Ssh.php';
 require_once APPPATH . 'modules/news/services/Markdown.php';
-require_once APPPATH . 'modules/registry/services/Module_spec.php';
-require_once APPPATH . 'modules/registry/services/Registry_embeddings.php';
-require_once APPPATH . 'modules/registry/services/Git_http_backend.php';
+require_once APPPATH . 'modules/harbour/services/Module_spec.php';
+require_once APPPATH . 'modules/harbour/services/Registry_embeddings.php';
+require_once APPPATH . 'modules/harbour/services/Git_http_backend.php';
 
 /**
- * ZFS-backed Trongate Module Registry & Marketplace.
+ * ZFS-backed Trongate Module Harbour.
  *
  * Serves:
- *  - Public Marketplace UI (`/registry`, `/registry/show/<ns>/<name>`) with EmbeddingGemma 2 hybrid search
+ *  - Public Harbour UI (`/harbour`, `/harbour/show/<ns>/<name>`) with EmbeddingGemma 2 hybrid search
  *  - Public JSON API (`/api/v1/modules`, `/api/v1/modules/<ns>/<name>`)
  *  - Immutable archive download fallback (`/archives/<ns>/<name>/<ver>.tar.gz`)
  *  - Unprivileged Smart HTTP Git (`/git/<ns>/<name>.git/...`) with author-scoped tokens
- *  - Authenticated management UI (`/registry/manage`) & worker jobs (`_init_repo`, `_publish`, `_yank`)
+ *  - Authenticated management UI (`/harbour/manage`) & worker jobs (`_init_repo`, `_publish`, `_yank`)
  */
-class Registry extends Trongate {
+class Harbour extends Trongate {
     private ?Http_client $http_override = null;
 
     function make_sure_allowed(): void {
-        block_url('registry/make_sure_allowed');
+        block_url('harbour/make_sure_allowed');
         $this->workspace->_actor();
     }
 
@@ -40,12 +40,8 @@ class Registry extends Trongate {
         $search = $this->model->_search($query, $category, $mode, $embeddings);
         $stats = $this->model->_embedding_stats($embeddings);
 
-        $actor = $this->workspace->_optional_actor();
-        $this->module('apps');
-        $apps = $actor !== null ? $this->apps->visible_apps($actor, $this->records->_all('app')) : [];
-
-        $this->_render_marketplace('index', [
-            'title' => 'Module Registry · trongate.cloud',
+        $this->_render_harbour('index', [
+            'title' => 'Module Harbour · trongate.cloud',
             'query' => $query,
             'category' => $category,
             'mode' => $search['mode'],
@@ -55,8 +51,7 @@ class Registry extends Trongate {
             'categories' => Module_spec::CATEGORIES,
             'embeddings_configured' => $embeddings->configured(),
             'embedding_stats' => $stats,
-            'actor' => $actor,
-            'apps' => $apps,
+            'actor' => $this->workspace->_optional_actor(),
         ]);
     }
 
@@ -82,24 +77,16 @@ class Registry extends Trongate {
         }
 
         $versions = $this->model->_versions_for($namespace, $name);
-        $actor = $this->workspace->_optional_actor();
-        $this->module('apps');
-        $apps = $actor !== null ? $this->apps->visible_apps($actor, $this->records->_all('app')) : [];
         $readme_html = trim((string) ($module['readme'] ?? '')) !== ''
             ? Markdown::render((string) $module['readme'])
             : '';
 
-        $this->_render_marketplace('show', [
-            'title' => $module['slug'] . ' · Module Registry · trongate.cloud',
+        $this->_render_harbour('show', [
+            'title' => $module['slug'] . ' · Module Harbour · trongate.cloud',
             'module' => $module,
             'versions' => $versions,
             'readme_html' => $readme_html,
-            'git_url' => Module_spec::git_url($namespace, $name),
-            'latest_archive_url' => ($module['latest_version'] ?? '') !== ''
-                ? Module_spec::archive_url($namespace, $name, (string) $module['latest_version'])
-                : '',
-            'actor' => $actor,
-            'apps' => $apps,
+            'actor' => $this->workspace->_optional_actor(),
         ]);
     }
 
@@ -126,8 +113,6 @@ class Registry extends Trongate {
                 'category' => $mod['category'],
                 'tags' => $mod['tags'],
                 'latest_version' => $latest,
-                'autowire' => $mod['autowire'] ?? [],
-                'config_schema' => $mod['config_schema'] ?? [],
                 'git_url' => !empty($mod['repo_ready']) ? Module_spec::git_url($ns, $name) : null,
                 'archive_url' => $latest !== '' ? Module_spec::archive_url($ns, $name, $latest) : null,
                 'match' => $mod['match'] ?? null,
@@ -189,8 +174,6 @@ class Registry extends Trongate {
             'category' => $module['category'],
             'tags' => $module['tags'],
             'latest_version' => $module['latest_version'],
-            'autowire' => $module['autowire'] ?? [],
-            'config_schema' => $module['config_schema'] ?? [],
             'git_url' => !empty($module['repo_ready']) ? Module_spec::git_url($namespace, $name) : null,
             'versions' => $versions,
         ]);
@@ -326,13 +309,13 @@ class Registry extends Trongate {
     // -----------------------------------------------------------------------
 
     function manage(): void {
-        $this->trongate_security->make_sure_allowed('registry');
+        $this->trongate_security->make_sure_allowed('harbour');
         $embeddings = $this->_embeddings_client();
         $notice = $_SESSION['registry_notice'] ?? null;
         $new_token = $_SESSION['registry_new_token'] ?? null;
         unset($_SESSION['registry_notice'], $_SESSION['registry_new_token']);
 
-        $this->workspace->_render_panel('registry', 'manage', 'registry-manage', [
+        $this->workspace->_render_panel('harbour', 'manage', 'harbour-manage', [
             'registry_modules' => $this->model->_all_modules(),
             'registry_tokens' => $this->model->_list_tokens(),
             'registry_servers' => $this->records->_all('server'),
@@ -342,14 +325,14 @@ class Registry extends Trongate {
             'saved_notice' => is_string($notice) ? $notice : null,
             'new_token' => is_array($new_token) ? $new_token : null,
             'crumbs' => [
-                ['/registry', 'Registry'],
-                ['/registry/manage', 'Manage'],
+                ['/harbour', 'Harbour'],
+                ['/harbour/manage', 'Manage'],
             ],
         ]);
     }
 
     function create_repo(): void {
-        $this->trongate_security->make_sure_allowed('registry');
+        $this->trongate_security->make_sure_allowed('harbour');
         $this->trongate_security->_csrf();
         try {
             $module = $this->model->_save_module_repo($_POST);
@@ -363,12 +346,12 @@ class Registry extends Trongate {
         } catch (Throwable $e) {
             $_SESSION['registry_notice'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not create module repository.';
         }
-        header('Location: /registry/manage', true, 303);
+        header('Location: /harbour/manage', true, 303);
         exit;
     }
 
     function create_token(): void {
-        $this->trongate_security->make_sure_allowed('registry');
+        $this->trongate_security->make_sure_allowed('harbour');
         $this->trongate_security->_csrf();
         try {
             $actor = $this->workspace->_actor();
@@ -382,12 +365,12 @@ class Registry extends Trongate {
         } catch (Throwable $e) {
             $_SESSION['registry_notice'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not create push token.';
         }
-        header('Location: /registry/manage', true, 303);
+        header('Location: /harbour/manage', true, 303);
         exit;
     }
 
     function revoke_token(): void {
-        $this->trongate_security->make_sure_allowed('registry');
+        $this->trongate_security->make_sure_allowed('harbour');
         $this->trongate_security->_csrf();
         try {
             $this->model->_revoke_token((string) ($_POST['id'] ?? ''));
@@ -395,12 +378,12 @@ class Registry extends Trongate {
         } catch (Throwable $e) {
             $_SESSION['registry_notice'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not revoke token.';
         }
-        header('Location: /registry/manage', true, 303);
+        header('Location: /harbour/manage', true, 303);
         exit;
     }
 
     function publish(): void {
-        $this->trongate_security->make_sure_allowed('registry');
+        $this->trongate_security->make_sure_allowed('harbour');
         $this->trongate_security->_csrf();
         try {
             $ns = Module_spec::validate_namespace((string) ($_POST['namespace'] ?? ''));
@@ -417,13 +400,13 @@ class Registry extends Trongate {
             exit;
         } catch (Throwable $e) {
             $_SESSION['registry_notice'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not queue module publish.';
-            header('Location: /registry/manage', true, 303);
+            header('Location: /harbour/manage', true, 303);
             exit;
         }
     }
 
     function upload(): void {
-        $this->trongate_security->make_sure_allowed('registry');
+        $this->trongate_security->make_sure_allowed('harbour');
         $this->trongate_security->_csrf();
         try {
             $upload = $_FILES['archive'] ?? null;
@@ -471,13 +454,13 @@ class Registry extends Trongate {
             exit;
         } catch (Throwable $e) {
             $_SESSION['registry_notice'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not upload module archive.';
-            header('Location: /registry/manage', true, 303);
+            header('Location: /harbour/manage', true, 303);
             exit;
         }
     }
 
     function reindex(): void {
-        $this->trongate_security->make_sure_allowed('registry');
+        $this->trongate_security->make_sure_allowed('harbour');
         $this->trongate_security->_csrf();
         try {
             $client = $this->_embeddings_client();
@@ -490,12 +473,12 @@ class Registry extends Trongate {
         } catch (Throwable $e) {
             $_SESSION['registry_notice'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not embed registry modules.';
         }
-        header('Location: /registry/manage', true, 303);
+        header('Location: /harbour/manage', true, 303);
         exit;
     }
 
     function yank(): void {
-        $this->trongate_security->make_sure_allowed('registry');
+        $this->trongate_security->make_sure_allowed('harbour');
         $this->trongate_security->_csrf();
         try {
             $ns = Module_spec::validate_namespace((string) ($_POST['namespace'] ?? ''));
@@ -511,7 +494,7 @@ class Registry extends Trongate {
             exit;
         } catch (Throwable $e) {
             $_SESSION['registry_notice'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not queue yank.';
-            header('Location: /registry/manage', true, 303);
+            header('Location: /harbour/manage', true, 303);
             exit;
         }
     }
@@ -610,7 +593,7 @@ class Registry extends Trongate {
         $this->view($view, $data);
     }
 
-    private function _render_marketplace(string $view, array $data): void {
+    private function _render_harbour(string $view, array $data): void {
         $_SESSION['csrf_token'] ??= bin2hex(random_bytes(32));
         $e = static fn(mixed $v): string => htmlspecialchars((string) $v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $csrf = static fn(): string => '<input type="hidden" name="csrf_token" value="' . htmlspecialchars((string) $_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8') . '">';

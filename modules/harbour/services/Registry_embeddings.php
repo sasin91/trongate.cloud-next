@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * EmbeddingGemma 2 semantic & hybrid search client for the Module Marketplace.
+ * EmbeddingGemma 2 semantic & hybrid search client for the Module Harbour.
  *
  * Follows the proven semantic-webshop design:
  *  - OpenAI-compatible POST /v1/embeddings served by llama.cpp (EmbeddingGemma 2 GGUF)

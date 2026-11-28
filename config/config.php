@@ -46,7 +46,7 @@ if (strlen($key_bytes) !== 32) {
 
 define('BASE_URL', $base_url);
 define('ENV', $environment);
-define('DEFAULT_MODULE', 'welcome');
+define('DEFAULT_MODULE', getenv('TC_REGISTRY_MODE') === '1' ? 'harbour' : 'welcome');
 define('DEFAULT_METHOD', 'index');
 define('MODULE_ASSETS_TRIGGER', '_module');
 define('ERROR_404', 'error_pages/not_found');

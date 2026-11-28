@@ -1,6 +1,10 @@
-# ZFS Module Registry & Marketplace (`registry.trongate.cloud`)
+# Trongate Module Harbour (`registry.trongate.cloud`)
 
-`trongate.cloud` hosts an author-namespaced Trongate Module Registry backed by ZFS datasets, a dedicated unprivileged FreeBSD jail (`tc_registry`), zero-copy `nullfs` mounts for hosted apps, self-hosted Smart HTTP Git repositories, and optional EmbeddingGemma 2 hybrid semantic search.
+Ahoy! The Module Harbour is a free, author-namespaced directory of Trongate modules ("crates"). It is backed by immutable ZFS datasets, served from a dedicated unprivileged FreeBSD jail (`tc_registry`), and offers self-hosted Git repositories, `.tar.gz` archives, and optional EmbeddingGemma 2 hybrid search.
+
+Everything in the Harbour is free. There are no paid listings, and none are planned.
+
+Modules are installed the Trongate way: you download the code into your app's `modules/` folder, commit it, and push. The code is yours to read and change, local development matches production, and trongate.cloud never edits your repository or mounts code into your app behind your back.
 
 ---
 
@@ -31,7 +35,7 @@ Provisioned by `infra/scripts/platform-jails.sh` when `REGISTRY_DOMAIN` is set (
 
 To keep authorship and licensing clean, every module lives under its author's namespace (`<namespace>/<module>`), never mixed into a single platform GitHub account:
 
-1. Register a module repository in `/registry/manage` (queues `registry-init-repo` to initialize `zroot/tc/registry/repos/<namespace>/<module>.git`).
+1. Register a module repository in `/harbour/manage` (queues `registry-init-repo` to initialize `zroot/tc/registry/repos/<namespace>/<module>.git`).
 2. Mint a push token strictly scoped to `<namespace>` (stored SHA-256 hashed in `registry_tokens`).
 3. Push code and a semver tag:
    ```sh
@@ -50,62 +54,49 @@ git subtree add --prefix=modules/error_pages https://registry.trongate.cloud/git
 
 ### Upload a module package
 
-Publish a small module without setting up Git from **Registry → Manage & Publish → Upload a module**. Enter its namespace, module name, and a new semantic version, then upload a `.tar.gz` archive of the module directory's contents (the module files should be at the archive root):
+Publish a small module without setting up Git from **Harbour → Manage & Publish → Upload a module**. Enter its namespace, module name, and a new semantic version, then upload a `.tar.gz` archive of the module directory's contents (the module files should be at the archive root):
 
 ```sh
 tar -czf error_pages.tar.gz -C modules/error_pages .
 ```
 
-Uploads are limited to 512 KiB compressed. The host checks archive paths, file types, and expanded size before publishing the version as an immutable ZFS snapshot. The uploaded version appears in the shared Marketplace and can be installed from any app's **Modules** tab. Versions remain immutable; upload a new version to publish changes.
+Uploads are limited to 512 KiB compressed. The host checks archive paths, file types, and expanded size before publishing the version as an immutable ZFS snapshot. The uploaded version appears in the shared Harbour, ready for anyone to haul aboard. Versions remain immutable; upload a new version to publish changes.
 
 ---
 
 ## Bandwidth & CDN / Object Storage Offloading
 
-- **Hosted apps use zero network bandwidth**: `tc-runtime` mounts `zroot/tc/registry/modules/<ns>/<name>/<ver>` directly into `/app/modules/<name>` via read-only `nullfs`, sharing a single copy in ZFS ARC across every app jail on the host.
 - **External downloads are served straight from ZFS ARC by host Caddy** (`/archives/*` -> `file_server`) with `Cache-Control: public, max-age=31536000, immutable` and `ETag`. Typical pure-PHP Trongate modules are 5–100 KB gzipped (1,000,000 downloads ≈ 50 GB).
 - **Pull-through CDN / optional S3 bucket**: Place any pull-through CDN in front of `registry.trongate.cloud/archives/*` (the immutable header gives ~99%+ cache hit rate with zero host credentials), or set `TC_REGISTRY_ARCHIVE_BASE_URL=https://cdn.example.com/modules` if you mirror `zroot/tc/registry/archives/` to an S3/CDN bucket.
 
 ---
 
-## App Modules Panel, Zero-Copy `nullfs`, Config Overlays & Auto-Wiring
+## Installing a crate (download, commit, push)
 
-Every hosted app has a **Modules** tab (`/apps/modules/<app_id>`) where team members with settings access can:
+Each module page in the Harbour shows copy-paste commands for its latest version. Run them from your app's repository root:
 
-- **Insert** modules directly from the ZFS registry (with inline EmbeddingGemma 2 search)
-- **Update** pinned versions with one click when newer releases are published
-- **Configure** each module using typed fields declared in `module.json` (`config_schema`, supporting `string`, `int`, `bool`, `select`, and encrypted `secret` fields stored in `credentials`) plus custom `key=value` entries
-- **Remove** modules and deploy atomically via blue/green ZFS rollout
+```sh
+# With Git (keeps history tidy and makes updates a one-liner)
+git subtree add --prefix=modules/log https://registry.trongate.cloud/git/sasin91/log.git v1.0.1 --squash
 
-Apps can also commit a declarative `trongate-modules.json` in their repository root (panel settings override per module name):
-
-```json
-{
-  "modules": {
-    "sasin91/error_pages": "1.0.0",
-    "sasin91/log": "1.0.1"
-  },
-  "autowire": {
-    "error_pages": true,
-    "log": true
-  }
-}
+# Without Git subtree: archives already contain a top-level <name>/ folder
+curl -fsSL https://registry.trongate.cloud/archives/sasin91/log/1.0.1.tar.gz | tar -xzf - -C modules
 ```
 
-At deploy time, `tc-runtime`:
+Then commit and push. The next deploy carries the module like any other code in your repository. To update, run `git subtree pull` with the newer tag (shown on the module page and in the app's **Modules** tab), or replace the folder with the newer archive.
 
-1. Verifies each pinned module's ZFS dataset and SHA-256 manifest digest.
-2. Mounts each module read-only at `/app/modules/<name>` via `nullfs` (refusing to overwrite a non-empty vendored directory).
-3. Renders per-module configuration read-only (`0440`) at `/app/config/<name>.php` (merging decrypted secret fields at deploy time).
-4. When auto-wiring is enabled:
-   - `error_pages`: patches `ERROR_404` in `/app/config/config.php` and prepends `/etc/tc/tc_modules_boot.php` via `php_admin_value[auto_prepend_file]` to register exception/fatal handlers (returning friendly HTML or JSON for `fetch()` calls).
-   - `log`: preloads `Log.php` and provides `tc_log($channel)` writing structured entries to `/var/log/php-fpm.log` (automatically tailed by the app's Logs tab and 24-hour error rate card).
+## The app's Modules tab: what's aboard
 
----
+Every hosted app has a read-only **Modules** tab (`/apps/modules/<app_id>`). It works like an add-on manager: it recognises what is installed and keeps a lookout for updates, but it never changes your code.
 
+- During each build, `infra/runtime/builder.php` fingerprints every top-level `modules/<name>` folder with the same SHA-256 manifest digest that the Harbour records for each published version. The fingerprints are stored in the release metadata.
+- A fingerprint that matches a published version shows as that crate and version: **Up to date**, or **vX.Y.Z available** with the update command.
+- A folder named like a Harbour module whose fingerprint matches no published version shows as **Changed locally**. You've made it your own, so no updates are suggested.
+- Every other folder is listed as one of the app's own modules.
+- Empty directories are not part of Git trees or archives. A module that ships empty directories may therefore show as changed locally after a Git install.
 ## EmbeddingGemma 2 Semantic Search
 
-The Marketplace uses the same hybrid search architecture proven in `semantic-webshop`:
+The Harbour uses the same hybrid search architecture proven in `semantic-webshop`:
 
 1. Add the FreeBSD-native **EmbeddingGemma 2 (semantic search)** service preset on `/services` (`llama-cpp` / `llama-server` running `ggml-org/embeddinggemma-2-GGUF:Q8_0` with persistent ZFS model cache at `/var/db/service/llama`).
 2. `Registry` auto-discovers a running shared `embeddings` service (or reads `EMBEDDINGS_URL`).

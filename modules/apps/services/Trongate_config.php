@@ -13,7 +13,7 @@ final class Trongate_config {
      * Patch only BASE_URL and ENV in an existing Trongate config/config.php,
      * preserving all user-defined constants, comments, and routing defaults.
      */
-    static function patch_config_php(string $source, string $domain, string $env = 'production', bool $https = true, ?string $error_404 = null): string {
+    static function patch_config_php(string $source, string $domain, string $env = 'production', bool $https = true): string {
         $domain = trim($domain);
         if ($domain === '' || str_contains($domain, "\0") || str_contains($env, "\0")) {
             throw new InvalidArgumentException('Invalid Trongate configuration value.');
@@ -23,12 +23,6 @@ final class Trongate_config {
             'BASE_URL' => ($https ? 'https' : 'http') . '://' . trim($domain, '/') . '/',
             'ENV' => $env,
         ];
-        if ($error_404 !== null && trim($error_404) !== '') {
-            if (str_contains($error_404, "\0")) {
-                throw new InvalidArgumentException('Invalid Trongate ERROR_404 configuration value.');
-            }
-            $replacements['ERROR_404'] = trim($error_404);
-        }
         $found = [];
         $tokens = token_get_all($source);
         $count = count($tokens);

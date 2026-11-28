@@ -18,6 +18,7 @@ class Builder {
     public const MAX_DISK_QUOTA_MB = 1048576;
     public const MAX_INSPECT_FILE_BYTES = 524288;
     public const MAX_PERSISTENT_PATHS = 10;
+    public const MAX_FINGERPRINTED_MODULES = 200;
     public const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
     public const BUILD_MEMORY_LIMIT = '1536M';
     public const BUILD_SWAP_LIMIT = '16384M';
@@ -418,7 +419,7 @@ class Builder {
                     'detected_uploads' => $inspection['detected_uploads'],
                     'persistent_paths' => $inspection['persistent_paths'],
                     'disk_quota_mb' => $inspection['disk_quota_mb'],
-                    'declared_modules' => $inspection['declared_modules'],
+                    'modules' => $inspection['modules'],
                 ];
                 $this->write($result_path, $output);
                 return $output;
@@ -493,7 +494,7 @@ class Builder {
         }
     }
 
-    private function manifest_digest(string $release_path): string {
+    public static function manifest_digest(string $release_path): string {
         $root = realpath($release_path);
         if ($root === false) {
             throw new RuntimeException('Cannot inspect staged release');
@@ -591,73 +592,44 @@ class Builder {
 
         $persistent_paths = self::normalize_persistent_paths($candidate_paths);
         $disk_quota_mb = self::recommended_disk_quota_mb($release_bytes, $detected_uploads);
-        $declared_modules = self::parse_modules_manifest($root . '/trongate-modules.json');
+        $modules = self::fingerprint_modules($root);
 
         return [
             'release_bytes' => $release_bytes,
             'detected_uploads' => $detected_uploads,
             'persistent_paths' => $persistent_paths,
             'disk_quota_mb' => $disk_quota_mb,
-            'declared_modules' => $declared_modules,
+            'modules' => $modules,
         ];
     }
 
     /**
-     * Parses an optional repository `trongate-modules.json` manifest:
-     *   {"modules": {"sasin91/error_pages": "1.0.0", "sasin91/log": {"version": "1.0.1", "autowire": true}}}
+     * Fingerprints each top-level `modules/<name>` directory with the same
+     * manifest digest the Module Harbour records for published versions, so the
+     * panel can recognise which Harbour crates (and versions) an app carries and
+     * whether they were changed locally.
      *
-     * @return list<array{namespace: string, name: string, version: string, autowire: bool}>
+     * @return list<array{name: string, digest: string}>
      */
-    public static function parse_modules_manifest(string $path): array {
-        if (!is_file($path) || is_link($path) || (int) filesize($path) > 65536) {
+    public static function fingerprint_modules(string $root): array {
+        $modules_dir = $root . "/modules";
+        if (!is_dir($modules_dir) || is_link($modules_dir)) {
             return [];
         }
-        $raw = file_get_contents($path);
-        if (!is_string($raw) || trim($raw) === '') {
-            return [];
-        }
-        $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            return [];
-        }
-        $entries = is_array($decoded['modules'] ?? null) ? $decoded['modules'] : [];
-        $autowire_map = is_array($decoded['autowire'] ?? null) ? $decoded['autowire'] : [];
         $result = [];
-        $seen = [];
-        foreach ($entries as $key => $val) {
-            if (!is_string($key) || !str_contains($key, '/')) {
+        foreach (new FilesystemIterator($modules_dir, FilesystemIterator::SKIP_DOTS) as $item) {
+            $name = $item->getFilename();
+            if (!$item->isDir() || $item->isLink() || preg_match("/\A[a-z][a-z0-9_]{0,39}\z/D", $name) !== 1) {
                 continue;
             }
-            [$ns, $name] = explode('/', $key, 2);
-            if (
-                preg_match('/\A[a-z][a-z0-9-]{1,38}\z/D', $ns) !== 1
-                || preg_match('/\A[a-z][a-z0-9_]{0,39}\z/D', $name) !== 1
-                || isset($seen[$name])
-            ) {
-                continue;
-            }
-            $version = is_string($val) ? trim($val) : (is_array($val) && is_string($val['version'] ?? null) ? trim($val['version']) : '');
-            $version = ltrim($version, 'v');
-            if (preg_match('/\A[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?\z/D', $version) !== 1) {
-                continue;
-            }
-            $autowire = is_array($val) && array_key_exists('autowire', $val)
-                ? (bool) $val['autowire']
-                : (array_key_exists($name, $autowire_map) ? (bool) $autowire_map[$name] : in_array($name, ['error_pages', 'log'], true));
-            $seen[$name] = true;
-            $result[] = [
-                'namespace' => $ns,
-                'name' => $name,
-                'version' => $version,
-                'autowire' => $autowire,
-            ];
-            if (count($result) >= 30) {
+            $result[] = ["name" => $name, "digest" => self::manifest_digest($item->getPathname())];
+            if (count($result) >= self::MAX_FINGERPRINTED_MODULES) {
                 break;
             }
         }
+        usort($result, static fn(array $a, array $b): int => strcmp($a["name"], $b["name"]));
         return $result;
     }
-
     public static function recommended_disk_quota_mb(int $release_bytes, bool $detected_uploads): int {
         $release_mb = $release_bytes > 0 ? (int) ceil($release_bytes / 1048576) : 1;
         $needed_mb = ($release_mb * 3) + self::RELEASE_HEADROOM_MB + ($detected_uploads ? self::UPLOAD_HEADROOM_MB : 0);

@@ -4,8 +4,8 @@ declare(strict_types=1);
 require_once APPPATH . 'modules/security/traits/Encrypted_credentials.php';
 require_once APPPATH . 'modules/jobs/traits/Job_queue.php';
 require_once APPPATH . 'modules/validation/services/Validate.php';
-require_once APPPATH . 'modules/registry/services/Module_spec.php';
-require_once APPPATH . 'modules/registry/services/Registry_embeddings.php';
+require_once APPPATH . 'modules/harbour/services/Module_spec.php';
+require_once APPPATH . 'modules/harbour/services/Registry_embeddings.php';
 
 /**
  * Persistence for the ZFS Module Registry:
@@ -14,7 +14,7 @@ require_once APPPATH . 'modules/registry/services/Registry_embeddings.php';
  *  - EmbeddingGemma 2 module vectors & query cache in `registry_embeddings` / `registry_query_cache`
  *  - Hybrid keyword + semantic search with Reciprocal Rank Fusion
  */
-class Registry_model extends Model {
+class Harbour_model extends Model {
     use Encrypted_credentials, Job_queue;
 
     function __construct(?string $module_name = null, PDO|Closure|null $connection = null) {
@@ -51,6 +51,60 @@ class Registry_model extends Model {
     }
 
     /**
+     * Recognises Harbour crates in a release from the `modules/<name>` fingerprints
+     * its build recorded. A digest that equals a published version is that exact
+     * version; a folder named like a Harbour module with an unknown digest has been
+     * changed locally; anything else is the app's own module.
+     *
+     * @return array{installed: list<array<string, mixed>>, own: list<string>}
+     */
+    public function _identify(array $fingerprints): array {
+        $by_digest = [];
+        foreach ($this->records->_all('registry-version') as $ver) {
+            $digest = (string) ($ver['digest'] ?? '');
+            if ($digest !== '') {
+                $by_digest[$digest] = $ver;
+            }
+        }
+        $by_name = [];
+        foreach ($this->_all_modules() as $mod) {
+            $by_name[(string) ($mod['name'] ?? '')][] = $mod;
+        }
+
+        $installed = [];
+        $own = [];
+        foreach (Module_spec::fingerprints($fingerprints) as $fp) {
+            $ver = $by_digest[$fp['digest']] ?? null;
+            $module = $ver !== null
+                ? $this->_find_module((string) $ver['namespace'], (string) $ver['name'])
+                : ($by_name[$fp['name']][0] ?? null);
+            if ($module === null) {
+                $own[] = $fp['name'];
+                continue;
+            }
+
+            $latest = (string) ($module['latest_version'] ?? '');
+            $version = $ver !== null ? (string) $ver['version'] : '';
+            $status = match (true) {
+                $ver === null => 'modified',
+                $latest !== '' && version_compare($latest, $version) > 0 => 'outdated',
+                default => 'current',
+            };
+            $installed[] = [
+                'folder' => $fp['name'],
+                'namespace' => (string) $module['namespace'],
+                'name' => (string) $module['name'],
+                'title' => (string) ($module['title'] ?? $module['name']),
+                'version' => $version,
+                'latest_version' => $latest,
+                'status' => $status,
+                'repo_ready' => !empty($module['repo_ready']),
+            ];
+        }
+        return ['installed' => $installed, 'own' => $own];
+    }
+
+    /**
      * Registers or updates a namespaced module repository record (owned by its author namespace).
      */
     public function _save_module_repo(array $input): array {
@@ -83,10 +137,6 @@ class Registry_model extends Model {
             'server' => $server,
             'latest_version' => (string) ($existing['latest_version'] ?? ''),
             'readme' => (string) ($existing['readme'] ?? ''),
-            'autowire' => is_array($existing['autowire'] ?? null) ? $existing['autowire'] : [],
-            'config_schema' => is_array($input['config_schema'] ?? null)
-                ? $input['config_schema']
-                : (is_array($existing['config_schema'] ?? null) ? $existing['config_schema'] : []),
             'repo_ready' => (bool) ($input['repo_ready'] ?? ($existing['repo_ready'] ?? false)),
             'created_at' => (int) ($existing['created_at'] ?? $now),
             'updated_at' => $now,
@@ -128,8 +178,6 @@ class Registry_model extends Model {
             'server' => $server !== '' ? $server : (string) ($existing['server'] ?? ''),
             'latest_version' => $latest,
             'readme' => (string) (($meta['readme'] ?? '') !== '' ? $meta['readme'] : ($existing['readme'] ?? '')),
-            'autowire' => is_array($meta['autowire'] ?? null) ? $meta['autowire'] : (is_array($existing['autowire'] ?? null) ? $existing['autowire'] : []),
-            'config_schema' => is_array($meta['config_schema'] ?? null) ? $meta['config_schema'] : (is_array($existing['config_schema'] ?? null) ? $existing['config_schema'] : []),
             'repo_ready' => !empty($result['repo_ready']) || !empty($existing['repo_ready']),
             'created_at' => (int) ($existing['created_at'] ?? $now),
             'updated_at' => $now,

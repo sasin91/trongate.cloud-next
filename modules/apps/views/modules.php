@@ -3,342 +3,157 @@ $active_tab = 'modules';
 $app = $overview['app'];
 $app_id = (string) $app['id'];
 $label = (string) ($app['label'] ?? $app_id);
-$attached = is_array($app_modules ?? null) ? $app_modules : [];
+$installed = is_array($harbour_installed ?? null) ? $harbour_installed : [];
+$own = is_array($own_modules ?? null) ? $own_modules : [];
+$scanned = !empty($modules_scanned);
 $catalog_results = is_array($registry_results ?? null) ? $registry_results : [];
-$catalog_versions = is_array($registry_versions ?? null) ? $registry_versions : [];
-$catalog_schemas = is_array($registry_schemas ?? null) ? $registry_schemas : [];
 $categories = is_array($registry_categories ?? null) ? $registry_categories : Module_spec::CATEGORIES;
 $q = (string) ($registry_query ?? '');
 $cat = (string) ($registry_category ?? '');
-$can_edit = !empty($can_settings);
-$has_pending_deploy = !empty($modules_pending_deploy);
-$attached_by_name = [];
-foreach ($attached as $item) {
-    $attached_by_name[(string) ($item['name'] ?? '')] = $item;
+$installed_by_slug = [];
+foreach ($installed as $item) {
+    $installed_by_slug[$item['namespace'] . '/' . $item['name']] = $item;
 }
-$live_modules_by_name = [];
-foreach (is_array($live_app_modules ?? null) ? $live_app_modules : [] as $item) {
-    if (is_array($item) && !empty($item['name'])) {
-        $live_modules_by_name[(string) $item['name']] = $item;
-    }
-}
+$outdated = count(array_filter($installed, static fn(array $m): bool => $m['status'] === 'outdated'));
 ?>
-<link rel="stylesheet" href="/registry_module/css/registry.css">
+<link rel="stylesheet" href="/harbour_module/css/harbour.css">
 <main class="panel tc-panel">
     <div class="ov">
         <?php require __DIR__ . '/_header.php'; ?>
 
-        <?php if (!empty($saved_notice)): ?>
-            <p class="flash" role="status"><?= $e($saved_notice) ?></p>
-        <?php endif ?>
-
-        <?php if ($has_pending_deploy && !empty($can_deploy)): ?>
-            <div class="reg-notice" role="status" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:0">
-                <span>Module changes are saved. Deploy <strong><?= $e($label) ?></strong> to mount updated ZFS snapshots and apply module config overlays.</span>
-                <form method="post" action="/apps/deploy" style="margin:0;width:auto">
-                    <?= $csrf() ?>
-                    <input type="hidden" name="app" value="<?= $e($app_id) ?>">
-                    <button type="submit" class="btn-primary">Deploy now</button>
-                </form>
-            </div>
-        <?php endif ?>
-
         <section class="ov-card">
             <div class="ov-card-head">
-                <h2>Installed modules</h2>
-                <span class="muted"><?= count($attached) ?> installed</span>
+                <h2>Harbour crates aboard</h2>
+                <span class="muted">
+                    <?= count($installed) ?> aboard<?= $outdated > 0 ? ' &middot; ' . $outdated . ' with updates' : '' ?>
+                </span>
             </div>
             <div class="ov-pad">
-                <?php if ($attached === []): ?>
-                    <p class="muted" style="font-size:14px">No modules installed yet. Browse the Marketplace below, or add modules with a <code>trongate-modules.json</code> manifest in your repository.</p>
+                <?php if (!$scanned): ?>
+                    <p class="muted" style="font-size:14px">The lookout hasn't checked this app's hold yet. Modules are spotted during a build, so they'll show up here after the next deploy.</p>
+                <?php elseif ($installed === []): ?>
+                    <p class="muted" style="font-size:14px">No Harbour crates aboard yet. Pick one below, run its install command in your repository, then commit and push. The next deploy carries it, and it shows up here.</p>
                 <?php else: ?>
                     <div class="mod-list">
-                        <?php foreach ($attached as $mod): ?>
+                        <?php foreach ($installed as $mod): ?>
                             <?php
-                            $ns = (string) ($mod['namespace'] ?? '');
-                            $name = (string) ($mod['name'] ?? '');
+                            $ns = (string) $mod['namespace'];
+                            $name = (string) $mod['name'];
                             $slug = $ns . '/' . $name;
-                            $ver = (string) ($mod['version'] ?? '');
-                            $autowire = !empty($mod['autowire']);
-                            $source = (string) ($mod['source'] ?? 'panel');
-                            $versions = $catalog_versions[$slug] ?? [];
-                            $latest = $versions !== [] ? (string) ($versions[0]['version'] ?? '') : '';
-                            $has_update = $latest !== '' && version_compare($latest, $ver) > 0;
-                            $schema = $catalog_schemas[$slug] ?? [];
-                            $schema_keys = [];
-                            foreach ($schema as $sf) {
-                                $schema_keys[(string) ($sf['key'] ?? '')] = true;
-                            }
-                            $cfg = is_array($mod['config'] ?? null) ? $mod['config'] : [];
-                            $secret_names = array_keys(is_array($mod['secret_refs'] ?? null) ? $mod['secret_refs'] : []);
-                            $extra_lines = [];
-                            foreach ($cfg as $ck => $cv) {
-                                if (!isset($schema_keys[$ck])) {
-                                    $extra_lines[] = $ck . '=' . (is_bool($cv) ? ($cv ? 'true' : 'false') : (string) $cv);
-                                }
-                            }
-                            $can_autowire = Module_spec::can_autowire($name);
+                            $latest = (string) $mod['latest_version'];
                             ?>
-                            <article class="mod-item" id="module-<?= $e($name) ?>">
+                            <article class="mod-item" id="module-<?= $e($mod['folder']) ?>">
                                 <div class="mod-item-head">
                                     <div>
                                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                                            <a href="/registry/show/<?= $e(rawurlencode($ns)) ?>/<?= $e(rawurlencode($name)) ?>" style="font-weight:600;text-decoration:none;color:var(--text-main)"><?= $e($slug) ?></a>
-                                            <span class="reg-pill reg-pill-ver">v<?= $e($ver) ?></span>
-                                            <?php if ($autowire): ?>
-                                                <span class="reg-pill reg-pill-autowire">Auto-wired</span>
+                                            <a href="/harbour/show/<?= $e(rawurlencode($ns)) ?>/<?= $e(rawurlencode($name)) ?>" style="font-weight:600;text-decoration:none;color:var(--text-main)"><?= $e($mod['title']) ?></a>
+                                            <?php if ($mod['version'] !== ''): ?>
+                                                <span class="reg-pill reg-pill-ver">v<?= $e($mod['version']) ?></span>
                                             <?php endif ?>
-                                            <span class="reg-pill reg-pill-keyword"><?= $e($source === 'manifest' ? 'trongate-modules.json' : 'Panel') ?></span>
+                                            <?php if ($mod['status'] === 'current'): ?>
+                                                <span class="status-pill live-running">Up to date</span>
+                                            <?php elseif ($mod['status'] === 'outdated'): ?>
+                                                <span class="status-pill live-not_live">v<?= $e($latest) ?> available</span>
+                                            <?php else: ?>
+                                                <span class="reg-pill reg-pill-keyword" title="This folder doesn't match any published version of <?= $e($slug) ?>.">Changed locally</span>
+                                            <?php endif ?>
                                         </div>
                                         <div class="muted" style="font-size:12px;margin-top:3px">
-                                            Mounted read-only at <code>/app/modules/<?= $e($name) ?></code>
-                                            <?php if ($cfg !== [] || $secret_names !== []): ?>
-                                                &middot; Config overlay: <code>/app/config/<?= $e($name) ?>.php</code>
-                                            <?php endif ?>
+                                            <?= $e($slug) ?> &middot; in <code>modules/<?= $e($mod['folder']) ?></code>
                                         </div>
                                     </div>
-                                    <?php if ($can_edit): ?>
-                                        <div class="mod-inline-actions">
-                                            <?php if ($has_update): ?>
-                                                <form method="post" action="/apps/update_module">
-                                                    <?= $csrf() ?>
-                                                    <input type="hidden" name="app" value="<?= $e($app_id) ?>">
-                                                    <input type="hidden" name="namespace" value="<?= $e($ns) ?>">
-                                                    <input type="hidden" name="name" value="<?= $e($name) ?>">
-                                                    <input type="hidden" name="version" value="<?= $e($latest) ?>">
-                                                    <input type="hidden" name="autowire" value="<?= $autowire ? '1' : '0' ?>">
-                                                    <input type="hidden" name="preserve_config" value="1">
-                                                    <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:13px">Update to v<?= $e($latest) ?></button>
-                                                </form>
-                                            <?php endif ?>
-                                            <?php if ($source !== 'manifest'): ?>
-                                                <form method="post" action="/apps/remove_module" data-confirm="Remove module <?= $e($slug) ?> from <?= $e($label) ?>?">
-                                                    <?= $csrf() ?>
-                                                    <input type="hidden" name="app" value="<?= $e($app_id) ?>">
-                                                    <input type="hidden" name="name" value="<?= $e($name) ?>">
-                                                    <button type="submit" class="btn-link">Remove</button>
-                                                </form>
-                                            <?php endif ?>
-                                        </div>
-                                    <?php endif ?>
                                 </div>
-
-                                <?php if ($can_edit): ?>
+                                <?php if ($mod['status'] === 'outdated' && $latest !== ''): ?>
                                     <div class="mod-item-body">
-                                        <details<?= ($cfg !== [] || $schema !== []) ? '' : '' ?>>
-                                            <summary style="cursor:pointer;font-size:14px;font-weight:500;color:var(--primary)">Version, wiring &amp; configuration</summary>
-                                            <form method="post" action="/apps/update_module" class="settings-form" style="margin-top:14px">
-                                                <?= $csrf() ?>
-                                                <input type="hidden" name="app" value="<?= $e($app_id) ?>">
-                                                <input type="hidden" name="namespace" value="<?= $e($ns) ?>">
-                                                <input type="hidden" name="name" value="<?= $e($name) ?>">
-
-                                                <div class="mod-config-grid">
-                                                    <div class="settings-field">
-                                                        <label for="ver_<?= $e($name) ?>">Pinned version</label>
-                                                        <?php if ($versions !== []): ?>
-                                                            <select id="ver_<?= $e($name) ?>" name="version" style="padding:9px 10px;border:1px solid var(--border-strong);border-radius:8px;background:#fff">
-                                                                <?php
-                                                                $has_cur = false;
-                                                                foreach ($versions as $vrow):
-                                                                    $vv = (string) ($vrow['version'] ?? '');
-                                                                    if ($vv === $ver) {
-                                                                        $has_cur = true;
-                                                                    }
-                                                                ?>
-                                                                    <option value="<?= $e($vv) ?>"<?= $vv === $ver ? ' selected' : '' ?>>v<?= $e($vv) ?></option>
-                                                                <?php endforeach ?>
-                                                                <?php if (!$has_cur && $ver !== ''): ?>
-                                                                    <option value="<?= $e($ver) ?>" selected>v<?= $e($ver) ?> (pinned)</option>
-                                                                <?php endif ?>
-                                                            </select>
-                                                        <?php else: ?>
-                                                            <input id="ver_<?= $e($name) ?>" type="text" name="version" value="<?= $e($ver) ?>" required>
-                                                        <?php endif ?>
-                                                    </div>
-
-                                                    <?php if ($can_autowire): ?>
-                                                        <div class="settings-field" style="justify-content:center">
-                                                            <label>Runtime wiring</label>
-                                                            <input type="hidden" name="autowire" value="0">
-                                                            <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-weight:400;color:var(--text-main);font-size:14px">
-                                                                <input type="checkbox" name="autowire" value="1"<?= $autowire ? ' checked' : '' ?> style="width:auto">
-                                                                <span>Auto-wire <code><?= $e($name) ?></code> into PHP-FPM &amp; config</span>
-                                                            </label>
-                                                        </div>
-                                                    <?php endif ?>
-                                                </div>
-
-                                                <?php if ($schema !== []): ?>
-                                                    <div class="mod-config-grid">
-                                                        <?php foreach ($schema as $field): ?>
-                                                            <?php
-                                                            $fkey = (string) ($field['key'] ?? '');
-                                                            $flabel = (string) ($field['label'] ?? $fkey);
-                                                            $ftype = (string) ($field['type'] ?? 'string');
-                                                            $fsecret = !empty($field['secret']);
-                                                            $fdefault = $field['default'] ?? '';
-                                                            $fhint = (string) ($field['hint'] ?? '');
-                                                            $fval = $fsecret ? '' : ($cfg[$fkey] ?? $fdefault);
-                                                            $is_set_secret = $fsecret && in_array($fkey, $secret_names, true);
-                                                            ?>
-                                                            <div class="settings-field">
-                                                                <label for="cfg_<?= $e($name . '_' . $fkey) ?>"><?= $e($flabel) ?><?= $fsecret ? ' (secret)' : '' ?></label>
-                                                                <?php if ($ftype === 'bool'): ?>
-                                                                    <input type="hidden" name="schema_config[<?= $e($fkey) ?>]" value="0">
-                                                                    <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-weight:400;color:var(--text-main);font-size:14px">
-                                                                        <input id="cfg_<?= $e($name . '_' . $fkey) ?>" type="checkbox" name="schema_config[<?= $e($fkey) ?>]" value="1"<?= !empty($fval) ? ' checked' : '' ?> style="width:auto">
-                                                                        <span>Enabled</span>
-                                                                    </label>
-                                                                <?php elseif ($ftype === 'select' && !empty($field['options'])): ?>
-                                                                    <select id="cfg_<?= $e($name . '_' . $fkey) ?>" name="schema_config[<?= $e($fkey) ?>]" style="padding:9px 10px;border:1px solid var(--border-strong);border-radius:8px;background:#fff">
-                                                                        <?php foreach ($field['options'] as $opt): ?>
-                                                                            <option value="<?= $e($opt) ?>"<?= (string) $fval === (string) $opt ? ' selected' : '' ?>><?= $e($opt) ?></option>
-                                                                        <?php endforeach ?>
-                                                                    </select>
-                                                                <?php elseif ($fsecret): ?>
-                                                                    <input id="cfg_<?= $e($name . '_' . $fkey) ?>" type="password" name="schema_secrets[<?= $e($fkey) ?>]" value="" placeholder="<?= $is_set_secret ? 'Saved (leave blank to keep)' : 'Enter secret value' ?>" autocomplete="new-password">
-                                                                <?php else: ?>
-                                                                    <input id="cfg_<?= $e($name . '_' . $fkey) ?>" type="<?= $ftype === 'int' ? 'number' : 'text' ?>" name="schema_config[<?= $e($fkey) ?>]" value="<?= $e((string) $fval) ?>">
-                                                                <?php endif ?>
-                                                                <?php if ($fhint !== ''): ?>
-                                                                    <p class="form-hint"><?= $e($fhint) ?></p>
-                                                                <?php endif ?>
-                                                            </div>
-                                                        <?php endforeach ?>
-                                                    </div>
-                                                <?php endif ?>
-
-                                                <div class="settings-field">
-                                                    <label for="extra_cfg_<?= $e($name) ?>">Additional configuration (<code>key=value</code> per line)</label>
-                                                    <textarea id="extra_cfg_<?= $e($name) ?>" name="extra_config" class="mono" rows="2" spellcheck="false" placeholder="option_name=value"><?= $e(implode("\n", $extra_lines)) ?></textarea>
-                                                    <p class="form-hint">Rendered read-only as <code>/app/config/<?= $e($name) ?>.php</code> (returns an associative array).</p>
-                                                </div>
-
-                                                <div class="form-actions">
-                                                    <button type="submit" class="btn-primary">Save module configuration</button>
-                                                </div>
-                                            </form>
-                                        </details>
+                                        <p class="form-hint" style="margin-top:0">Update in your repository, then commit and push:</p>
+                                        <?php if (!empty($mod['repo_ready'])): ?>
+                                            <pre class="reg-code"><?= $e(Module_spec::subtree_command($ns, $name, $latest, true)) ?></pre>
+                                        <?php else: ?>
+                                            <pre class="reg-code">rm -rf modules/<?= $e($name) ?> &amp;&amp; <?= $e(Module_spec::archive_command($ns, $name, $latest)) ?></pre>
+                                        <?php endif ?>
+                                    </div>
+                                <?php elseif ($mod['status'] === 'modified'): ?>
+                                    <div class="mod-item-body">
+                                        <p class="form-hint" style="margin:0">You've made this crate your own, which is exactly what Trongate modules are for. The lookout can't tell which version it started from, so it won't suggest updates. Compare with v<?= $e($latest) ?> on its Harbour page if you want to pull in changes.</p>
                                     </div>
                                 <?php endif ?>
                             </article>
                         <?php endforeach ?>
                     </div>
                 <?php endif ?>
+                <?php if ($own !== []): ?>
+                    <p class="muted" style="font-size:13px;margin:14px 0 0">
+                        Also aboard, your own modules: <?= $e(implode(', ', $own)) ?>.
+                    </p>
+                <?php endif ?>
             </div>
         </section>
 
-        <?php if ($can_edit): ?>
-            <section class="ov-card">
-                <div class="ov-card-head">
-                    <h2>Browse Marketplace</h2>
-                    <a href="/registry" class="btn-link" style="font-size:13px">Open full Marketplace &rarr;</a>
-                </div>
-                <div class="ov-pad">
-                    <form method="get" action="/apps/modules/<?= $e(rawurlencode($app_id)) ?>" class="reg-search-form">
-                        <input
-                            type="search"
-                            name="q"
-                            value="<?= $e($q) ?>"
-                            class="reg-search-input"
-                            placeholder="Search modules semantically or by name (e.g. error pages, logging, auth)…"
-                        >
-                        <select name="category" class="reg-mode-select" aria-label="Category">
-                            <option value="">All categories</option>
-                            <?php foreach ($categories as $ck => $cl): ?>
-                                <option value="<?= $e($ck) ?>"<?= $cat === $ck ? ' selected' : '' ?>><?= $e($cl) ?></option>
-                            <?php endforeach ?>
-                        </select>
-                        <button type="submit" class="btn-secondary">Search</button>
-                    </form>
+        <section class="ov-card">
+            <div class="ov-card-head">
+                <h2>Browse the Harbour</h2>
+                <a href="/harbour" class="btn-link" style="font-size:13px">Open the Harbour &rarr;</a>
+            </div>
+            <div class="ov-pad">
+                <form method="get" action="/apps/modules/<?= $e(rawurlencode($app_id)) ?>" class="reg-search-form" data-helm="Searching the seas…">
+                    <input
+                        type="search"
+                        name="q"
+                        value="<?= $e($q) ?>"
+                        class="reg-search-input"
+                        placeholder="Search by intent or name (e.g. error pages, logging, auth)…"
+                    >
+                    <select name="category" class="reg-mode-select" aria-label="Category">
+                        <option value="">All categories</option>
+                        <?php foreach ($categories as $ck => $cl): ?>
+                            <option value="<?= $e($ck) ?>"<?= $cat === $ck ? ' selected' : '' ?>><?= $e($cl) ?></option>
+                        <?php endforeach ?>
+                    </select>
+                    <button type="submit" class="btn-secondary">Search</button>
+                </form>
 
-                    <?php if (!empty($registry_fallback_notice)): ?>
-                        <p class="form-hint"><?= $e($registry_fallback_notice) ?></p>
-                    <?php endif ?>
+                <?php if (!empty($registry_fallback_notice)): ?>
+                    <p class="form-hint"><?= $e($registry_fallback_notice) ?></p>
+                <?php endif ?>
 
-                    <?php if ($catalog_results === []): ?>
-                        <p class="muted" style="font-size:14px">
-                            No modules matched. Try another search or <a href="/registry/manage">publish your own module</a>.
-                        </p>
-                    <?php else: ?>
-                        <div class="mod-browser-grid">
-                            <?php foreach ($catalog_results as $mod): ?>
-                                <?php
-                                $mns = (string) ($mod['namespace'] ?? '');
-                                $mname = (string) ($mod['name'] ?? '');
-                                $mslug = $mns . '/' . $mname;
-                                $mvers = $catalog_versions[$mslug] ?? [];
-                                $selected_module = $attached_by_name[$mname] ?? null;
-                                $selected = is_array($selected_module) && (string) ($selected_module['namespace'] ?? '') === $mns;
-                                $live_module = $live_modules_by_name[$mname] ?? null;
-                                $already = is_array($live_module) && (string) ($live_module['namespace'] ?? '') === $mns;
-                                $match = $mod['match'] ?? null;
-                                $m_autowire = Module_spec::can_autowire($mname);
-                                ?>
-                                <div class="mod-browser-card">
-                                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-                                        <div>
-                                            <div class="reg-slug"><?= $e($mslug) ?></div>
-                                            <h3><a href="/registry/show/<?= $e(rawurlencode($mns)) ?>/<?= $e(rawurlencode($mname)) ?>" style="text-decoration:none;color:inherit"><?= $e($mod['title'] ?? $mname) ?></a></h3>
-                                        </div>
-                                        <?php if ($match === 'both'): ?>
-                                            <span class="reg-pill reg-pill-both">Both</span>
-                                        <?php elseif ($match === 'semantic'): ?>
-                                            <span class="reg-pill reg-pill-semantic">Semantic</span>
-                                        <?php elseif ($match === 'keyword'): ?>
-                                            <span class="reg-pill reg-pill-keyword">Keyword</span>
-                                        <?php endif ?>
-                                    </div>
-                                    <p><?= $e(($mod['summary'] ?? '') !== '' ? $mod['summary'] : 'Self-contained Trongate module.') ?></p>
-                                    <div class="mod-browser-foot">
-                                        <?php if ($mvers === []): ?>
-                                            <span class="muted" style="font-size:12px">No versions published yet</span>
-                                        <?php elseif ($already): ?>
-                                            <?php
-                                            $installed_version = (string) ($live_module['version'] ?? '');
-                                            $catalog_latest = (string) ($mvers[0]['version'] ?? '');
-                                            $update_available = $catalog_latest !== '' && $installed_version !== '' && version_compare($catalog_latest, $installed_version) > 0;
-                                            ?>
-                                            <div class="mod-browser-row">
-                                                <span class="status-pill live-running">Installed · v<?= $e($installed_version) ?></span>
-                                                <?php if ($update_available): ?>
-                                                    <a class="btn-link" href="#module-<?= $e($mname) ?>">Update to v<?= $e($catalog_latest) ?></a>
-                                                <?php endif ?>
-                                            </div>
-                                        <?php elseif ($selected): ?>
-                                            <span class="status-pill live-not_live" style="align-self:flex-start">Added · deploy pending</span>
-                                        <?php elseif (is_array($selected_module)): ?>
-                                            <span class="status-pill live-not_live" style="align-self:flex-start">Another module uses this name</span>
-                                        <?php else: ?>
-                                            <form method="post" action="/apps/insert_module">
-                                                <?= $csrf() ?>
-                                                <input type="hidden" name="app" value="<?= $e($app_id) ?>">
-                                                <input type="hidden" name="namespace" value="<?= $e($mns) ?>">
-                                                <input type="hidden" name="name" value="<?= $e($mname) ?>">
-                                                <div class="mod-browser-row">
-                                                    <select name="version" aria-label="Version">
-                                                        <?php foreach ($mvers as $vr): ?>
-                                                            <option value="<?= $e($vr['version']) ?>">v<?= $e($vr['version']) ?></option>
-                                                        <?php endforeach ?>
-                                                    </select>
-                                                    <?php if ($m_autowire): ?>
-                                                        <label style="display:inline-flex;gap:5px;align-items:center;font-size:12px;margin:0">
-                                                            <input type="checkbox" name="autowire" value="1" checked style="width:auto">
-                                                            <span>Auto-wire</span>
-                                                        </label>
-                                                    <?php endif ?>
-                                                    <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:13px;margin-left:auto">Install</button>
-                                                </div>
-                                            </form>
-                                        <?php endif ?>
-                                    </div>
+                <?php if ($catalog_results === []): ?>
+                    <p class="muted" style="font-size:14px">
+                        No crates matched. Try another search or <a href="/harbour/manage">moor your own module</a>.
+                    </p>
+                <?php else: ?>
+                    <div class="mod-browser-grid">
+                        <?php foreach ($catalog_results as $mod): ?>
+                            <?php
+                            $mns = (string) ($mod['namespace'] ?? '');
+                            $mname = (string) ($mod['name'] ?? '');
+                            $mslug = $mns . '/' . $mname;
+                            $mlatest = (string) ($mod['latest_version'] ?? '');
+                            $aboard = $installed_by_slug[$mslug] ?? null;
+                            ?>
+                            <div class="mod-browser-card">
+                                <div>
+                                    <div class="reg-slug"><?= $e($mslug) ?></div>
+                                    <h3><a href="/harbour/show/<?= $e(rawurlencode($mns)) ?>/<?= $e(rawurlencode($mname)) ?>" style="text-decoration:none;color:inherit"><?= $e($mod['title'] ?? $mname) ?></a></h3>
                                 </div>
-                            <?php endforeach ?>
-                        </div>
-                    <?php endif ?>
-                </div>
-            </section>
-        <?php endif ?>
+                                <p><?= $e(($mod['summary'] ?? '') !== '' ? $mod['summary'] : 'Self-contained Trongate module.') ?></p>
+                                <div class="mod-browser-foot">
+                                    <?php if ($aboard !== null): ?>
+                                        <span class="status-pill live-running" style="align-self:flex-start">Aboard<?= $aboard['version'] !== '' ? ' · v' . $e($aboard['version']) : '' ?></span>
+                                    <?php elseif ($mlatest === ''): ?>
+                                        <span class="muted" style="font-size:12px">No versions published yet</span>
+                                    <?php else: ?>
+                                        <details>
+                                            <summary style="cursor:pointer;font-size:13px;color:var(--primary)">Haul v<?= $e($mlatest) ?> aboard</summary>
+                                            <pre class="reg-code" style="margin-top:8px"><?= $e(!empty($mod['repo_ready']) ? Module_spec::subtree_command($mns, $mname, $mlatest) : Module_spec::archive_command($mns, $mname, $mlatest)) ?></pre>
+                                            <p class="form-hint" style="margin:6px 0 0">Run it in your repository, then commit and push.</p>
+                                        </details>
+                                    <?php endif ?>
+                                </div>
+                            </div>
+                        <?php endforeach ?>
+                    </div>
+                <?php endif ?>
+            </div>
+        </section>
     </div>
 </main>

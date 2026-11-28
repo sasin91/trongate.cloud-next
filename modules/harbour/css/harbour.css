@@ -1,0 +1,150 @@
+/* Calm Mint/Trongate Module Harbour & App Modules styling */
+.reg-body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg-app,#f6f7fb);color:var(--text-main,#1c1d5e);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}
+.reg-shell{flex:1 0 auto;width:min(1180px,calc(100% - 32px));margin:0 auto;padding:32px 0 40px}
+.reg-hero{background:#fff;border:1px solid var(--border,#e3e5f0);border-radius:14px;padding:28px 30px;margin-bottom:22px}
+.reg-hero-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.reg-hero h1{margin:0 0 6px;font-size:28px;font-weight:700;letter-spacing:-.02em;color:var(--text-main,#1c1d5e)}
+.reg-hero p{margin:0;color:var(--text-muted,#585c7a);font-size:15px;max-width:660px}
+.reg-search-form{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center}
+@media(max-width:720px){.reg-search-form{grid-template-columns:1fr}}
+.reg-search-input{width:100%;padding:11px 14px;border:1px solid var(--border-strong,#d5d8e6);border-radius:8px;font-size:15px;color:var(--text-main,#1c1d5e);background:#fff;margin:0}
+.reg-search-input:focus{outline:none;border-color:var(--primary,#1d1e6e)}
+.reg-mode-select{padding:11px 12px;border:1px solid var(--border-strong,#d5d8e6);border-radius:8px;font-size:14px;color:var(--text-main,#1c1d5e);background:#fff;margin:0;width:auto}
+.reg-cats{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 0}
+.reg-cat{display:inline-flex;align-items:center;padding:5px 12px;border-radius:999px;font-size:13px;color:var(--text-muted,#585c7a);background:var(--bg-app,#f6f7fb);border:1px solid var(--border,#e3e5f0);text-decoration:none}
+.reg-cat:hover{border-color:var(--border-strong,#d5d8e6);color:var(--text-main,#1c1d5e)}
+.reg-cat[aria-current=page]{background:var(--primary,#1d1e6e);border-color:var(--primary,#1d1e6e);color:#fff;font-weight:600}
+.reg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:18px}
+.reg-card{display:flex;flex-direction:column;gap:10px;background:#fff;border:1px solid var(--border,#e3e5f0);border-radius:12px;padding:20px;text-decoration:none;color:inherit;transition:border-color .15s,box-shadow .15s,transform .15s}
+.reg-card:hover{border-color:var(--border-strong,#d5d8e6);box-shadow:0 10px 22px -16px rgba(29,30,110,.3);transform:translateY(-1px)}
+.reg-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.reg-slug{font-family:var(--wz-mono,ui-monospace,monospace);font-size:13px;color:var(--text-muted,#585c7a)}
+.reg-card h2{margin:2px 0 0;font-size:17px;font-weight:600;color:var(--text-main,#1c1d5e)}
+.reg-summary{margin:0;font-size:14px;color:var(--text-muted,#585c7a);line-height:1.5}
+.reg-badges{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.reg-pill{display:inline-flex;align-items:center;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.reg-pill-ver{background:#ecebfa;color:var(--primary,#1d1e6e);font-family:var(--wz-mono,ui-monospace,monospace)}
+.reg-pill-both{background:#d1fae5;color:#065f46}
+.reg-pill-semantic{background:#e0f2fe;color:#075985}
+.reg-pill-keyword{background:#f3f4f6;color:#374151}
+.reg-pill-autowire{background:#fef3c7;color:#92400e}
+.reg-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;padding-top:8px;border-top:1px solid var(--border,#e3e5f0);font-size:12px;color:var(--text-muted,#585c7a)}
+.reg-tag{background:#f4f6f8;padding:2px 8px;border-radius:5px}
+.reg-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:22px;align-items:start}
+@media(max-width:960px){.reg-detail-grid{grid-template-columns:1fr}}
+.reg-code{margin:0;padding:12px 14px;background:#f6f7fb;border:1px solid var(--border,#e3e5f0);border-radius:8px;font-family:var(--wz-mono,ui-monospace,monospace);font-size:12.5px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;color:var(--text-main,#1c1d5e)}
+.reg-readme{font-size:15px;line-height:1.65;color:var(--text-main,#1c1d5e)}
+.reg-readme pre{background:#f6f7fb;border:1px solid var(--border,#e3e5f0);border-radius:8px;padding:12px 14px;overflow-x:auto;font-size:13px}
+.reg-readme code{font-family:var(--wz-mono,ui-monospace,monospace);font-size:.9em}
+.reg-readme h1,.reg-readme h2,.reg-readme h3{margin-top:1.3em;margin-bottom:.4em}
+.reg-notice{padding:12px 16px;border-radius:10px;background:#fef3c7;border:1px solid #fde68a;color:#92400e;font-size:14px;margin-bottom:18px}
+.reg-token-box{padding:16px 18px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;margin-bottom:20px}
+.reg-token-box code{display:block;margin-top:8px;padding:10px 12px;background:#fff;border:1px solid #a7f3d0;border-radius:6px;font-size:13px;word-break:break-all;color:#1c1d5e}
+
+/* App Modules Panel */
+.mod-list{display:flex;flex-direction:column;gap:14px}
+.mod-item{border:1px solid var(--border,#e3e5f0);border-radius:12px;background:#fff;overflow:hidden}
+.mod-item-head{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--border,#e3e5f0);background:var(--bg-subtle,#fafafd)}
+.mod-item-body{padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+.mod-inline-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.mod-inline-actions form{margin:0;width:auto}
+.mod-config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.mod-browser-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+.mod-browser-card{display:flex;flex-direction:column;gap:10px;padding:16px;border:1px solid var(--border,#e3e5f0);border-radius:10px;background:#fff}
+.mod-browser-card h3{margin:0;font-size:15px;color:var(--text-main,#1c1d5e)}
+.mod-browser-card p{margin:0;font-size:13px;color:var(--text-muted,#585c7a)}
+.mod-browser-foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--border,#e3e5f0);display:flex;flex-direction:column;gap:8px}
+.mod-browser-foot form{margin:0;display:flex;flex-direction:column;gap:8px}
+.mod-browser-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mod-browser-row select{padding:6px 8px;border:1px solid var(--border-strong,#d5d8e6);border-radius:6px;background:#fff;font-size:13px;width:auto;margin:0}
+
+/* Harbour footer: a little ship docks, rings the bell, loads crates and sails off.
+   Every scene animation shares one 26s cycle so their percentages line up. */
+.hb-footer{--hb-cycle:26s;--hb-dock:min(68%,calc(100% - 156px));position:relative;height:196px;overflow:hidden;background:linear-gradient(180deg,var(--bg-app,#f6f7fb) 0%,#ecfdf5 100%);border-top:1px solid var(--border,#e3e5f0)}
+.hb-footer-text{position:relative;z-index:4;margin:0 auto;padding:18px 16px 0;max-width:640px;text-align:center;font-size:13px;line-height:1.6;color:var(--text-muted,#585c7a)}
+.hb-footer-text span{display:block;font-style:italic;opacity:.85}
+.hb-wave{position:absolute;left:0;width:200%;height:58px;animation:hb-drift 30s linear infinite}
+.hb-wave-back{bottom:18px;z-index:0;animation-duration:44s;animation-direction:reverse}
+.hb-wave-back path{fill:#a7f3d0;opacity:.7}
+.hb-wave-front{bottom:-6px;z-index:3}
+.hb-wave-front path{fill:#6ee7b7;opacity:.85}
+
+/* Ship */
+.hb-ship{position:absolute;left:-140px;bottom:30px;z-index:1;width:112px;animation:hb-voyage var(--hb-cycle) infinite}
+.hb-ship svg{display:block;width:100%;height:auto;transform-origin:50% 85%;animation:hb-bob 4.6s ease-in-out infinite}
+.hb-hull{fill:var(--primary,#1d1e6e)}
+.hb-stripe{stroke:#6ee7b7;stroke-width:2.2;fill:none}
+.hb-port{fill:#fdf8ec}
+.hb-wood{stroke:#6b5241;stroke-width:2.4;stroke-linecap:round;fill:none}
+.hb-sail{fill:#fdf8ec;stroke:#d9cfb6;stroke-width:1;stroke-linejoin:round}
+.hb-flag{fill:#1f2033}
+.hb-bone{fill:#fdf8ec}
+.hb-bone-line{stroke:#fdf8ec;stroke-width:1.2;stroke-linecap:round}
+
+/* Crates (deck and pier) */
+.hb-deck-crate rect,.hb-pier-crate rect{fill:#c8925a;stroke:#8a5a2e;stroke-width:1}
+.hb-deck-crate path,.hb-pier-crate path{stroke:#8a5a2e;stroke-width:.9;fill:none}
+.hb-deck-crate,.hb-pier-crate{transform-box:fill-box;transform-origin:50% 100%}
+.hb-deck-crate{opacity:0}
+.hb-deck-crate-1{animation:hb-board-1 var(--hb-cycle) infinite}
+.hb-deck-crate-2{animation:hb-board-2 var(--hb-cycle) infinite}
+.hb-deck-crate-3{animation:hb-board-3 var(--hb-cycle) infinite}
+.hb-pier-crate-1{animation:hb-lift-1 var(--hb-cycle) infinite}
+.hb-pier-crate-2{animation:hb-lift-2 var(--hb-cycle) infinite}
+.hb-pier-crate-3{animation:hb-lift-3 var(--hb-cycle) infinite}
+
+/* Pier and bell */
+.hb-pier{position:absolute;left:var(--hb-dock);bottom:22px;z-index:2;width:150px}
+.hb-pier svg{display:block;width:100%;height:auto}
+.hb-planks{fill:#a47551}
+.hb-plank-lines{stroke:#86593a;stroke-width:1}
+.hb-pilings,.hb-post{stroke:#6b5241;stroke-width:5;stroke-linecap:round;fill:none}
+.hb-post{stroke-width:3.2}
+.hb-post-hook{stroke:#6b5241;stroke-width:1.2}
+.hb-bell{fill:#d4a72c;transform-box:view-box;transform-origin:128px 7px;animation:hb-ring var(--hb-cycle) infinite}
+.hb-bell circle{fill:#8a6a12}
+.hb-ding{position:absolute;right:-6px;top:-22px;padding:2px 8px;border-radius:999px;background:#fff;border:1px solid var(--border,#e3e5f0);box-shadow:0 4px 10px -6px rgba(29,30,110,.35);font-size:11px;font-weight:600;font-style:italic;color:var(--primary,#1d1e6e);white-space:nowrap;opacity:0;animation:hb-ding var(--hb-cycle) infinite}
+
+/* Timeline: 0-30% sail in, 31-38% bell, 41-60% loading, 64-100% sail off */
+@keyframes hb-voyage{
+    0%{left:-140px;animation-timing-function:cubic-bezier(.25,.6,.35,1)}
+    30%{left:calc(var(--hb-dock) - 104px)}
+    64%{left:calc(var(--hb-dock) - 104px);animation-timing-function:cubic-bezier(.55,0,.8,.5)}
+    100%{left:calc(100% + 40px)}
+}
+@keyframes hb-ring{
+    0%,30.5%,38%,100%{transform:rotate(0)}
+    32%{transform:rotate(22deg)}
+    33.5%{transform:rotate(-20deg)}
+    35%{transform:rotate(15deg)}
+    36.5%{transform:rotate(-9deg)}
+}
+@keyframes hb-ding{
+    0%,30.5%{opacity:0;transform:translateY(6px)}
+    32%,36.5%{opacity:1;transform:translateY(0)}
+    39%,100%{opacity:0;transform:translateY(-8px)}
+}
+@keyframes hb-lift-3{0%,40.5%{opacity:1;transform:none}43%{opacity:0;transform:translate(-26px,-14px) rotate(-12deg)}43.1%,90%{opacity:0;transform:none}96%,100%{opacity:1;transform:none}}
+@keyframes hb-lift-2{0%,47.5%{opacity:1;transform:none}50%{opacity:0;transform:translate(-30px,-16px) rotate(-12deg)}50.1%,90%{opacity:0;transform:none}96%,100%{opacity:1;transform:none}}
+@keyframes hb-lift-1{0%,54.5%{opacity:1;transform:none}57%{opacity:0;transform:translate(-26px,-14px) rotate(-12deg)}57.1%,90%{opacity:0;transform:none}96%,100%{opacity:1;transform:none}}
+@keyframes hb-board-1{0%,42.5%{opacity:0;transform:translateY(-9px)}44.5%,99.5%{opacity:1;transform:none}100%{opacity:0}}
+@keyframes hb-board-2{0%,49.5%{opacity:0;transform:translateY(-9px)}51.5%,99.5%{opacity:1;transform:none}100%{opacity:0}}
+@keyframes hb-board-3{0%,56.5%{opacity:0;transform:translateY(-9px)}58.5%,99.5%{opacity:1;transform:none}100%{opacity:0}}
+@keyframes hb-bob{0%,100%{transform:translateY(0) rotate(-2.5deg)}50%{transform:translateY(4px) rotate(2deg)}}
+@keyframes hb-drift{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+@media(max-width:600px){.hb-footer{height:236px}}
+@media(prefers-reduced-motion:reduce){
+    .hb-wave,.hb-ship,.hb-ship svg,.hb-bell,.hb-ding,.hb-deck-crate,.hb-pier-crate{animation:none}
+    .hb-ship{left:calc(var(--hb-dock) - 104px)}
+    .hb-deck-crate{opacity:1}
+    .hb-pier-crate{opacity:0}
+}
+
+/* Ship's wheel spinner (shown on submit buttons while a request is under way) */
+.hb-helm{display:inline-block;width:1.15em;height:1.15em;vertical-align:-.2em;animation:hb-helm 1.6s cubic-bezier(.45,.05,.55,.95) infinite}
+.hb-helm circle,.hb-helm path{fill:none;stroke:currentColor;stroke-linecap:round}
+.hb-helm .hb-helm-hub{fill:currentColor;stroke:none}
+.hb-loading{display:inline-flex;align-items:center;gap:8px;pointer-events:none;opacity:.85}
+@keyframes hb-helm{0%{transform:rotate(0)}60%{transform:rotate(400deg)}80%{transform:rotate(345deg)}100%{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.hb-helm{animation-duration:4s;animation-timing-function:linear}}

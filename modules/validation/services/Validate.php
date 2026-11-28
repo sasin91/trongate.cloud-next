@@ -135,54 +135,8 @@ final class Validate {
             throw new RuntimeException('Migrations require schema_compatible=true');
         }
 
-        $p['modules'] = $p['modules'] ?? [];
-        if (!is_array($p['modules']) || count($p['modules']) > 30) {
-            throw new RuntimeException('Invalid registry modules list');
-        }
-        $clean_modules = [];
-        $seen_names = [];
-        foreach ($p['modules'] as $mod) {
-            if (!is_array($mod)) {
-                throw new RuntimeException('Invalid registry module entry');
-            }
-            $ns = self::match((string) ($mod['namespace'] ?? ''), '/^[a-z][a-z0-9-]{1,38}$/D', 'module namespace');
-            $name = self::match((string) ($mod['name'] ?? ''), '/^[a-z][a-z0-9_]{0,39}$/D', 'module name');
-            $ver = self::match((string) ($mod['version'] ?? ''), '/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/D', 'module version');
-            if (isset($seen_names[$name])) {
-                throw new RuntimeException('Duplicate registry module mount: ' . $name);
-            }
-            $seen_names[$name] = true;
-            $entry = [
-                'namespace' => $ns,
-                'name' => $name,
-                'version' => $ver,
-                'autowire' => !empty($mod['autowire']),
-            ];
-            if (isset($mod['digest']) && is_string($mod['digest']) && $mod['digest'] !== '') {
-                $entry['digest'] = self::release_digest($mod['digest']);
-            }
-            if (isset($mod['config'])) {
-                if (!is_array($mod['config']) || count($mod['config']) > 64) {
-                    throw new RuntimeException('Invalid module configuration');
-                }
-                $cfg = [];
-                foreach ($mod['config'] as $k => $v) {
-                    $key = self::match((string) $k, '/^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/D', 'module config key');
-                    if (is_string($v) && (strlen($v) > 8192 || str_contains($v, "\0"))) {
-                        throw new RuntimeException('Invalid module config value');
-                    }
-                    if (!is_scalar($v) && $v !== null) {
-                        throw new RuntimeException('Module config values must be scalar');
-                    }
-                    $cfg[$key] = $v;
-                }
-                $entry['config'] = $cfg;
-            }
-            $clean_modules[] = $entry;
-        }
-        $p['modules'] = $clean_modules;
-
-        unset($p['image'], $p['container_port'], $p['registry_secret']);
+        // Harbour modules ship inside the app's own repository; releases no longer pin mounts.
+        unset($p['image'], $p['container_port'], $p['registry_secret'], $p['modules']);
         return $p;
     }
 }
