@@ -89,17 +89,14 @@ Then initialize the first administrator using a temporary `0600` credential file
 
 ### 1. Forced-command `tc-runtime` protocol v2 check
 
-```sh
-printf '{"action":"inspect-host"}\n' | jexec tc_panel ssh -i /var/db/tc/panel/host-key tc-agent@10.99.0.1
-# Expected: JSON with "status":"succeeded", "protocol":2, "os":"freebsd", "application_ready":true
+The control plane stores each host's SSH private key encrypted in the
+credentials table and materializes it in a private temporary directory for
+each request. There is no persistent `/var/db/tc/panel/host-key` file.
 
-printf '{"action":"inspect-panel-worker"}\n' | jexec tc_panel ssh -i /var/db/tc/panel/host-key tc-agent@10.99.0.1
-# Expected: read-only tc_panel jail, tc_worker service, PHP worker process, and deployed worker fingerprint
-# plus the latest uncaught PHP error type/source location (never its message)
-
-jexec tc_panel ssh -i /var/db/tc/panel/host-key tc-agent@10.99.0.1 "id" </dev/null
-# Expected: JSON error from tc-runtime (never shell output)
-```
+After enrolling Host #1, use the authenticated panel's **Jobs → Inspect worker**
+action on a pending or running build to verify the pinned SSH path and inspect
+the worker. The action sends a read-only `inspect-panel-worker` JSON request
+through the `tc-agent` forced command; it does not expose the private key.
 
 ### 2. PF jail-to-jail deny, host isolation, and SSRF guard
 
