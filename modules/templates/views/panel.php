@@ -18,7 +18,9 @@ $viewData = compact(
     'deleting_server',
     'timeline',
     'resource_details',
-    'resources_saved'
+    'resources_saved',
+    'worker_diagnostics',
+    'inspection_error'
 );
 $viewData += [
     'capacities' => $capacities ?? [],
