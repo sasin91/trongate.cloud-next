@@ -95,6 +95,19 @@ try {
 
 $ssh = new Ssh(
     new Panel_worker_test_model('servers'),
+    new Panel_worker_test_process('', 1, 'doas: Operation not permitted')
+);
+try {
+    $ssh->inspect_panel_worker($server);
+} catch (RuntimeException $error) {
+    if ($error->getMessage() !== 'The host denied the tc-runtime forced command. Check the doas policy for tc-agent.') {
+        throw $error;
+    }
+    echo "doas error classified\n";
+}
+
+$ssh = new Ssh(
+    new Panel_worker_test_model('servers'),
     new Panel_worker_test_process(
         json_encode(['status' => 'uncertain', 'error' => 'RuntimeException', 'reason' => 'private failure detail']),
         1
@@ -114,5 +127,6 @@ echo "sanitized PHP error transport passed\n";
 --EXPECT--
 SSH error classified
 panel route error classified
+doas error classified
 remote runtime error classified
 sanitized PHP error transport passed

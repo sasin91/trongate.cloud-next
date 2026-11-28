@@ -262,11 +262,15 @@ final class Ssh {
         $error = strtolower($stderr);
         return match (true) {
             str_contains($error, 'invalid format'), str_contains($error, 'error in libcrypto') => 'The SSH private key could not be read. Paste the complete private key, including its BEGIN and END lines.',
+            str_contains($error, 'doas') => 'The host denied the tc-runtime forced command. Check the doas policy for tc-agent.',
             str_contains($error, 'permission denied') => 'The server rejected the SSH key. Check the SSH username and use the private key matching the public key installed on this server.',
             str_contains($error, 'host key verification failed'), str_contains($error, 'remote host identification has changed') => 'The server SSH identity has changed. Reconnect the server to check its new identity.',
             str_contains($error, 'connection refused') => 'The server refused the SSH connection. Check its SSH port and that SSH is running.',
-            str_contains($error, 'timed out'), str_contains($error, 'no route to host') => 'The SSH server could not be reached. Check its address, firewall, and SSH port.',
+            str_contains($error, 'timed out'), str_contains($error, 'no route to host'), str_contains($error, 'network is unreachable'), str_contains($error, 'connection reset') => 'The SSH server could not be reached. Check its address, firewall, and SSH port.',
             str_contains($error, 'operation not permitted'), str_contains($error, 'administratively prohibited') => 'The panel jail cannot open the SSH connection. Check the host PF rule and the panel-to-host route.',
+            str_contains($error, 'could not resolve hostname') => 'The panel jail could not resolve the SSH host name.',
+            str_contains($error, 'no such file or directory'), str_contains($error, 'not found') => 'The tc-runtime forced command or its PHP executable is missing on the host.',
+            $error === '' => 'SSH exited without returning a diagnostic response.',
             default => $fallback,
         };
     }
